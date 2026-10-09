@@ -8,6 +8,7 @@ function renderIndicator(overrides = {}) {
     createElement(SessionLivenessIndicator, {
       agent: 'codex',
       running: true,
+      connected: true,
       updatedAt: new Date().toISOString(),
       ...overrides,
     }),
@@ -40,6 +41,15 @@ test('stale sessions keep the agent name and alert treatment', () => {
   expect(html).toContain('Codex is still marked running')
   expect(html).toContain('no updates for 10m')
   expect(html).not.toContain('live-shimmer')
+})
+
+test('a dropped event stream reads as reconnecting instead of a quiet or stale agent', () => {
+  const stale = new Date(Date.now() - 10 * 60_000).toISOString()
+  const html = renderIndicator({ connected: false, updatedAt: stale })
+  expect(html).toContain('Working')
+  expect(html).toContain('- reconnecting')
+  expect(html).not.toContain('still marked running')
+  expect(renderIndicator({ connected: false, running: false })).toBe('')
 })
 
 test('reported thinking changes the live label while compaction and stale state take precedence', () => {
