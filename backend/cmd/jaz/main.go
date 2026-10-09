@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	_ "time/tzdata"
 )
 
 func main() {
