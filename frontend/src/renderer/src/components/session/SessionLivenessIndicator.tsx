@@ -10,6 +10,7 @@ import {
 
 function detailFor(signal: RunSignal, ageMs: number | undefined): string {
   const age = formatDuration(ageMs)
+  if (signal === 'offline') return '- reconnecting'
   if (signal === 'live') return age ? `- live ${age} ago` : '- live'
   if (signal === 'quiet') return age ? `- quiet for ${age}` : '- quiet'
   if (signal === 'stale') return age ? `no updates for ${age}` : 'no recent updates'
@@ -21,6 +22,7 @@ export type TurnActivity = 'starting' | 'thinking' | 'working'
 export function SessionLivenessIndicator({
   agent,
   running,
+  connected,
   activity = 'working',
   activeOperation,
   updatedAt,
@@ -28,6 +30,7 @@ export function SessionLivenessIndicator({
 }: {
   agent?: string
   running: boolean
+  connected: boolean
   activity?: TurnActivity
   activeOperation?: string
   updatedAt: string
@@ -36,6 +39,7 @@ export function SessionLivenessIndicator({
   const [, setTick] = useState(0)
   const { signal, ageMs } = deriveSessionRunSignal({
     running,
+    connected,
     updatedAt,
     lastActivityAt,
     now: Date.now(),

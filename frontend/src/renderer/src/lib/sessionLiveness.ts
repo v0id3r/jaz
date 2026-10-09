@@ -1,7 +1,7 @@
 const LIVE_MS = 30_000
 const STALE_MS = 120_000
 
-export type RunSignal = 'idle' | 'live' | 'quiet' | 'stale'
+export type RunSignal = 'idle' | 'offline' | 'live' | 'quiet' | 'stale'
 
 export interface SessionRunSignal {
   signal: RunSignal
@@ -21,16 +21,19 @@ export function latestEventTimeISO(a: string | undefined, b: string | undefined)
 
 export function deriveSessionRunSignal({
   running,
+  connected,
   updatedAt,
   lastActivityAt,
   now,
 }: {
   running: boolean
+  connected: boolean
   updatedAt: string
   lastActivityAt?: string
   now: number
 }): SessionRunSignal {
   if (!running) return { signal: 'idle' }
+  if (!connected) return { signal: 'offline' }
 
   const at = eventTime(latestEventTimeISO(updatedAt, lastActivityAt))
   const ageMs = at ? Math.max(0, now - at) : undefined
