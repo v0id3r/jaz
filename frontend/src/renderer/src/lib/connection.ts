@@ -143,31 +143,34 @@ function teleportSessionMessage(url: string): string {
   return `Sign in through Teleport again to reach the backend at ${url}`
 }
 
-function responseMovedOffBackend(url: string, res: Response): boolean {
-  if (!res.redirected) return false
-  try {
-    return new URL(res.url).origin !== new URL(normalizeBaseUrl(url)).origin
-  } catch {
-    return true
-  }
-}
-
 function responseIsJSON(contentType: string): boolean {
   return contentType.includes('json')
 }
 
-function responseLooksLikeBrowserLogin(url: string, res: Response, contentType: string): boolean {
+// Probes use redirect: 'manual'. An auth proxy answers an expired session with a
+// redirect to its login origin; followed, that becomes an opaque CORS failure
+// indistinguishable from a dead backend.
+function responseLooksLikeBrowserLogin(res: Response, contentType: string): boolean {
   if (clientRuntime.kind !== 'web') return false
   const authStatusWithoutAPIJSON =
     (res.status === 401 || res.status === 403) && !responseIsJSON(contentType)
-  return responseMovedOffBackend(url, res) || authStatusWithoutAPIJSON || contentType.includes('text/html')
+  return res.type === 'opaqueredirect' || authStatusWithoutAPIJSON || contentType.includes('text/html')
+}
+
+// A web app served by the backend's own origin regains the proxy session only
+// through a top-level navigation, which the proxy turns into its login page.
+// reload() revalidates the document, so a cached app shell cannot short-circuit it.
+function signInThroughBrowser(url: string): boolean {
+  if (clientRuntime.kind !== 'web' || normalizeBaseUrl(url) !== window.location.origin) return false
+  window.location.reload()
+  return true
 }
 
 async function readHealth(url: string): Promise<HealthProbe> {
   try {
-    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    const res = await fetch(`${url}/health`, { redirect: 'manual', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
     const contentType = res.headers.get('content-type')?.toLowerCase() ?? ''
-    if (responseLooksLikeBrowserLogin(url, res, contentType)) {
+    if (responseLooksLikeBrowserLogin(res, contentType)) {
       return backendFailure('browser_session_required', teleportSessionMessage(url))
     }
     if (!res.ok) {
@@ -205,10 +208,11 @@ async function checkAuthAccess(url: string, token: string): Promise<AuthAccess> 
     headers.set(CLIENT_PLATFORM_HEADER, CLIENT_PLATFORM)
     const res = await fetch(`${url}/v1/auth/check`, {
       headers,
+      redirect: 'manual',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
     const contentType = res.headers.get('content-type')?.toLowerCase() ?? ''
-    if (responseLooksLikeBrowserLogin(url, res, contentType)) {
+    if (responseLooksLikeBrowserLogin(res, contentType)) {
       return {
         ok: false,
         reason: 'browser_session_required',
@@ -592,7 +596,10 @@ export async function connectRemote(url: string): Promise<string | null> {
   if (!target) return 'Enter a backend URL'
   const token = parsed.key || apiAuthToken(target)
   const health = await readHealth(target)
-  if (!health.ok) return health.message
+  if (!health.ok) {
+    if (health.reason === 'browser_session_required' && signInThroughBrowser(target)) return null
+    return health.message
+  }
   if (health.authRequired) {
     if (!token) return startPairing(target)
     const access = await checkAuthAccess(target, token)
