@@ -1039,6 +1039,8 @@ export interface SessionEvent {
   seq?: number
   projection_key?: string
   projection_op?: 'append' | 'replace'
+  // Client-only: the earliest seq folded into a text projection.
+  first_seq?: number
   session_id: string
   type: string
   content?: string
