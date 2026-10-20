@@ -40,6 +40,16 @@ describe('session history ownership', () => {
     expect(merged.has_earlier).toBe(false)
   })
 
+  test('keeps one copy of a text run refetched while it streams', () => {
+    const page = (...events) => ({ session, history_revision: 4, messages: [message(2, 'middle')], events })
+    let history = mergeLatestHistory(undefined, page(text(1, 'Hel')))
+    history = mergeLatestHistory(history, page(text(1, 'Hel'), text(2, 'lo')))
+    history = mergeLatestHistory(history, page(text(1, 'Hel'), text(2, 'lo'), text(3, ' world')))
+
+    expect(history.events).toHaveLength(1)
+    expect(history.events[0].content).toBe('Hello world')
+  })
+
   test('drops stale accumulated pages when compaction changes the revision', () => {
     const current = { session, history_revision: 4, messages: [message(1, 'stale')] }
     const latest = { session, history_revision: 5, messages: [message(9, 'fresh')] }
