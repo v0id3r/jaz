@@ -49,7 +49,7 @@ export function mergeSessionEvent(prev: SessionEvent[], event: SessionEvent): Se
   if (keyIndex === -1) return [...prev, event]
   if (event.seq && (prev[keyIndex].seq ?? 0) >= event.seq) return prev
   const next = [...prev]
-  next[keyIndex] = event.projection_op === 'append' ? appendProjection(next[keyIndex], event) : event
+  next[keyIndex] = foldProjection(next[keyIndex], event)
   return next
 }
 
@@ -70,16 +70,25 @@ export function coalesceSessionEvents(events: SessionEvent[]): SessionEvent[] {
       if (key) byKey.set(key, projected.length)
       projected.push(event)
     } else {
-      projected[index] = event.projection_op === 'append' ? appendProjection(projected[index], event) : event
+      projected[index] = foldProjection(projected[index], event)
     }
   }
   return projected.sort(compareEvents)
+}
+
+// A folded text projection spans first_seq..seq. An event reaching back to the
+// projection's start already carries its text, so it replaces instead of appending.
+function foldProjection(prev: SessionEvent, event: SessionEvent): SessionEvent {
+  if (event.projection_op !== 'append') return event
+  if (event.seq && prev.seq && (event.first_seq ?? event.seq) <= (prev.first_seq ?? prev.seq)) return event
+  return appendProjection(prev, event)
 }
 
 function appendProjection(prev: SessionEvent, event: SessionEvent): SessionEvent {
   return {
     ...prev,
     ...event,
+    first_seq: prev.first_seq ?? prev.seq,
     content:
       event.type === 'acp_message'
         ? `${prev.content ?? ''}${event.content ?? ''}`
