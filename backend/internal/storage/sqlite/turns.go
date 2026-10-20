@@ -154,7 +154,7 @@ func (s *Store) SetTurnIntent(id string, goalRequested, parentVisible, notifyPar
 		ID: id, GoalRequested: boolInt(goalRequested), ParentVisible: boolInt(parentVisible), NotifyParent: boolInt(notifyParent),
 	})
 	if err == nil && updated == 0 {
-		return fmt.Errorf("%s has no active turn", id)
+		return fmt.Errorf("%s has %w", id, storage.ErrNoActiveTurn)
 	}
 	return err
 }
@@ -164,7 +164,7 @@ func (s *Store) SetTurnRetries(id string, retries int) error {
 	defer s.writeMu.Unlock()
 	updated, err := threaddb.New(s.db).SetTurnRetries(context.Background(), threaddb.SetTurnRetriesParams{ID: id, Retries: int64(retries)})
 	if err == nil && updated == 0 {
-		return fmt.Errorf("%s has no active turn", id)
+		return fmt.Errorf("%s has %w", id, storage.ErrNoActiveTurn)
 	}
 	return err
 }

@@ -103,7 +103,7 @@ func (s *Store) SetTurnIntent(id string, goalRequested, parentVisible, notifyPar
 		return err
 	}
 	if session.Turn == nil || session.Status != storage.StatusRunning {
-		return fmt.Errorf("%s has no active turn", id)
+		return fmt.Errorf("%s has %w", id, storage.ErrNoActiveTurn)
 	}
 	session.Turn.GoalRequested = goalRequested
 	session.Turn.ParentVisible = parentVisible
@@ -119,7 +119,7 @@ func (s *Store) SetTurnRetries(id string, retries int) error {
 		return err
 	}
 	if session.Turn == nil || session.Status != storage.StatusRunning {
-		return fmt.Errorf("%s has no active turn", id)
+		return fmt.Errorf("%s has %w", id, storage.ErrNoActiveTurn)
 	}
 	session.Turn.Retries = retries
 	return s.saveSession(session)
