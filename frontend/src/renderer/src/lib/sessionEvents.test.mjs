@@ -71,6 +71,14 @@ describe('session event text projection', () => {
     expect(events[0].acp.tool_calls[0].status).toBe('completed')
   })
 
+  test('folds a live projection over the persisted rows it already holds', () => {
+    const live = [text(1, 'Hel', 'append'), text(2, 'lo', 'append'), text(3, ' world', 'append')].reduce(mergeSessionEvent, [])
+    const events = coalesceSessionEvents([text(1, 'Hel', 'append'), text(2, 'lo', 'append'), ...live])
+
+    expect(events).toHaveLength(1)
+    expect(events[0].content).toBe('Hello world')
+  })
+
   test('combines a compact snapshot with later append operations', () => {
     const events = coalesceSessionEvents([text(2, 'Hello'), text(3, ' world', 'append')])
 
