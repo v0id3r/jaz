@@ -16,7 +16,7 @@ func TestRunArgsMapsMountsAndKeepsSecretsOutOfArgv(t *testing.T) {
 		}
 	}
 	cfg := RunnerConfig{
-		Image: "jaz:test", Network: "sessions", User: "10001:999",
+		Image: "jaz:test", Network: "sessions", User: "10001:999", Home: "/var/lib/jaz-agent",
 		Mounts: []PathMapping{
 			{Container: "/var/lib/jaz", Host: data},
 			{Container: "/var/lib/jaz/workspaces/work", Host: workspaces},
@@ -26,7 +26,7 @@ func TestRunArgsMapsMountsAndKeepsSecretsOutOfArgv(t *testing.T) {
 	}
 	args, env, err := cfg.runArgs("jaz-x", Request{
 		Args:      []string{"/usr/bin/agent", "--acp"},
-		Env:       []string{"ANTHROPIC_API_KEY=secret", "PATH=/agent/bin"},
+		Env:       []string{"ANTHROPIC_API_KEY=secret", "PATH=/agent/bin", "HOME=/var/lib/jaz"},
 		Dir:       "/var/lib/jaz/workspaces/work/repo",
 		ReadOnly:  []string{"/usr/bin"},
 		ReadWrite: []string{"/var/lib/jaz/acp/claude"},
@@ -40,14 +40,14 @@ func TestRunArgsMapsMountsAndKeepsSecretsOutOfArgv(t *testing.T) {
 		"--volume " + filepath.Join(data, "acp", "claude") + ":/var/lib/jaz/acp/claude:idmap",
 		"--volume " + filepath.Join(data, "tools") + ":/var/lib/jaz/tools:idmap,ro",
 		"--userns=auto --cap-drop=all --security-opt=no-new-privileges",
-		"--env ANTHROPIC_API_KEY --env PATH=/agent/bin",
+		"--env HOME=/var/lib/jaz-agent --env ANTHROPIC_API_KEY --env PATH=/agent/bin --entrypoint",
 		`--entrypoint ["/usr/bin/agent","--acp"] jaz:test`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args lack %q:\n%s", want, joined)
 		}
 	}
-	if strings.Contains(joined, "secret") || strings.Contains(joined, ":/usr/bin") {
+	if strings.Contains(joined, "secret") || strings.Contains(joined, "HOME=/var/lib/jaz ") || strings.Contains(joined, ":/usr/bin") {
 		t.Fatalf("args leak a secret or mount an image path:\n%s", joined)
 	}
 	if !slices.Contains(env, "ANTHROPIC_API_KEY=secret") || slices.Contains(env, "PATH=/agent/bin") {

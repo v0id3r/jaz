@@ -60,6 +60,9 @@ func (c RunnerConfig) runArgs(name string, req Request) ([]string, []string, err
 		"--cap-drop=all", "--security-opt=no-new-privileges",
 		"--network", c.Network, "--workdir", dir,
 	}
+	if req.TTY {
+		args = append(args, "-t")
+	}
 	if c.User != "" {
 		args = append(args, "--user", c.User)
 	}
@@ -86,9 +89,12 @@ func (c RunnerConfig) runArgs(name string, req Request) ([]string, []string, err
 		args = append(args, "--volume", host+":"+path+":"+options)
 	}
 	env := []string{podmanPath}
+	if c.Home != "" {
+		args = append(args, "--env", "HOME="+c.Home)
+	}
 	for _, entry := range req.Env {
 		key, _, ok := strings.Cut(entry, "=")
-		if !ok || key == "" {
+		if !ok || key == "" || key == "HOME" && c.Home != "" {
 			continue
 		}
 		if podmanReads(key) {

@@ -18,6 +18,8 @@ type Spec struct {
 	Dir       string
 	ReadOnly  []string
 	ReadWrite []string
+	// TTY marks an interactive process started on a terminal.
+	TTY bool
 }
 
 // Launcher turns a Spec into the command to execute. The returned cleanup
@@ -97,6 +99,9 @@ type runnerLauncher struct {
 
 func (r runnerLauncher) Command(spec Spec) (Spec, func(), error) {
 	args := []string{"sandbox-attach", "--socket", r.socket}
+	if spec.TTY {
+		args = append(args, "--tty")
+	}
 	for _, path := range spec.ReadOnly {
 		args = append(args, "--ro", path)
 	}

@@ -19,6 +19,7 @@ import (
 	"syscall"
 
 	"github.com/charmbracelet/log"
+	"github.com/creack/pty"
 )
 
 // ServeRunner is `jaz runner`: it accepts process launches from Jaz on a unix
@@ -109,21 +110,15 @@ func (r *runner) serve(conn net.Conn) {
 	if err == nil {
 		args, env, err = r.cfg.runArgs(name, req)
 	}
-	cmd := exec.Command(r.cfg.Podman, args...)
-	cmd.Env = env
-	var stdin io.WriteCloser
-	var stdout, stderr io.ReadCloser
+	var proc *process
 	if err == nil {
-		stdin, err = cmd.StdinPipe()
-	}
-	if err == nil {
-		stdout, err = cmd.StdoutPipe()
-	}
-	if err == nil {
-		stderr, err = cmd.StderrPipe()
-	}
-	if err == nil {
-		err = cmd.Start()
+		cmd := exec.Command(r.cfg.Podman, args...)
+		cmd.Env = env
+		if req.TTY {
+			proc, err = startTTY(cmd, req.Rows, req.Cols)
+		} else {
+			proc, err = startPipes(cmd)
+		}
 	}
 	if err != nil {
 		r.log.Warn("rejected launch", "error", err)
@@ -133,30 +128,90 @@ func (r *runner) serve(conn net.Conn) {
 	}
 	r.track(name, true)
 	defer r.track(name, false)
-	r.log.Info("started", "container", name, "command", req.Args[0], "dir", req.Dir)
+	r.log.Info("started", "container", name, "command", req.Args[0], "dir", req.Dir, "tty", req.TTY)
 
 	var output sync.WaitGroup
-	output.Add(2)
-	go func() {
-		defer output.Done()
-		_ = pump(out, frameStdout, stdout)
-	}()
-	go func() {
-		defer output.Done()
-		_ = pump(out, frameStderr, stderr)
-	}()
+	for kind, stream := range proc.outputs {
+		output.Add(1)
+		go func() {
+			defer output.Done()
+			_ = pump(out, kind, stream)
+		}()
+	}
 	exited := make(chan struct{})
-	go r.relayInput(conn, stdin, name, exited)
+	go r.relayInput(conn, proc, name, exited)
 	output.Wait()
-	code := exitCode(cmd.Wait())
+	code := exitCode(proc.wait())
 	close(exited)
 	r.log.Info("exited", "container", name, "code", code)
 	_ = out.writeInt(frameExit, code)
 }
 
+// process is a started podman client and the streams that reach it.
+type process struct {
+	stdin   io.WriteCloser
+	outputs map[byte]io.Reader
+	resize  func(rows, cols uint16)
+	wait    func() error
+}
+
+func startPipes(cmd *exec.Cmd) (*process, error) {
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return &process{
+		stdin:   stdin,
+		outputs: map[byte]io.Reader{frameStdout: stdout, frameStderr: stderr},
+		resize:  func(uint16, uint16) {},
+		wait:    cmd.Wait,
+	}, nil
+}
+
+// startTTY runs podman on a pseudo-terminal, so `-t` gives the container a
+// terminal that follows this one's size; its output is a single stream.
+func startTTY(cmd *exec.Cmd, rows, cols uint16) (*process, error) {
+	if rows == 0 || cols == 0 {
+		rows, cols = 24, 80
+	}
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
+	if err != nil {
+		return nil, err
+	}
+	return &process{
+		stdin:   nopCloser{ptmx},
+		outputs: map[byte]io.Reader{frameStdout: ptmx},
+		resize: func(rows, cols uint16) {
+			_ = pty.Setsize(ptmx, &pty.Winsize{Rows: rows, Cols: cols})
+		},
+		wait: func() error {
+			err := cmd.Wait()
+			_ = ptmx.Close()
+			return err
+		},
+	}, nil
+}
+
+// nopCloser keeps a terminal open when the client's input ends; a terminal
+// has no end of input, only a hangup when the process exits.
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
+
 // relayInput feeds client frames to the container until the client goes away;
 // a client that disappears while the container runs gets it stopped.
-func (r *runner) relayInput(conn net.Conn, stdin io.WriteCloser, name string, exited <-chan struct{}) {
+func (r *runner) relayInput(conn net.Conn, proc *process, name string, exited <-chan struct{}) {
 	for {
 		kind, payload, err := readFrame(conn)
 		if err != nil {
@@ -169,12 +224,16 @@ func (r *runner) relayInput(conn net.Conn, stdin io.WriteCloser, name string, ex
 		}
 		switch kind {
 		case frameStdin:
-			_, _ = stdin.Write(payload)
+			_, _ = proc.stdin.Write(payload)
 		case frameCloseStdin:
-			_ = stdin.Close()
+			_ = proc.stdin.Close()
 		case frameSignal:
 			if number, err := frameInt(payload); err == nil {
 				r.podman("kill", "--signal", strconv.Itoa(number), name)
+			}
+		case frameResize:
+			if rows, cols, ok := frameSize(payload); ok {
+				proc.resize(rows, cols)
 			}
 		}
 	}

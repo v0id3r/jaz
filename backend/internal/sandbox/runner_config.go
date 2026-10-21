@@ -21,7 +21,10 @@ type RunnerConfig struct {
 	// Hosts are extra "name:ip" entries for the containers' /etc/hosts.
 	Hosts []string
 	// User is the container user, matching the owner of Jaz's files.
-	User        string
+	User string
+	// Home replaces the HOME a launch asks for, so sessions keep their own
+	// dotfiles and caches apart from the Jaz process's home.
+	Home        string
 	StopTimeout time.Duration
 	Mounts      []PathMapping
 	// ReadOnly and ReadWrite are mounted into every container.
@@ -62,6 +65,9 @@ func (c *RunnerConfig) normalize() error {
 		if value == "" {
 			return fmt.Errorf("runner config: %s is required", name)
 		}
+	}
+	if c.Home != "" && !filepath.IsAbs(c.Home) {
+		return fmt.Errorf("runner config: home %s must be absolute", c.Home)
 	}
 	for _, mount := range c.Mounts {
 		if !filepath.IsAbs(mount.Container) || !filepath.IsAbs(mount.Host) {

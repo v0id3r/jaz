@@ -37,10 +37,11 @@ Server flags (pass from the container entrypoint):
 
 - `--agent-url http://<jaz-ip>:5299` — the Jaz URL agents use for Jaz MCP
   endpoints, since `127.0.0.1` inside a session is the session itself.
-- `--agent-networks <cidr>[,<cidr>]` — where sessions connect from; their
-  requests reach the internal MCP endpoints like loopback requests do. Session
-  IDs in MCP headers are not secrets, so any session can claim any session ID,
-  exactly as any local agent could before.
+- `--agent-networks <cidr>[,<cidr>]` — where sessions connect from; the
+  backend key in their MCP config is accepted from there for the internal MCP
+  endpoints only, as it is from loopback. Every agent therefore holds the
+  backend key, and session IDs in MCP headers are not secrets, so any session
+  can claim any session ID, exactly as any local agent can.
 
 Mount the runner socket directory into the Jaz container
 (`/run/jaz-runner:/run/jaz-runner`).

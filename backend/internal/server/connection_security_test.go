@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wins/jaz/backend/internal/deviceauth"
 	devicesapi "github.com/wins/jaz/backend/internal/httpapi/devices"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 	"github.com/wins/jaz/backend/internal/storage"
 	sqlite "github.com/wins/jaz/backend/internal/storage/sqlite"
@@ -233,7 +234,7 @@ func TestRevocationClosesExistingTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminals := terminal.New()
+	terminals := terminal.New(sandbox.Local{})
 	t.Cleanup(terminals.Close)
 	handler := devicesapi.NewHandler(devices, store, serverconfig.Config{})
 	srv := httptest.NewServer((&Server{Store: store, AuthKey: "root", Devices: devices, Terminal: terminals, Routes: Routes{

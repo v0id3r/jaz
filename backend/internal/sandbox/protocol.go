@@ -15,6 +15,11 @@ type Request struct {
 	Dir       string   `json:"dir"`
 	ReadOnly  []string `json:"readOnly,omitempty"`
 	ReadWrite []string `json:"readWrite,omitempty"`
+	// TTY runs the process on a terminal of Rows x Cols; stdout carries the
+	// terminal output and resize frames follow the client's terminal.
+	TTY  bool   `json:"tty,omitempty"`
+	Rows uint16 `json:"rows,omitempty"`
+	Cols uint16 `json:"cols,omitempty"`
 }
 
 const (
@@ -25,6 +30,7 @@ const (
 	frameCloseStdin
 	frameSignal
 	frameExit
+	frameResize
 )
 
 const maxFramePayload = 1 << 20
@@ -88,4 +94,15 @@ func pump(dst *frameWriter, kind byte, r io.Reader) error {
 			return err
 		}
 	}
+}
+
+func resizePayload(rows, cols uint16) []byte {
+	return binary.BigEndian.AppendUint16(binary.BigEndian.AppendUint16(nil, rows), cols)
+}
+
+func frameSize(payload []byte) (uint16, uint16, bool) {
+	if len(payload) != 4 {
+		return 0, 0, false
+	}
+	return binary.BigEndian.Uint16(payload), binary.BigEndian.Uint16(payload[2:]), true
 }

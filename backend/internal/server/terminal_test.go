@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/storage"
 	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
 	"github.com/wins/jaz/backend/internal/terminal"
@@ -25,7 +26,7 @@ func TestSessionTerminalRequiresCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer((&Server{Store: store, Terminal: terminal.New()}).Handler())
+	server := httptest.NewServer((&Server{Store: store, Terminal: terminal.New(sandbox.Local{})}).Handler())
 	defer server.Close()
 
 	conn, res, err := websocket.DefaultDialer.Dial(wsURL(server.URL, "/v1/sessions/"+session.ID+"/terminal"), nil)
@@ -51,7 +52,7 @@ func TestSessionTerminalDoesNotStartBeforeWebsocketUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminals := terminal.New()
+	terminals := terminal.New(sandbox.Local{})
 	srv := &Server{Store: store, Terminal: terminals}
 	defer terminals.Close()
 	server := httptest.NewServer(srv.Handler())
@@ -80,7 +81,7 @@ func TestSessionTerminalAcceptsBearerWithBackendAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminals := terminal.New()
+	terminals := terminal.New(sandbox.Local{})
 	srv := &Server{Store: store, Terminal: terminals, AuthKey: "secret"}
 	defer terminals.Close()
 	server := httptest.NewServer(srv.Handler())
@@ -138,7 +139,7 @@ func TestSessionTerminalStartsInCWDAndReplaysOnReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &Server{Store: store, Terminal: terminal.New()}
+	srv := &Server{Store: store, Terminal: terminal.New(sandbox.Local{})}
 	defer srv.Terminal.Close()
 	server := httptest.NewServer(srv.Handler())
 	defer server.Close()

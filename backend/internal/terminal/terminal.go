@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/creack/pty"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/shellcmd"
 )
 
@@ -35,10 +36,13 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	replay   int
+	launcher sandbox.Launcher
 }
 
-func New() *Manager {
-	return &Manager{sessions: map[string]*Session{}, replay: defaultReplayBytes}
+// New starts terminals through launcher, so a terminal for a sandboxed
+// session runs where that session's agent runs.
+func New(launcher sandbox.Launcher) *Manager {
+	return &Manager{sessions: map[string]*Session{}, replay: defaultReplayBytes, launcher: launcher}
 }
 
 func (m *Manager) Open(id, cwd string, size Size) (*Session, error) {
@@ -63,7 +67,7 @@ func (m *Manager) Open(id, cwd string, size Size) (*Session, error) {
 		delete(m.sessions, id)
 		session.Terminate()
 	}
-	session := newSession(cwd, m.replay, func(s *Session) {
+	session := newSession(cwd, m.replay, m.launcher, func(s *Session) {
 		m.mu.Lock()
 		if m.sessions[id] == s {
 			delete(m.sessions, id)
@@ -110,20 +114,23 @@ func (m *Manager) Close() {
 type Session struct {
 	cwd       string
 	replayMax int
+	launcher  sandbox.Launcher
 	onExit    func(*Session)
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
+	release func()
 	file    *os.File
 	closed  bool
 	buffer  []byte
 	clients map[chan Message]struct{}
 }
 
-func newSession(cwd string, replayMax int, onExit func(*Session)) *Session {
+func newSession(cwd string, replayMax int, launcher sandbox.Launcher, onExit func(*Session)) *Session {
 	return &Session{
 		cwd:       cwd,
 		replayMax: replayMax,
+		launcher:  launcher,
 		clients:   map[chan Message]struct{}{},
 		onExit:    onExit,
 	}
@@ -212,16 +219,27 @@ func (s *Session) start(size Size) error {
 	if runtime.GOOS == "windows" {
 		return ErrUnsupported
 	}
-	cmd := exec.Command(shellcmd.DefaultShell())
-	cmd.Dir = s.cwd
-	cmd.Env = terminalEnv(os.Environ())
+	launch, release, err := s.launcher.Command(sandbox.Spec{
+		Path: shellcmd.DefaultShell(),
+		Env:  terminalEnv(os.Environ()),
+		Dir:  s.cwd,
+		TTY:  true,
+	})
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(launch.Path, launch.Args...)
+	cmd.Dir = launch.Dir
+	cmd.Env = launch.Env
 	win := &pty.Winsize{Cols: firstNonZero(size.Cols, 80), Rows: firstNonZero(size.Rows, 24)}
 	file, err := pty.StartWithSize(cmd, win)
 	if err != nil {
+		release()
 		return err
 	}
 	s.mu.Lock()
 	s.cmd = cmd
+	s.release = release
 	s.file = file
 	s.mu.Unlock()
 	go s.read()
@@ -244,6 +262,7 @@ func (s *Session) read() {
 
 func (s *Session) wait() {
 	err := s.cmd.Wait()
+	s.release()
 	code := exitCode(err)
 	msg := Message{Type: "exit", Code: code}
 	if err != nil && !errors.Is(err, os.ErrProcessDone) {
