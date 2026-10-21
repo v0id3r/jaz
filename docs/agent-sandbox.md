@@ -74,8 +74,20 @@ readwrite:                        # every session, writable
 writable:                         # roots a launch may request as writable
   - /var/lib/jaz/workspaces
   - /var/lib/jaz/acp
-args: ["--memory=4g", "--pids-limit=4096"]
+args: ["--memory=4g", "--pids-limit=4096", "--security-opt=apparmor=jaz-session"]
 ```
+
+Host files are in [recipes/agent-runner](recipes/agent-runner): the systemd unit,
+the `jaz-session` AppArmor profile (`/etc/apparmor.d/jaz-session`, load with
+`apparmor_parser -r`) and a containers.conf drop-in that keeps podman's
+container events out of journald.
+
+The AppArmor profile matters on Ubuntu 24.04+: crun has its own profile there,
+so container processes run under a stacked label (`crun//&<profile>`), and
+podman's `containers-default` denies every signal to that label — `--init`
+cannot forward SIGTERM and an agent cannot interrupt its own tool commands.
+`jaz-session` is `containers-default` with signal and ptrace peers that match
+the stacked label.
 
 Each session gets: the requested working directory and agent state home
 (writable), the agent command's directory and per-launch config directory
