@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -38,6 +39,7 @@ import (
 	"github.com/wins/jaz/backend/internal/provider"
 	"github.com/wins/jaz/backend/internal/runtimeauth"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/server"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 	"github.com/wins/jaz/backend/internal/sessionevents"
@@ -119,6 +121,7 @@ func serveOptions(args []string) []fx.Option {
 			app.NewACPAgentConfigSource,
 			app.NewACPAdapterManager,
 			app.NewManagedToolManager,
+			sandbox.New,
 			app.NewACPConfig,
 			acp.NewManager,
 			sessionlock.New,
@@ -178,7 +181,8 @@ func newLogger() *log.Logger {
 type config struct {
 	fx.Out
 
-	Jaz app.Config
+	Jaz     app.Config
+	Sandbox sandbox.Config
 }
 
 func loadConfig() (config, error) {
@@ -186,7 +190,7 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	return config{Jaz: loaded.Jaz}, nil
+	return config{Jaz: loaded.Jaz, Sandbox: loaded.Jaz.Sandbox}, nil
 }
 
 func parseServeConfig(args serveArgs) (serverconfig.Config, error) {
@@ -195,6 +199,8 @@ func parseServeConfig(args serveArgs) (serverconfig.Config, error) {
 	publicURL := fs.String("public-url", "", "URL shown to Jaz clients")
 	allowedOrigins := fs.String("allowed-origins", "", "comma-separated browser client origins")
 	previewURLTemplate := fs.String("preview-url-template", "", "isolated preview origin URL containing {id}")
+	agentURL := fs.String("agent-url", "", "Jaz URL for sandboxed agents outside this network namespace")
+	agentNetworks := fs.String("agent-networks", "", "comma-separated CIDRs sandboxed agents connect from")
 	if err := fs.Parse(args.Args); err != nil {
 		return serverconfig.Config{}, err
 	}
@@ -209,6 +215,17 @@ func parseServeConfig(args serveArgs) (serverconfig.Config, error) {
 		}
 	}
 	cfg.PreviewURLTemplate = strings.TrimSpace(*previewURLTemplate)
+	cfg.AgentURL = strings.TrimSpace(*agentURL)
+	for _, network := range strings.Split(*agentNetworks, ",") {
+		if network = strings.TrimSpace(network); network == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(network)
+		if err != nil {
+			return serverconfig.Config{}, fmt.Errorf("--agent-networks: %w", err)
+		}
+		cfg.AgentNetworks = append(cfg.AgentNetworks, prefix)
+	}
 	return cfg, nil
 }
 

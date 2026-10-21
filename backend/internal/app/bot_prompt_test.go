@@ -41,7 +41,7 @@ func TestBotDelegationPromptsAndIdentityRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	threads := []storage.Session{bot, seat, create("Ordinary", "", "", ""), create("Implementation", storage.SourceBotWorker, bot.ID, seat.ID)}
-	cfg := NewACPConfig(Config{}, store, "", nil, nil, nil, nil, nil, nil, nil, nil)
+	cfg := NewACPConfig(Config{}, store, "", nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	for _, name := range []string{"Scout", "Reviewer"} {
 		bot.Title = name
 		if err := store.SaveSession(bot); err != nil {

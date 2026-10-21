@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 
 	"github.com/wins/jaz/backend/internal/deviceauth"
 	"github.com/wins/jaz/backend/internal/modelcatalog"
+	"github.com/wins/jaz/backend/internal/serverconfig"
 	sqlitestore "github.com/wins/jaz/backend/internal/storage/sqlite"
 )
 
@@ -189,5 +191,47 @@ func testDeviceInfo(name, kind string, seed byte) deviceauth.Registration {
 			Name: name,
 			Kind: kind,
 		},
+	}
+}
+
+func TestAuthMiddlewareAdmitsAgentNetworksOnlyToInternalMCP(t *testing.T) {
+	store, err := sqlitestore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	devices := deviceauth.New(store)
+	if _, err := devices.Register(testDeviceInfo("First Mac", "desktop", 1)); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{ModelCatalog: modelcatalog.NewService(nil), AuthKey: "root-key", Devices: devices, ServerConfig: serverconfig.Config{
+		AgentNetworks: []netip.Prefix{netip.MustParsePrefix("10.216.94.0/24")},
+	}}
+	for _, tc := range []struct {
+		path, remote, key, forwarded string
+		want                         int
+	}{
+		{serverconfig.MCPProxyPath, "10.216.94.70:40000", "root-key", "", http.StatusNoContent},
+		{serverconfig.JazToolsMCPPath, "10.216.94.70:40000", "root-key", "", http.StatusNoContent},
+		{serverconfig.JazToolsMCPPath, "10.216.94.70:40000", "", "", http.StatusUnauthorized},
+		{serverconfig.JazToolsMCPPath, "10.216.94.70:40000", "root-key", "203.0.113.7", http.StatusForbidden},
+		{serverconfig.MCPProxyPath, "10.216.93.11:40000", "root-key", "", http.StatusForbidden},
+		{"/v1/sessions", "10.216.94.70:40000", "root-key", "", http.StatusForbidden},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, nil)
+		req.RemoteAddr = tc.remote
+		if tc.key != "" {
+			req.Header.Set("Authorization", "Bearer "+tc.key)
+		}
+		if tc.forwarded != "" {
+			req.Header.Set("X-Forwarded-For", tc.forwarded)
+		}
+		res := httptest.NewRecorder()
+		server.withAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})).ServeHTTP(res, req)
+		if res.Code != tc.want {
+			t.Fatalf("%s from %s: status = %d, want %d", tc.path, tc.remote, res.Code, tc.want)
+		}
 	}
 }

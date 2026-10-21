@@ -1,6 +1,7 @@
 package serverconfig
 
 import (
+	"net/netip"
 	"net/url"
 	"strings"
 )
@@ -17,6 +18,13 @@ type Config struct {
 	PublicURL          string
 	PreviewURLTemplate string
 	AllowedOrigins     []string
+	// AgentURL is the base URL of Jaz for agents that run outside its network
+	// namespace; empty means the local listen address.
+	AgentURL string
+	// AgentNetworks are where such agents connect from; with the backend key
+	// their requests reach the internal MCP endpoints the way loopback
+	// requests do.
+	AgentNetworks []netip.Prefix
 }
 
 type URLs struct {
@@ -34,10 +42,11 @@ func New(addr string, publicURL ...string) Config {
 }
 
 func NewURLs(config Config) URLs {
+	base := agentBaseURL(config)
 	return URLs{
-		JazToolsMCP: localURL(config.Addr, JazToolsMCPPath),
-		JazmemMCP:   localURL(config.Addr, JazmemMCPPath),
-		MCPProxy:    localURL(config.Addr, MCPProxyPath),
+		JazToolsMCP: base + JazToolsMCPPath,
+		JazmemMCP:   base + JazmemMCPPath,
+		MCPProxy:    base + MCPProxyPath,
 	}
 }
 
@@ -77,10 +86,13 @@ func ClientBaseURL(config Config) string {
 	return u.String()
 }
 
-func localURL(addr, path string) string {
-	host := strings.TrimSpace(addr)
+func agentBaseURL(config Config) string {
+	if config.AgentURL != "" {
+		return strings.TrimRight(config.AgentURL, "/")
+	}
+	host := config.Addr
 	if strings.HasPrefix(host, ":") {
 		host = "127.0.0.1" + host
 	}
-	return "http://" + host + path
+	return "http://" + host
 }

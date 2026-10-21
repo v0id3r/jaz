@@ -33,6 +33,7 @@ import (
 	"github.com/wins/jaz/backend/internal/providerstore"
 	"github.com/wins/jaz/backend/internal/runtimeenv"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/sessioncontext"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/sessionlock"
@@ -61,6 +62,7 @@ type Config struct {
 	Skills         SkillsConfig
 	Voice          VoiceConfig
 	ACP            acp.Config
+	Sandbox        sandbox.Config
 	Memory         MemoryConfig
 	Connections    ConnectionsConfig
 	Devices        DevicesConfig
@@ -354,7 +356,7 @@ func StartModelCatalogWarmup(lc fx.Lifecycle, catalog *modelcatalog.Service, log
 	})
 }
 
-func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, prompts *coordinator.Builder, catalog acp.AgentCatalog, source acp.AgentConfigSource, adapters *acpadapter.Manager, mcpServers mcpconfig.ServerReader, providerSource provider.Source, modelCatalog *modelcatalog.Service, widgetService *widgets.Service) acp.Config {
+func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, prompts *coordinator.Builder, catalog acp.AgentCatalog, source acp.AgentConfigSource, adapters *acpadapter.Manager, mcpServers mcpconfig.ServerReader, providerSource provider.Source, modelCatalog *modelcatalog.Service, widgetService *widgets.Service, launch sandbox.Launcher) acp.Config {
 	cfg.ACP.Agents = catalog
 	cfg.ACP.AgentSource = source
 	cfg.ACP.Adapters = adapters
@@ -365,6 +367,7 @@ func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, pro
 	cfg.ACP.ModelCatalog = modelCatalog
 	cfg.ACP.SystemPrompt = prompts
 	cfg.ACP.MCPStore = mcpServers
+	cfg.ACP.Launcher = launch
 	promptBuilder := loops.RuntimePromptBuilder{Repo: store, PromptExtras: []func(loops.Loop, loops.Run) string{bots.RoutineInstructions(store)}}
 	if widgetService != nil {
 		promptBuilder.PromptExtras = append(promptBuilder.PromptExtras, widgetService.LoopPromptExtra)

@@ -9,6 +9,7 @@ import (
 	"github.com/wins/jaz/backend/internal/modelcatalog"
 	"github.com/wins/jaz/backend/internal/promptmodule"
 	"github.com/wins/jaz/backend/internal/provider"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/storage"
 )
 
@@ -124,6 +125,8 @@ type Config struct {
 	TurnNote func(storage.Session) (note, promptDigest string)
 	// SteerNote refreshes context when a user writes during a running turn.
 	SteerNote func(storage.Session) string
+	// Launcher starts agent processes; nil runs them directly on the host.
+	Launcher sandbox.Launcher
 }
 
 type AgentConfig struct {

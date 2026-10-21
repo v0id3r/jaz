@@ -16,6 +16,7 @@ import (
 	"github.com/wins/jaz/backend/internal/promptmodule"
 	"github.com/wins/jaz/backend/internal/provider"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/sessionlock"
 	"github.com/wins/jaz/backend/internal/storage"
@@ -230,6 +231,9 @@ func NewManager(store Store, cfg Config, logger *log.Logger) *Manager {
 	}
 	if logger == nil {
 		logger = log.Default()
+	}
+	if cfg.Launcher == nil {
+		cfg.Launcher = sandbox.Local{}
 	}
 	launchCtx, stopLaunches := context.WithCancel(context.Background())
 	return &Manager{

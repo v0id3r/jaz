@@ -19,6 +19,8 @@ import (
 	"github.com/gluonfield/acp-transport/stdio"
 	"github.com/gluonfield/acp-transport/streamhttp"
 	"github.com/wins/jaz/backend/internal/processenv"
+	"github.com/wins/jaz/backend/internal/runtimefiles"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/subprocess"
 )
 
@@ -123,33 +125,64 @@ func (m *Manager) openConn(ctx context.Context, name string, cfg AgentConfig, en
 	if cfg.Command == "" {
 		return nil, nil, fmt.Errorf("acp agent %q has no command", name)
 	}
-	cleanup := func() {}
-	switch CanonicalAgentName(name) {
-	case AgentCodex:
-		if cfg.Model, err = m.startingModel(name, cfg); err == nil {
-			cleanup, err = configureCodexEnv(env, cfg, m.providers(), systemPrompt)
-		}
-	case AgentMuse:
-		cleanup, err = configureMusePrompt(env, systemPrompt)
-	case AgentOpenCode:
-		cleanup, err = m.configureOpenCode(env, cfg, systemPrompt)
+	// Launch files live under the Jaz root, which a sandboxed agent can mount.
+	launchRoot := runtimefiles.New(firstNonEmpty(m.cfg.Root, filepath.Join(os.TempDir(), "jaz"))).ACPLaunch
+	if err := os.MkdirAll(launchRoot, 0o700); err != nil {
+		return nil, nil, err
 	}
+	launchDir, err := os.MkdirTemp(launchRoot, "")
 	if err != nil {
 		return nil, nil, err
+	}
+	agentCleanup := func() {}
+	cleanup := func() {
+		agentCleanup()
+		_ = os.RemoveAll(launchDir)
 	}
 	defer func() {
 		if err != nil {
 			cleanup()
 		}
 	}()
+	switch CanonicalAgentName(name) {
+	case AgentCodex:
+		if cfg.Model, err = m.startingModel(name, cfg); err == nil {
+			err = configureCodexEnv(launchDir, env, cfg, m.providers(), systemPrompt)
+		}
+	case AgentMuse:
+		err = configureMusePrompt(launchDir, env, systemPrompt)
+	case AgentOpenCode:
+		agentCleanup, err = m.configureOpenCode(env, cfg, systemPrompt)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
 	command, args := launchCommand(cfg.Command, cfg.Args)
 	addCommandDirToPath(env, command)
-	cmd := exec.CommandContext(ctx, command, args...)
-	process := subprocess.New(cmd)
-	cmd.Env = processenv.List(env)
-	if cwd != "" {
-		cmd.Dir = cwd
+	readOnly := []string{launchDir}
+	if filepath.IsAbs(command) {
+		readOnly = append(readOnly, filepath.Dir(command))
 	}
+	launch, release, err := m.cfg.Launcher.Command(sandbox.Spec{
+		Path:      command,
+		Args:      args,
+		Env:       processenv.List(env),
+		Dir:       cwd,
+		ReadOnly:  readOnly,
+		ReadWrite: agentStateDirs(env),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("prepare acp agent %q launch: %w", name, err)
+	}
+	prepared := cleanup
+	cleanup = func() {
+		release()
+		prepared()
+	}
+	cmd := exec.CommandContext(ctx, launch.Path, launch.Args...)
+	process := subprocess.New(cmd)
+	cmd.Env = launch.Env
+	cmd.Dir = launch.Dir
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, nil, err
@@ -178,6 +211,18 @@ func (m *Manager) openConn(ctx context.Context, name string, cfg AgentConfig, en
 		_ = conn.Close()
 	}()
 	return conn, stderr, nil
+}
+
+// agentStateDirs are the homes where agents keep credentials and sessions; a
+// sandboxed agent must be able to write them.
+func agentStateDirs(env map[string]string) []string {
+	var dirs []string
+	for _, key := range []string{"CODEX_HOME", "CLAUDE_CONFIG_DIR", "KIMI_CODE_HOME", "OPENCODE_CONFIG_DIR"} {
+		if env[key] != "" {
+			dirs = append(dirs, env[key])
+		}
+	}
+	return dirs
 }
 
 func validateAgentLaunch(name string, cfg AgentConfig) error {

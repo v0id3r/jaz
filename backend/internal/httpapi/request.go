@@ -73,12 +73,17 @@ func TrustedLocalRequest(r *http.Request) bool {
 	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
 		return false
 	}
+	return !ForwardedRequest(r)
+}
+
+// ForwardedRequest reports a request that carries proxy headers.
+func ForwardedRequest(r *http.Request) bool {
 	for _, name := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "CF-Connecting-IP"} {
 		if r.Header.Get(name) != "" {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func LoopbackRequest(r *http.Request) bool {

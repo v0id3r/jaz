@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/wins/jaz/backend/internal/deviceauth"
@@ -60,7 +62,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			deviceErr = err
 		}
 		if subtle.ConstantTimeCompare([]byte(token), []byte(key)) == 1 {
-			if s.Devices == nil || (httpapi.TrustedLocalRequest(r) && (rootKeyAllowed(r) || s.rootKeyHasFullAccess())) {
+			if s.Devices == nil || (httpapi.TrustedLocalRequest(r) && (rootKeyAllowed(r) || s.rootKeyHasFullAccess())) || agentMCPRequest(r, s.ServerConfig.AgentNetworks) {
 				principal := deviceauth.Principal{Kind: deviceauth.PrincipalRoot}
 				next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 				return
@@ -218,10 +220,28 @@ func queryAuthAllowed(r *http.Request) bool {
 }
 
 func internalMCPRequest(r *http.Request) bool {
-	switch r.URL.Path {
+	return internalMCPPath(r.URL.Path) && httpapi.LoopbackRequest(r)
+}
+
+func internalMCPPath(path string) bool {
+	switch path {
 	case serverconfig.JazToolsMCPPath, serverconfig.JazToolsMCPCompatPath, serverconfig.JazmemMCPPath, serverconfig.MCPProxyPath:
-		return httpapi.LoopbackRequest(r)
+		return true
 	default:
 		return false
 	}
+}
+
+// agentMCPRequest reports an internal MCP request from sandboxed agents, which
+// reach Jaz over the network instead of loopback.
+func agentMCPRequest(r *http.Request, networks []netip.Prefix) bool {
+	if len(networks) == 0 || !internalMCPPath(r.URL.Path) || httpapi.ForwardedRequest(r) {
+		return false
+	}
+	addr, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := addr.Addr().Unmap()
+	return slices.ContainsFunc(networks, func(network netip.Prefix) bool { return network.Contains(ip) })
 }
