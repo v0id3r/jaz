@@ -3,7 +3,7 @@ import {
   apiBaseUrl, cachedApiAuthToken, clearApiSession, CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER,
   consumeStartupConnectUrl, isLocalBackendUrl, localBaseUrl, normalizeBaseUrl,
   parseBackendConnectUrl, rememberApiAuthToken, restoreApiAuthToken, secureBackendConnection,
-  setApiAuthToken, setApiBaseUrl, onApiAuthRejected,
+  setApiAuthToken, setApiBaseUrl, onApiAuthRejected, dropRejectedApiAuthToken,
 } from '@/lib/api/client'
 import { rememberBackend, removeKnownBackend } from '@/lib/backends'
 import { clientRuntime } from '@/lib/clientRuntime'
@@ -357,6 +357,9 @@ export async function connectRemote(input: string): Promise<string | null> {
       if (access.code === 'device_approval_required' && parsed.key) {
         return await register(value, token)
       }
+      if (access.code === 'unauthorized') {
+        dropRejectedApiAuthToken(url)
+      }
       block(access.error)
       return access.error
     }
@@ -519,6 +522,9 @@ async function init(): Promise<void> {
   if (health.ok && !health.authRequired) {
     activate(value, { url, token: '', deviceId: '', remembered: false })
   }
+  else if (health.ok && clientRuntime.kind === 'web' && restoreApiAuthToken(url)) {
+    await restore(url)
+  }
   else {
     block(null)
   }
@@ -564,6 +570,9 @@ async function restore(url: string): Promise<void> {
         pollTimer = setTimeout(() => void retry(), 5000)
       }
       else {
+        if (access.code === 'unauthorized') {
+          dropRejectedApiAuthToken(url)
+        }
         block(access.error)
       }
       return

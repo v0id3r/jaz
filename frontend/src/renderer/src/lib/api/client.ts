@@ -6,6 +6,9 @@ import type { ResourceTicket } from '@shared/connectionSession'
 export { ApiError } from '@/lib/api/response'
 
 const AUTH_KEY_PREFIX = 'jaz.backendAuth.'
+// A browser has no secure store, so it keeps the device token in localStorage
+// as before; otherwise every PWA restart would need a new invite or approval.
+const browserKeepsToken = clientRuntime.kind === 'web'
 const authTokens = new Map<string, string>()
 const resourceTickets = new Map<string, ResourceTicket>()
 let credentialRevision = 0
@@ -172,8 +175,8 @@ export function cachedApiAuthToken(url = apiBaseUrl()): string {
 
 export function restoreApiAuthToken(url: string): string {
   const stored = localStorage.getItem(authStorageKey(url))?.trim() ?? ''
-  if (!stored) {
-    return ''
+  if (!stored || browserKeepsToken) {
+    return stored
   }
   if (!stored.startsWith('enc:v1:') || !clientRuntime.decryptCredential) {
     throw new Error('Saved connection is not securely encrypted')
@@ -198,6 +201,9 @@ export function setApiAuthToken(url: string, token?: string | null, ticket?: Res
   const key = authStorageKey(url)
   if (token) {
     authTokens.set(key, token)
+    if (browserKeepsToken) {
+      localStorage.setItem(key, token)
+    }
   } else {
     authTokens.delete(key)
   }
@@ -216,6 +222,12 @@ export function clearApiSession(): void {
 export function forgetApiAuthToken(url: string): void {
   setApiAuthToken(url, null)
   localStorage.removeItem(authStorageKey(url))
+}
+
+export function dropRejectedApiAuthToken(url: string): void {
+  if (browserKeepsToken) {
+    localStorage.removeItem(authStorageKey(url))
+  }
 }
 
 export function apiSessionRevision(): number {
@@ -280,6 +292,9 @@ export function apiFetch(path: string, init?: RequestInit, url = apiBaseUrl()): 
       const body = await response.clone().json().catch(() => null) as { code?: string } | null
       if (revision === credentialRevision && url === apiBaseUrl() &&
         (body?.code === 'unauthorized' || body?.code === 'device_approval_required')) {
+        if (body?.code === 'unauthorized') {
+          dropRejectedApiAuthToken(url)
+        }
         for (const handler of rejectionListeners) {
           handler()
         }

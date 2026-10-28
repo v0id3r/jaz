@@ -110,7 +110,7 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
   replace('clearTimeout', (id) => timers.delete(id))
   replace('fetch', async (url, init) => {
     const target = new URL(url)
-    if (target.hostname === '127.0.0.1' && target.pathname === '/health') {
+    if (!web && target.hostname === '127.0.0.1' && target.pathname === '/health') {
       return Response.json({ ok: false })
     }
     if (target.pathname === '/health') {
@@ -334,7 +334,28 @@ test('a web auth proxy login redirect reloads the serving origin and asks to sig
   expect(reloads()).toBe(1)
   expect(await connection.connectRemote('https://other.example')).toBe('Sign in through Teleport again to reach the backend at https://other.example')
   expect(reloads()).toBe(1)
-  expect(redirects).toEqual(['manual', 'manual'])
+  expect(redirects).toEqual(['manual', 'manual', 'manual'])
+})
+
+test('a browser keeps its device token across reloads and drops it once rejected', async () => {
+  const served = 'jaz.backendAuth.http://127.0.0.1:5299'
+  const key = 'jaz.backendAuth.https://jaz.example'
+  let accepted = 'jaz_saved-token'
+  const { connection, stored } = await fixture({
+    web: true,
+    storedValues: [[served, 'jaz_saved-token']],
+    auth: (init) => new Headers(init.headers).get('Authorization') === `Bearer ${accepted}`
+      ? Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' })
+      : Response.json({ code: 'unauthorized' }, { status: 401 }),
+  })
+  expect(connection.useConnection().status).toBe('connected')
+  expect(stored.get(served)).toBe('jaz_saved-token')
+  accepted = 'jaz_device-token'
+  expect(await connection.connectRemote('https://jaz.example#key=jaz_device-token')).toBeNull()
+  expect(stored.get(key)).toBe('jaz_device-token')
+  accepted = ''
+  expect(await connection.connectRemote('https://jaz.example')).toBe('Backend key was rejected')
+  expect(stored.has(key)).toBe(false)
 })
 
 test('an unauthenticated health probe does not unlock saved credentials', async () => {
