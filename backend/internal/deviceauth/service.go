@@ -81,6 +81,13 @@ type Principal struct {
 	DeviceID        string `json:"device_id,omitempty"`
 	EnrollmentToken string `json:"-"`
 	CredentialHash  string `json:"-"`
+	// Owner marks a request the trusted auth proxy vouches for as the host owner.
+	Owner bool `json:"-"`
+}
+
+// Manages reports whether the principal may manage devices and enrollment.
+func (p Principal) Manages() bool {
+	return p.Kind == PrincipalRoot || p.Owner
 }
 
 type RegisterResult struct {

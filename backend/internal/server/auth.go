@@ -19,8 +19,13 @@ import (
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := s.AuthKey
-		if key == "" || r.URL.Path == "/health" || publicDeviceRequest(r) || publicOAuthCallback(r) {
+		if key == "" || r.URL.Path == "/health" || publicOAuthCallback(r) {
 			next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, deviceauth.Principal{})))
+			return
+		}
+		if publicDeviceRequest(r) {
+			principal := deviceauth.Principal{Owner: s.DeviceProxy.Owner(r)}
+			next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 			return
 		}
 		if s.Devices != nil && queryAuthAllowed(r) && r.URL.Query().Get("ticket") != "" {
@@ -42,6 +47,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			info := httpapi.RequestInfoFrom(r)
 			principal, err := s.Devices.Authenticate(token, deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
 			if err == nil {
+				principal.Owner = s.DeviceProxy.Owner(r)
 				s.serveDevice(w, r, principal, next)
 				return
 			}
@@ -67,7 +73,7 @@ const clientPlatformHeader = "X-Jaz-Client-Platform"
 
 func contextWithClientInfo(r *http.Request, principal deviceauth.Principal) context.Context {
 	ctx := r.Context()
-	if principal.Kind != "" {
+	if principal != (deviceauth.Principal{}) {
 		ctx = deviceauth.WithPrincipal(ctx, principal)
 	}
 	return sessioncontext.WithClientPlatform(ctx, requestClientPlatform(r))

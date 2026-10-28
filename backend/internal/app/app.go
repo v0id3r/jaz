@@ -17,6 +17,7 @@ import (
 	"github.com/wins/jaz/backend/internal/bots"
 	"github.com/wins/jaz/backend/internal/connections"
 	"github.com/wins/jaz/backend/internal/coordinator"
+	"github.com/wins/jaz/backend/internal/deviceauth"
 	"github.com/wins/jaz/backend/internal/jazagent"
 	"github.com/wins/jaz/backend/internal/loops"
 	"github.com/wins/jaz/backend/internal/managedtool"
@@ -72,6 +73,7 @@ type Config struct {
 
 type DevicesConfig struct {
 	DisablePairing bool
+	Proxy          deviceauth.ProxyConfig
 }
 
 type Release struct {

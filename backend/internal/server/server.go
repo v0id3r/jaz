@@ -128,6 +128,7 @@ type Server struct {
 
 	Terminal     *terminal.Manager
 	Devices      *deviceauth.Service
+	DeviceProxy  *deviceauth.Proxy
 	terminalOnce sync.Once
 
 	acpAuthLoginJobs sync.Map

@@ -305,6 +305,7 @@ func startServer(
 		MemorySourceQueue:     memorySourceQueue.Queue,
 		Terminal:              terminals,
 		Devices:               deviceAuth,
+		DeviceProxy:           deviceauth.NewProxy(cfg.Devices.Proxy),
 	}
 	app.ConnectACPCompletion(manager, a, store, locks, events, prompts, logger)
 	lc.Append(fx.Hook{
