@@ -14,12 +14,15 @@ export async function readJSON<T>(response: Response): Promise<T | null> {
   }
 }
 
-function loginResponse(url: string, response: Response): boolean {
+// Health probes use redirect: 'manual'. An auth proxy answers an expired session
+// with a redirect to its login origin; followed, that becomes an opaque CORS
+// failure indistinguishable from a dead backend.
+function loginResponse(response: Response): boolean {
   if (clientRuntime.kind !== 'web') {
     return false
   }
   const contentType = response.headers.get('content-type') || ''
-  return contentType.includes('text/html') || (response.redirected && new URL(response.url).origin !== url) ||
+  return contentType.includes('text/html') || response.type === 'opaqueredirect' ||
     ((response.status === 401 || response.status === 403) && !contentType.includes('json'))
 }
 
@@ -28,9 +31,9 @@ export async function readHealth(url: string, signal?: AbortSignal): Promise<Hea
     return { ok: false, error: 'Remote connections require HTTPS', recoverable: false }
   }
   try {
-    const response = await fetch(url + '/health', { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
-    if (loginResponse(url, response)) {
-      return { ok: false, error: `Sign in through Teleport again to reach the backend at ${url}`, recoverable: false }
+    const response = await fetch(url + '/health', { redirect: 'manual', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
+    if (loginResponse(response)) {
+      return { ok: false, error: `Sign in through Teleport again to reach the backend at ${url}`, recoverable: false, code: 'browser_session_required' }
     }
     const body = await readJSON<{ ok?: boolean; auth_required?: boolean }>(response)
     if (response.ok && body?.ok === true && typeof body.auth_required === 'boolean') {

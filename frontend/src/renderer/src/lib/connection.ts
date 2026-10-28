@@ -298,6 +298,17 @@ async function pair(value: Attempt): Promise<string | null> {
   return null
 }
 
+// A web app served by the backend's own origin regains the proxy session only
+// through a top-level navigation, which the proxy turns into its login page.
+// reload() revalidates the document, so a cached app shell cannot short-circuit it.
+function signInThroughBrowser(url: string): boolean {
+  if (clientRuntime.kind !== 'web' || url !== window.location.origin) {
+    return false
+  }
+  window.location.reload()
+  return true
+}
+
 export async function connectRemote(input: string): Promise<string | null> {
   const parsed = parseBackendConnectUrl(input)
   const url = normalizeBaseUrl(parsed.url)
@@ -317,6 +328,9 @@ export async function connectRemote(input: string): Promise<string | null> {
       return null
     }
     if (!health.ok) {
+      if (health.code === 'browser_session_required' && signInThroughBrowser(url)) {
+        return null
+      }
       block(health.error)
       return health.error
     }

@@ -55,7 +55,7 @@ async function settle() {
   }
 }
 
-async function fixture({ auth, pairing = false, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature } = {}) {
+async function fixture({ auth, pairing = false, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature, web = false } = {}) {
   const stored = new Map(storedValues)
   const configured = []
   const timers = new Map()
@@ -80,10 +80,11 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       return { url: result.url, token: 'jaz_local-device-token', deviceId: 'identity', remembered: false }
     },
   }
+  let reloads = 0
   replace('window', {
-    location: { origin: 'http://localhost', search: '', hash: '' },
+    location: { origin: web ? 'https://jaz.example' : 'http://localhost', search: '', hash: '', reload: () => { reloads += 1 } },
     addEventListener() {},
-    jaz: {
+    jaz: web ? undefined : {
       apiBaseUrl: 'http://127.0.0.1:5299',
       windowKind: owner ? 'main' : 'board',
       connectionSession: session,
@@ -113,7 +114,7 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       return Response.json({ ok: false })
     }
     if (target.pathname === '/health') {
-      return health ? health() : Response.json({ ok: true, auth_required: true })
+      return health ? health(init) : Response.json({ ok: true, auth_required: true })
     }
     if (target.pathname === '/v1/devices/register') {
       if (registration) {
@@ -150,6 +151,7 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
     configured,
     timers,
     session,
+    reloads: () => reloads,
     async pollPairing() {
       const timer = [...timers.values()].find((entry) => entry.delay === 2_000)
       await timer.callback()
@@ -317,6 +319,22 @@ test('remote startup waits for health before unlocking, stops on denial, and rec
   expect(events).toEqual(['health', 'health', 'unlock', 'health', 'unlock'])
   expect(restarted.configured).toContainEqual({ enabled: true, baseUrl: target, token: 'jaz_device-token' })
   expect(restarted.stored.get('jaz.backendAuth.' + target)).toBe('enc:v1:sealed-credential')
+})
+
+test('a web auth proxy login redirect reloads the serving origin and asks to sign in elsewhere', async () => {
+  const redirects = []
+  const { connection, reloads } = await fixture({
+    web: true,
+    health: (init) => {
+      redirects.push(init.redirect)
+      return { type: 'opaqueredirect', ok: false, status: 0, headers: new Headers() }
+    },
+  })
+  expect(await connection.connectRemote('https://jaz.example')).toBeNull()
+  expect(reloads()).toBe(1)
+  expect(await connection.connectRemote('https://other.example')).toBe('Sign in through Teleport again to reach the backend at https://other.example')
+  expect(reloads()).toBe(1)
+  expect(redirects).toEqual(['manual', 'manual'])
 })
 
 test('an unauthenticated health probe does not unlock saved credentials', async () => {
