@@ -154,7 +154,7 @@ func (s *Store) UpdateTurn(id string, update storage.TurnUpdate, messages ...sto
 			return err
 		}
 		if updated == 0 {
-			return fmt.Errorf("%s has no active turn", id)
+			return fmt.Errorf("%s has %w", id, storage.ErrNoActiveTurn)
 		}
 		if update.EndExchange {
 			if err := q.ResetTurnHops(ctx, id); err != nil {
@@ -195,7 +195,7 @@ func (s *Store) SetTurnRetries(id string, retries int) error {
 	defer s.writeMu.Unlock()
 	updated, err := threaddb.New(s.db).SetTurnRetries(context.Background(), threaddb.SetTurnRetriesParams{ID: id, Retries: int64(retries)})
 	if err == nil && updated == 0 {
-		return fmt.Errorf("%s has no active turn", id)
+		return fmt.Errorf("%s has %w", id, storage.ErrNoActiveTurn)
 	}
 	return err
 }
