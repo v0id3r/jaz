@@ -123,7 +123,7 @@ func (s *Store) UpdateTurn(id string, update storage.TurnUpdate, messages ...sto
 		return err
 	}
 	if session.Turn == nil || session.Status != storage.StatusRunning {
-		return fmt.Errorf("%s has no active turn", id)
+		return fmt.Errorf("%s has %w", id, storage.ErrNoActiveTurn)
 	}
 	if err := s.appendUserMessagesLocked(id, messages); err != nil {
 		return err
@@ -159,7 +159,7 @@ func (s *Store) SetTurnRetries(id string, retries int) error {
 		return err
 	}
 	if session.Turn == nil || session.Status != storage.StatusRunning {
-		return fmt.Errorf("%s has no active turn", id)
+		return fmt.Errorf("%s has %w", id, storage.ErrNoActiveTurn)
 	}
 	session.Turn.Retries = retries
 	return s.saveSession(session)

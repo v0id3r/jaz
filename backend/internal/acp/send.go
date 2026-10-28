@@ -17,6 +17,10 @@ var ErrSteeringUnsupported = errors.New("acp steering unsupported")
 
 var errTurnEnded = fmt.Errorf("%w: agent turn ended before steering", ErrSteeringUnsupported)
 
+// errTurnNotStored refuses a steer into a turn storage already ended while the
+// job still runs it; the message waits for the next turn rather than failing.
+var errTurnNotStored = fmt.Errorf("%w: stored turn ended before steering", ErrSteeringUnsupported)
+
 // errPromptPending refuses a steer while the turn's next prompt has not
 // reached the agent, as while it waits to retry a provider failure.
 var errPromptPending = fmt.Errorf("%w: the turn's next prompt has not reached the agent", ErrSteeringUnsupported)
@@ -379,7 +383,7 @@ func (m *Manager) reserveSteer(job *jobState, req SteerRequest, contexts []stora
 		return steerSlot{}, err
 	}
 	if session.Turn == nil {
-		return steerSlot{}, fmt.Errorf("active turn is missing from storage")
+		return steerSlot{}, m.turnNotStored(job, session.Status)
 	}
 	update := storage.TurnUpdate{
 		GoalRequested: session.Turn.GoalRequested || req.GoalRequested,
@@ -400,7 +404,9 @@ func (m *Manager) reserveSteer(job *jobState, req SteerRequest, contexts []stora
 		message.FromUser = req.FromUser
 		messages = append(messages, message)
 	}
-	if err := m.store.UpdateTurn(job.ID, update, messages...); err != nil {
+	if err := m.store.UpdateTurn(job.ID, update, messages...); errors.Is(err, storage.ErrNoActiveTurn) {
+		return steerSlot{}, m.turnNotStored(job, session.Status)
+	} else if err != nil {
 		return steerSlot{}, fmt.Errorf("reserve steering: %w", err)
 	}
 	job.turn.goalRequested = update.GoalRequested
@@ -417,6 +423,13 @@ func (m *Manager) reserveSteer(job *jobState, req SteerRequest, contexts []stora
 	slot := steerSlot{done: job.turn.done, after: job.turn.steerSent, sent: make(chan struct{})}
 	job.turn.steerSent = slot.sent
 	return slot, nil
+}
+
+// turnNotStored reports a job whose running turn storage no longer holds, so
+// whatever ended it there can be traced. The caller holds job.mu.
+func (m *Manager) turnNotStored(job *jobState, storedStatus string) error {
+	m.log.Warn("steer found no stored turn for a running job", "session", job.ID, "state", job.State, "stored_status", storedStatus)
+	return errTurnNotStored
 }
 
 func (m *Manager) runNativeSteerCall(ctx context.Context, job *jobState, done chan struct{}, prompt acpschema.PromptRequest) {
