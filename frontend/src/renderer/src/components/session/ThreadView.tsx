@@ -188,7 +188,7 @@ export function ThreadView({
     notifySessionEventError(event)
   }, [notifySessionEventError])
   useEffect(() => setLastSessionEventAt(undefined), [sessionId])
-  useSessionEvents(sessionId, detail.data?.latest_event_seq, handleSessionEvent)
+  const eventsConnected = useSessionEvents(sessionId, detail.data?.latest_event_seq, handleSessionEvent)
 
   const { paging } = detail
 
@@ -571,6 +571,7 @@ export function ThreadView({
                             <SessionLivenessIndicator
                               agent={session.runtime_ref?.agent}
                               running={sessionRunning}
+                              connected={eventsConnected}
                               activity={activity}
                               retrying={retrying}
                               activeOperation={detail.data?.acp_active_operation}

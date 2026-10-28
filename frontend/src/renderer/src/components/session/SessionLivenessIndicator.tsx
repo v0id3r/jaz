@@ -10,6 +10,7 @@ import {
 
 function detailFor(signal: RunSignal, ageMs: number | undefined, retrying: boolean): string {
   const age = formatDuration(ageMs)
+  if (signal === 'offline') return '- reconnecting'
   if (retrying) return age ? `- ${age} ago` : ''
   if (signal === 'live') return age ? `- live ${age} ago` : '- live'
   if (signal === 'quiet') return age ? `- quiet for ${age}` : '- quiet'
@@ -22,6 +23,7 @@ export type TurnActivity = 'starting' | 'thinking' | 'working'
 export function SessionLivenessIndicator({
   agent,
   running,
+  connected,
   activity = 'working',
   retrying,
   activeOperation,
@@ -30,6 +32,7 @@ export function SessionLivenessIndicator({
 }: {
   agent?: string
   running: boolean
+  connected: boolean
   activity?: TurnActivity
   retrying?: string
   activeOperation?: string
@@ -39,6 +42,7 @@ export function SessionLivenessIndicator({
   const [, setTick] = useState(0)
   const { signal, ageMs } = deriveSessionRunSignal({
     running,
+    connected,
     updatedAt,
     lastActivityAt,
     now: Date.now(),
@@ -51,9 +55,10 @@ export function SessionLivenessIndicator({
   }, [signal])
 
   const stale = signal === 'stale'
-  const alert = stale || Boolean(retrying)
-  const detail = detailFor(signal, ageMs, Boolean(retrying))
-  const label = retrying || livenessLabel(agent, activeOperation, stale, activity)
+  const retry = signal === 'offline' ? undefined : retrying
+  const alert = stale || Boolean(retry)
+  const detail = detailFor(signal, ageMs, Boolean(retry))
+  const label = retry || livenessLabel(agent, activeOperation, stale, activity)
 
   return (
     <AnimatePresence initial={false}>

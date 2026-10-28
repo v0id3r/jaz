@@ -8,6 +8,7 @@ function renderIndicator(overrides = {}) {
     createElement(SessionLivenessIndicator, {
       agent: 'codex',
       running: true,
+      connected: true,
       updatedAt: new Date().toISOString(),
       ...overrides,
     }),
@@ -42,6 +43,15 @@ test('stale sessions keep the agent name and alert treatment', () => {
   expect(html).not.toContain('live-shimmer')
 })
 
+test('a dropped event stream reads as reconnecting instead of a quiet or stale agent', () => {
+  const stale = new Date(Date.now() - 10 * 60_000).toISOString()
+  const html = renderIndicator({ connected: false, updatedAt: stale })
+  expect(html).toContain('Working')
+  expect(html).toContain('- reconnecting')
+  expect(html).not.toContain('still marked running')
+  expect(renderIndicator({ connected: false, running: false })).toBe('')
+})
+
 test('reported thinking changes the live label while compaction and stale state take precedence', () => {
   expect(renderIndicator({ activity: 'thinking' })).toContain('Thinking')
   expect(renderIndicator({ activity: 'thinking', activeOperation: 'compact' })).toContain('Compacting')
@@ -63,4 +73,12 @@ test('a provider retry replaces the stale warning with its own status', () => {
   expect(html).toContain('text-danger')
   expect(html).not.toContain('still marked running')
   expect(renderIndicator({ retrying: 'Reconnecting... 2/5', running: false })).toBe('')
+})
+
+test('a dropped event stream outranks a provider retry it can no longer observe', () => {
+  const html = renderIndicator({ connected: false, retrying: 'Reconnecting... 2/5' })
+  expect(html).toContain('Working')
+  expect(html).toContain('- reconnecting')
+  expect(html).not.toContain('2/5')
+  expect(html).not.toContain('text-danger')
 })
