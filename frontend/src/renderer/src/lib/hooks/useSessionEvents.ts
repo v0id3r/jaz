@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { openSessionEvents } from '@/lib/api/sse'
 import type { SessionEvent } from '@/lib/api/types'
 import { keys } from '@/lib/query/keys'
@@ -8,12 +8,14 @@ import { mergeSessionEvent } from '@/lib/sessionEvents'
 // Subscribes to a session's SSE stream while mounted; events accumulate in
 // the query cache. Cache writes are batched and sidebar invalidations
 // debounced so a busy turn costs one render per flush, not one per event.
+// Returns whether the stream is connected.
 export function useSessionEvents(
   sessionId: string,
   latestEventSeq: number | undefined,
   onEvent?: (event: SessionEvent) => void,
-): void {
+): boolean {
   const queryClient = useQueryClient()
+  const [connected, setConnected] = useState(true)
   const afterSeq = latestEventSeq
 
   useEffect(() => {
@@ -73,7 +75,7 @@ export function useSessionEvents(
         }
       }
       listsTimer ??= setTimeout(invalidateLists, 500)
-    })
+    }, setConnected)
     return () => {
       stop()
       if (flushTimer !== null) clearTimeout(flushTimer)
@@ -82,4 +84,6 @@ export function useSessionEvents(
       if (listsTimer !== null) clearTimeout(listsTimer)
     }
   }, [sessionId, afterSeq, queryClient, onEvent])
+
+  return connected
 }
