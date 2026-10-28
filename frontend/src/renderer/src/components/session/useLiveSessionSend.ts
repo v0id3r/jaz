@@ -33,6 +33,7 @@ export function useLiveSessionSend({
     const draftAttachments = options.attachments ?? []
     const draftContexts = options.contexts ?? []
     const contextAttachments = liveContextAttachments(draftContexts)
+    let turnAccepted = false
     setLive({
       user: text,
       at: new Date().toISOString(),
@@ -74,6 +75,7 @@ export function useLiveSessionSend({
           if (sendRef.current?.controller !== controller) {
             return
           }
+          turnAccepted ||= event.type === 'accepted'
           setLive((prev) => (prev ? mergeLiveStreamEvent(prev, event) : prev))
         },
       })
@@ -84,7 +86,8 @@ export function useLiveSessionSend({
     void started
       .then((stream) => stream.finished)
       .catch((err: Error) => {
-        if (controller.signal.aborted || sendRef.current?.controller !== controller) {
+        // Once accepted, the server owns the turn and persists its failure; a dropped stream is not one.
+        if (controller.signal.aborted || sendRef.current?.controller !== controller || turnAccepted) {
           return
         }
         onCriticalError(err.message || 'Something went wrong.')
