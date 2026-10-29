@@ -1,7 +1,9 @@
 package deviceauth
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -106,4 +108,53 @@ func signDeviceProof(t *testing.T, signer, claimed ed25519.PrivateKey, claims ma
 	}
 	signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
 	return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
+}
+
+func TestDeviceProofAcceptsP256Keys(t *testing.T) {
+	store, err := sqlite.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := New(store)
+	service.RequireProof = true
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	stranger, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	public, _ := key.PublicKey.Bytes()
+	sum := sha256.Sum256(public)
+	registered, err := service.RegisterApproved(Registration{
+		Identity: DeviceIdentity{DeviceID: hex.EncodeToString(sum[:]), PublicKey: base64.RawURLEncoding.EncodeToString(public)},
+		Profile:  DeviceProfile{Name: "Safari", Kind: "browser"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sign := func(signer, claimed *ecdsa.PrivateKey, alg string) string {
+		point, _ := claimed.PublicKey.Bytes()
+		header, _ := json.Marshal(map[string]any{"typ": "dpop+jwt", "alg": alg, "jwk": map[string]string{
+			"kty": "EC", "crv": "P-256", "x": base64.RawURLEncoding.EncodeToString(point[1:33]), "y": base64.RawURLEncoding.EncodeToString(point[33:]),
+		}})
+		payload, _ := json.Marshal(map[string]any{"jti": rand.Text(), "htm": "GET", "htu": "https://jaz.example/v1/sessions", "iat": time.Now().Unix(), "ath": TokenHash(registered.Token)})
+		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
+		digest := sha256.Sum256([]byte(signed))
+		r, s, _ := ecdsa.Sign(rand.Reader, signer, digest[:])
+		return signed + "." + base64.RawURLEncoding.EncodeToString(append(r.FillBytes(make([]byte, 32)), s.FillBytes(make([]byte, 32))...))
+	}
+	for _, test := range []struct {
+		name  string
+		proof string
+		want  error
+	}{
+		{"valid", sign(key, key, "ES256"), nil},
+		{"alg not matching the key", sign(key, key, "EdDSA"), ErrProofInvalid},
+		{"signed by another key", sign(stranger, key, "ES256"), ErrUnauthorized},
+		{"another device key", sign(stranger, stranger, "ES256"), ErrUnauthorized},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := service.Authenticate(registered.Token, Proof{JWT: test.proof, Method: "GET", Path: "/v1/sessions"}, SeenInfo{})
+			if !errors.Is(err, test.want) || (test.want == nil && err != nil) {
+				t.Fatalf("Authenticate() error = %v, want %v", err, test.want)
+			}
+		})
+	}
 }

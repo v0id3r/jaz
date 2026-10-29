@@ -1,10 +1,14 @@
 package deviceauth
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/url"
 	"strings"
 	"sync"
@@ -53,16 +57,17 @@ func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
 	}
 	var header struct {
 		Typ, Alg string
-		JWK      struct{ Kty, Crv, X string }
+		JWK      proofJWK
 	}
-	if decodeSegment(parts[0], &header) != nil || header.Typ != "dpop+jwt" || header.Alg != "EdDSA" ||
-		header.JWK.Kty != "OKP" || header.JWK.Crv != "Ed25519" {
+	if decodeSegment(parts[0], &header) != nil || header.Typ != "dpop+jwt" {
 		return ErrProofInvalid
 	}
-	key, errKey := base64.RawURLEncoding.DecodeString(publicKey)
+	raw, verify := header.JWK.verifier(header.Alg)
+	if verify == nil {
+		return ErrProofInvalid
+	}
 	sig, errSig := base64.RawURLEncoding.DecodeString(parts[2])
-	if header.JWK.X != publicKey || errKey != nil || errSig != nil || len(key) != ed25519.PublicKeySize ||
-		!ed25519.Verify(key, []byte(parts[0]+"."+parts[1]), sig) {
+	if base64.RawURLEncoding.EncodeToString(raw) != publicKey || errSig != nil || !verify([]byte(parts[0]+"."+parts[1]), sig) {
 		return ErrUnauthorized
 	}
 	var claims struct {
@@ -81,6 +86,37 @@ func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
 		return ErrProofInvalid
 	}
 	return s.spendProof(claims.JTI)
+}
+
+type proofJWK struct{ Kty, Crv, X, Y string }
+
+// verifier returns the key in the raw form device identities store (32 bytes
+// for Ed25519, the 65-byte uncompressed point for P-256) and its signature
+// check, or a nil check when alg and key do not form a supported pair.
+func (k proofJWK) verifier(alg string) ([]byte, func(signed, sig []byte) bool) {
+	x, errX := base64.RawURLEncoding.DecodeString(k.X)
+	switch {
+	case errX != nil:
+	case alg == "EdDSA" && k.Kty == "OKP" && k.Crv == "Ed25519" && len(x) == ed25519.PublicKeySize:
+		return x, func(signed, sig []byte) bool { return ed25519.Verify(x, signed, sig) }
+	case alg == "ES256" && k.Kty == "EC" && k.Crv == "P-256":
+		y, _ := base64.RawURLEncoding.DecodeString(k.Y)
+		raw := append(append([]byte{4}, x...), y...)
+		key, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
+		if err != nil {
+			return nil, nil
+		}
+		return raw, func(signed, sig []byte) bool {
+			digest := sha256.Sum256(signed)
+			return len(sig) == 64 && ecdsa.Verify(key, digest[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:]))
+		}
+	}
+	return nil, nil
+}
+
+func validP256(raw []byte) bool {
+	_, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
+	return err == nil
 }
 
 func decodeSegment(segment string, out any) error {
