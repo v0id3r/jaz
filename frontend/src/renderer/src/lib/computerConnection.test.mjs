@@ -47,7 +47,7 @@ test('remote websocket bridge runs without a side browser and cancellation prese
       endCount += 1
     },
   }
-  const disconnect = connectComputer('ws://127.0.0.1:' + server.port + '/computer?key=fixture', host, 'thread')
+  const disconnect = connectComputer(async () => new WebSocket('ws://127.0.0.1:' + server.port + '/computer?key=fixture'), host, 'thread')
   const request = (id, method, params) => {
     const result = Promise.withResolvers()
     replies.set(id, result)

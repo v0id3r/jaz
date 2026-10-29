@@ -82,7 +82,7 @@ test('browser transports keep device credentials in headers and bound URLs to re
   const embedded = new URL(api.apiEmbeddedGetUrl('/v1/sessions/thread/file?raw=1'))
   expect(embedded.searchParams.get('ticket')).toBe('read-ticket')
   expect(embedded.toString()).not.toContain('device-credential')
-  api.apiWebSocket('/v1/sessions/thread/terminal')
+  await api.apiWebSocket('/v1/sessions/thread/terminal')
   expect(sockets).toEqual([{ url: 'wss://jaz.example/v1/sessions/thread/terminal', protocols: ['jaz', 'jaz-auth.device-credential'] }])
   api.setApiAuthToken(api.apiBaseUrl(), null)
   expect(api.apiEmbeddedGetUrl('/v1/sessions/thread/file?raw=1')).not.toContain('ticket=')
@@ -117,15 +117,37 @@ test('host management credentials stay bound to the local backend during a conne
   ])
 })
 
-test('HTTP remote addresses fail before any credential-bearing network call', () => {
+test('a device key proves every request and WebSocket handshake it sends the token with', async () => {
+  const proofs = []
+  const { api, sockets } = fixture('https://jaz.example', {
+    apiBaseUrl: 'http://127.0.0.1:5299',
+    deviceProof: async (method, url, token) => proofs.push([method, url, token]) && `proof-${proofs.length}`,
+  })
+  let request
+  replace('fetch', async (url, init) => {
+    request = init
+    return Response.json({ ok: true })
+  })
+  await api.apiFetch('/v1/sessions', { method: 'POST' })
+  expect(request.headers.get('Authorization')).toBe('DPoP device-credential')
+  expect(request.headers.get('DPoP')).toBe('proof-1')
+  await api.apiWebSocket('/v1/sessions/thread/terminal?cols=80')
+  expect(sockets[0].protocols).toEqual(['jaz', 'jaz-auth.device-credential', 'jaz-dpop.proof-2'])
+  expect(proofs).toEqual([
+    ['POST', 'https://jaz.example/v1/sessions', 'device-credential'],
+    ['GET', 'wss://jaz.example/v1/sessions/thread/terminal?cols=80', 'device-credential'],
+  ])
+})
+
+test('HTTP remote addresses fail before any credential-bearing network call', async () => {
   const { api, sockets } = fixture('http://jaz.example')
   let requests = 0
   replace('fetch', () => {
     requests += 1
     throw new Error('Network must remain unused')
   })
-  expect(() => api.apiFetch('/v1/auth/check')).toThrow('HTTPS')
-  expect(() => api.apiWebSocket('/v1/sessions/thread/terminal')).toThrow('HTTPS')
+  await expect(api.apiFetch('/v1/auth/check')).rejects.toThrow('HTTPS')
+  await expect(api.apiWebSocket('/v1/sessions/thread/terminal')).rejects.toThrow('HTTPS')
   expect(() => api.apiEmbeddedGetUrl('/v1/sessions/thread/file?raw=1')).toThrow('HTTPS')
   expect(requests).toBe(0)
   expect(sockets).toHaveLength(0)

@@ -5,6 +5,7 @@ import {
   type ThreadCompletion,
   type ThreadNotificationConfig,
 } from '../shared/notifications'
+import { deviceAuthHeaders } from '../shared/deviceProof'
 
 const POLL_INTERVAL_MS = 15_000
 const REQUEST_TIMEOUT_MS = 10_000
@@ -13,7 +14,8 @@ type EnabledConfig = Extract<ThreadNotificationConfig, { enabled: true }>
 
 export function createThreadCompletionMonitor(
   onCompletion: (completion: ThreadCompletion) => void,
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch,
+  proof: (method: string, url: string, token: string) => Promise<string>,
 ) {
   let config: EnabledConfig | null = null
   let history: Map<string, number> | null = null
@@ -28,9 +30,10 @@ export function createThreadCompletionMonitor(
     const controller = new AbortController()
     request = controller
     try {
-      const response = await fetcher(`${requestConfig.baseUrl}/v1/feed/completions`, {
+      const url = `${requestConfig.baseUrl}/v1/feed/completions`
+      const response = await fetcher(url, {
         headers: requestConfig.token
-          ? { Authorization: `Bearer ${requestConfig.token}` }
+          ? deviceAuthHeaders(requestConfig.token, await proof('GET', url, requestConfig.token))
           : undefined,
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
       })

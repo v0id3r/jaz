@@ -23,7 +23,7 @@ func TestPairingProofIsSingleUseAndTicketsExpire(t *testing.T) {
 	if _, err := service.ApprovePairing(pairing.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Authenticate(secret, SeenInfo{}); err == nil {
+	if _, err := service.Authenticate(secret, Proof{}, SeenInfo{}); err == nil {
 		t.Fatal("pairing proof authenticated before credential exchange")
 	}
 	poll, err := service.PollPairing(pairing.ID, secret)
@@ -33,7 +33,7 @@ func TestPairingProofIsSingleUseAndTicketsExpire(t *testing.T) {
 	if _, err := service.PollPairing(pairing.ID, secret); err == nil {
 		t.Fatal("pairing proof could be redeemed twice")
 	}
-	if _, err := service.Authenticate(secret, SeenInfo{}); err == nil {
+	if _, err := service.Authenticate(secret, Proof{}, SeenInfo{}); err == nil {
 		t.Fatal("pairing proof authenticated as a device")
 	}
 	ticket, err := service.IssueResourceTicket(poll.Token)
@@ -47,7 +47,7 @@ func TestPairingProofIsSingleUseAndTicketsExpire(t *testing.T) {
 	if _, err := service.AuthenticateResourceTicket(ticket.Token); err == nil {
 		t.Fatal("expired ticket accepted")
 	}
-	if _, err := service.Authenticate(poll.Token, SeenInfo{}); err != nil {
+	if _, err := service.Authenticate(poll.Token, Proof{}, SeenInfo{}); err != nil {
 		t.Fatalf("ticket expiry invalidated the device: %v", err)
 	}
 	pairing, _, err = service.CreatePairing(testClientInfo("Other phone", "mobile", 2))
@@ -81,7 +81,7 @@ func TestEnrollmentInvitationsRequireOwnerAndExpire(t *testing.T) {
 	if _, err := service.RegisterInvited(invite, testClientInfo("Other phone", "mobile", 3)); err == nil {
 		t.Fatal("invitation reused")
 	}
-	principal, err := service.Authenticate(registered.Token, SeenInfo{})
+	principal, err := service.Authenticate(registered.Token, Proof{}, SeenInfo{})
 	if err != nil {
 		t.Fatal(err)
 	}
