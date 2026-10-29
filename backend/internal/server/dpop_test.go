@@ -1,7 +1,9 @@
 package server
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -26,7 +28,16 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	devices, err := deviceauth.NewProofMode(store, []string{"https://jaz.example"})
+	proxyKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	proxyPublic, _ := proxyKey.PublicKey.Bytes()
+	jwks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{"kid": "k", "kty": "EC", "crv": "P-256",
+			"x": base64.RawURLEncoding.EncodeToString(proxyPublic[1:33]), "y": base64.RawURLEncoding.EncodeToString(proxyPublic[33:])}}})
+	}))
+	t.Cleanup(jwks.Close)
+	devices, err := deviceauth.NewProofMode(store, []string{"https://jaz.example"}, deviceauth.ProxyConfig{
+		Header: "Teleport-Jwt-Assertion", JWKS: jwks.URL, Issuer: "teleport.example", Audience: "https://jaz.example",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +67,15 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 		}
 		return sign(signer, map[string]any{"typ": "dpop+jwt", "alg": "EdDSA", "jwk": map[string]string{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(public)}}, claims)
 	}
-	requestToken := func(grant, contentType string) (*httptest.ResponseRecorder, map[string]any) {
+	proxyJWT := func(user string) string {
+		h, _ := json.Marshal(map[string]any{"alg": "ES256", "kid": "k"})
+		c, _ := json.Marshal(map[string]any{"iss": "teleport.example", "sub": user, "aud": "https://jaz.example", "exp": time.Now().Add(time.Hour).Unix()})
+		signed := base64.RawURLEncoding.EncodeToString(h) + "." + base64.RawURLEncoding.EncodeToString(c)
+		digest := sha256.Sum256([]byte(signed))
+		r, s, _ := ecdsa.Sign(rand.Reader, proxyKey, digest[:])
+		return signed + "." + base64.RawURLEncoding.EncodeToString(append(r.FillBytes(make([]byte, 32)), s.FillBytes(make([]byte, 32))...))
+	}
+	requestToken := func(grant, contentType, user string) (*httptest.ResponseRecorder, map[string]any) {
 		form := url.Values{"grant_type": {grant}, "client_assertion_type": {deviceauth.ClientAssertionType}, "client_assertion": {sign(key,
 			map[string]any{"typ": "client-authentication+jwt", "alg": "EdDSA"},
 			map[string]any{"iss": deviceID, "sub": deviceID, "aud": "https://jaz.example", "jti": rand.Text(), "iat": time.Now().Unix(), "exp": time.Now().Add(30 * time.Second).Unix()},
@@ -64,6 +83,9 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/devices/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", contentType)
 		req.Header.Set("DPoP", proof(key, "POST", "https://jaz.example/v1/devices/token", ""))
+		if user != "" {
+			req.Header.Set("Teleport-Jwt-Assertion", proxyJWT(user))
+		}
 		res := httptest.NewRecorder()
 		srv.ServeHTTP(res, req)
 		var body map[string]any
@@ -75,13 +97,16 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 	if !strings.Contains(health.Body.String(), `"device_proof":true`) {
 		t.Fatalf("health = %s, want device_proof", health.Body)
 	}
-	if res, body := requestToken("authorization_code", "application/x-www-form-urlencoded"); res.Code != http.StatusBadRequest || body["error"] != "unsupported_grant_type" {
+	if res, body := requestToken("authorization_code", "application/x-www-form-urlencoded", "alice"); res.Code != http.StatusBadRequest || body["error"] != "unsupported_grant_type" {
 		t.Fatalf("authorization_code grant = %d %v", res.Code, body)
 	}
-	if res, body := requestToken("client_credentials", "application/json"); res.Code != http.StatusBadRequest || body["error"] != "invalid_request" {
+	if res, body := requestToken("client_credentials", "application/json", "alice"); res.Code != http.StatusBadRequest || body["error"] != "invalid_request" {
 		t.Fatalf("JSON token request = %d %v", res.Code, body)
 	}
-	res, body := requestToken("client_credentials", "application/x-www-form-urlencoded; charset=utf-8")
+	if res, body := requestToken("client_credentials", "application/x-www-form-urlencoded", ""); res.Code != http.StatusBadRequest || body["error"] != "invalid_grant" {
+		t.Fatalf("token request around the auth proxy = %d %v", res.Code, body)
+	}
+	res, body := requestToken("client_credentials", "application/x-www-form-urlencoded; charset=utf-8", "alice")
 	token, _ := body["access_token"].(string)
 	if res.Code != http.StatusOK || token == "" || body["token_type"] != "DPoP" || res.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("token response = %d %v %v", res.Code, body, res.Header())

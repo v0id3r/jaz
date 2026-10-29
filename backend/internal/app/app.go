@@ -17,6 +17,7 @@ import (
 	"github.com/wins/jaz/backend/internal/bots"
 	"github.com/wins/jaz/backend/internal/connections"
 	"github.com/wins/jaz/backend/internal/coordinator"
+	"github.com/wins/jaz/backend/internal/deviceauth"
 	"github.com/wins/jaz/backend/internal/jazagent"
 	"github.com/wins/jaz/backend/internal/loops"
 	"github.com/wins/jaz/backend/internal/managedtool"
@@ -77,6 +78,9 @@ type DevicesConfig struct {
 	// proxy; proof mode requires them, and clients may only sign for these or
 	// the origin of a direct loopback request.
 	Origins []string
+	// Proxy trusts the users an auth proxy vouches for; a proof-mode device
+	// then gets access tokens only for the user it first got them for.
+	Proxy deviceauth.ProxyConfig
 }
 
 type Release struct {

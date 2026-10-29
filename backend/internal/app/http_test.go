@@ -378,6 +378,7 @@ func TestDeviceAuthConfigNeedsOriginsForProofMode(t *testing.T) {
 		{"proof mode", DevicesConfig{RequireProof: true, Origins: []string{"https://jaz.example"}}, true, false},
 		{"proof mode without origins", DevicesConfig{RequireProof: true}, false, true},
 		{"proof mode with a bad origin", DevicesConfig{RequireProof: true, Origins: []string{"jaz.example"}}, false, true},
+		{"proxy without proof mode", DevicesConfig{Proxy: deviceauth.ProxyConfig{Header: "Teleport-Jwt-Assertion"}}, false, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			devices, err := NewDeviceAuth(nil, Config{Devices: test.devices})

@@ -30,7 +30,8 @@ type Prove = (method: string, url: string, token: string) => Promise<string>
 // Gets an access token from a proof-mode backend: the client_credentials grant
 // with a private_key_jwt assertion (RFC 7523) and a DPoP proof, both signed by
 // the device key. Fails with the OAuth error code, e.g. invalid_client for a
-// device the backend has not approved.
+// device the backend has not approved, or token_request_failed, worth a retry,
+// when the backend could not answer.
 export async function requestDeviceAccessToken(baseUrl: string, key: DeviceKey, sign: Sign): Promise<DeviceAccessToken> {
   const url = baseUrl + '/v1/devices/token'
   const now = Math.floor(Date.now() / 1000)
@@ -44,7 +45,7 @@ export async function requestDeviceAccessToken(baseUrl: string, key: DeviceKey, 
   })
   const body = await response.json().catch(() => null) as { access_token?: unknown; token_type?: unknown; expires_in?: unknown; error?: unknown } | null
   if (!response.ok || body?.token_type !== 'DPoP' || typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') {
-    throw new DeviceTokenError(typeof body?.error === 'string' ? body.error : 'token_request_failed')
+    throw new DeviceTokenError(response.status < 500 && typeof body?.error === 'string' ? body.error : 'token_request_failed')
   }
   return { token: body.access_token, expiresAt: Date.now() + body.expires_in * 1000 }
 }
