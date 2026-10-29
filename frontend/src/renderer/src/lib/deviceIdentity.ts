@@ -19,13 +19,13 @@ export type DeviceProfile = DeviceIdentity & DeviceMetadata
 const DEVICE_IDENTITY_KEY = 'jaz.deviceIdentity'
 const DEVICE_KEY_DB = 'jaz-device-key'
 
-export async function getDeviceIdentity(): Promise<DeviceIdentity> {
+export async function getDeviceIdentity(proofRequired: boolean): Promise<DeviceIdentity> {
   if (clientRuntime.getDeviceIdentity) return clientRuntime.getDeviceIdentity()
-  return getBrowserDeviceIdentity()
+  return getBrowserDeviceIdentity(proofRequired)
 }
 
-export async function getDeviceProfile(): Promise<DeviceProfile> {
-  const [identity, metadata] = await Promise.all([getDeviceIdentity(), getDeviceMetadata()])
+export async function getDeviceProfile(proofRequired: boolean): Promise<DeviceProfile> {
+  const [identity, metadata] = await Promise.all([getDeviceIdentity(proofRequired), getDeviceMetadata()])
   return { ...identity, ...metadata }
 }
 
@@ -75,9 +75,9 @@ let browserKeyPromise: Promise<BrowserKey | null> | undefined
 const P256 = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' }
 
 // A non-extractable Ed25519 key kept in IndexedDB, or P-256 where the browser
-// lacks Ed25519. Only browsers without IndexedDB or either algorithm fall back
-// to the keyless identity and send no proofs; any other failure surfaces and
-// is retried on the next call.
+// lacks Ed25519. Browsers without IndexedDB or either algorithm have none and
+// cannot use proof mode; any other failure surfaces and is retried on the
+// next call.
 function browserKey(): Promise<BrowserKey | null> {
   browserKeyPromise ??= loadBrowserKey().catch((error) => {
     browserKeyPromise = undefined
@@ -121,8 +121,10 @@ function idbRequest<T>(request: IDBRequest): Promise<T> {
   })
 }
 
-async function getBrowserDeviceIdentity(): Promise<DeviceIdentity> {
-  const key = await browserKey()
+// Proof mode needs the device key. Token mode keeps the random identity
+// browsers always registered with, which backends without proofs expect.
+async function getBrowserDeviceIdentity(proofRequired: boolean): Promise<DeviceIdentity> {
+  const key = proofRequired ? await browserKey() : null
   if (key) return key.identity
   const stored = readStoredBrowserIdentity()
   if (stored) return stored
