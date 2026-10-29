@@ -39,8 +39,9 @@ type issuedToken struct {
 
 // IssueAccessToken serves the client_credentials grant of a device that
 // authenticates with a private_key_jwt assertion and binds the token to the
-// same key with a DPoP proof (RFC 9449 §5).
-func (s *Service) IssueAccessToken(assertion string, proof Proof) (AccessToken, error) {
+// same key with a DPoP proof (RFC 9449 §5). Behind a trusted auth proxy,
+// proxyJWT must vouch for the device's user, and the token expires with it.
+func (s *Service) IssueAccessToken(assertion string, proof Proof, proxyJWT string) (AccessToken, error) {
 	if !s.requireProof {
 		return AccessToken{}, ErrUnsupportedGrant
 	}
@@ -51,11 +52,21 @@ func (s *Service) IssueAccessToken(assertion string, proof Proof) (AccessToken, 
 	if err := s.verifyProof(proof, device.PublicKey, ""); err != nil {
 		return AccessToken{}, ErrProofInvalid
 	}
+	now := s.now()
+	expiresAt := now.Add(accessTokenTTL)
+	if s.users != nil {
+		userExpiresAt, err := s.authenticateUser(device, proxyJWT)
+		if err != nil {
+			return AccessToken{}, err
+		}
+		if userExpiresAt.Before(expiresAt) {
+			expiresAt = userExpiresAt
+		}
+	}
 	token, err := newToken()
 	if err != nil {
 		return AccessToken{}, err
 	}
-	now := s.now()
 	t := &s.tokens
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -67,8 +78,8 @@ func (s *Service) IssueAccessToken(assertion string, proof Proof) (AccessToken, 
 			delete(t.issued, hash)
 		}
 	}
-	t.issued[TokenHash(token)] = issuedToken{deviceID: device.ID, expiresAt: now.Add(accessTokenTTL)}
-	return AccessToken{Token: token, ExpiresIn: int(accessTokenTTL / time.Second)}, nil
+	t.issued[TokenHash(token)] = issuedToken{deviceID: device.ID, expiresAt: expiresAt}
+	return AccessToken{Token: token, ExpiresIn: int(expiresAt.Sub(now) / time.Second)}, nil
 }
 
 // authenticateClient verifies a private_key_jwt client assertion (RFC 7523,

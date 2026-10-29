@@ -60,6 +60,11 @@ export async function readKeyAccess(url: string, deviceId: string, signal?: Abor
   return checkAccess((init) => fetchWithDeviceKey(deviceAccessToken, deviceProof, url + '/v1/auth/check', init), signal, deviceId)
 }
 
+const deviceTokenErrors: Record<string, string> = {
+  invalid_client: 'This device is not approved on this server',
+  invalid_grant: 'Sign in through the auth proxy as the user this device belongs to',
+}
+
 async function checkAccess(send: (init: RequestInit & { headers: Record<string, string> }) => Promise<Response>, signal?: AbortSignal, expectedDeviceId?: string): Promise<Access> {
   try {
     const response = await send({
@@ -83,7 +88,7 @@ async function checkAccess(send: (init: RequestInit & { headers: Record<string, 
     }
   } catch (error) {
     if (error instanceof DeviceTokenError) {
-      return { ok: false, error: error.code === 'invalid_client' ? 'This device is not approved on this server' : 'Could not get a device access token', recoverable: error.code === 'token_request_failed', code: error.code }
+      return { ok: false, error: deviceTokenErrors[error.code] ?? 'Could not get a device access token', recoverable: error.code === 'token_request_failed', code: error.code }
     }
     return { ok: false, error: 'Backend auth check failed', recoverable: true }
   }

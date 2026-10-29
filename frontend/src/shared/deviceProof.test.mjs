@@ -60,6 +60,9 @@ test('a device asks for an access token with a client assertion and a proof by i
     const failure = await requestDeviceAccessToken('https://jaz.example', { device_id: 'device', public_key: publicKey }, sign).catch((error) => error)
     expect(failure).toBeInstanceOf(DeviceTokenError)
     expect(failure.code).toBe('invalid_client')
+    globalThis.fetch = async () => Response.json({ error: 'auth proxy JWKS: connection refused' }, { status: 500 })
+    const outage = await requestDeviceAccessToken('https://jaz.example', { device_id: 'device', public_key: publicKey }, sign).catch((error) => error)
+    expect(outage.code).toBe('token_request_failed')
   } finally {
     globalThis.fetch = original
   }

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ type Store interface {
 	LoadDeviceByTokenHash(string) (storage.Device, error)
 	SaveApprovedDevice(storage.SaveApprovedDevice) (storage.Device, error)
 	UpdateDeviceSeen(id, ip, userAgent string, at time.Time) error
+	BindDeviceUser(id, user string) (bool, error)
 	RevokeDevice(id string, at time.Time) (storage.Device, error)
 	CreateDevicePairing(storage.CreateDevicePairing) (storage.DevicePairing, error)
 	LoadDevicePairing(id string) (storage.DevicePairing, string, error)
@@ -56,7 +58,11 @@ type Service struct {
 	access  access
 	proofs  spentProofs
 	tokens  accessTokens
-	now     func() time.Time
+	// users verifies the auth proxy JWT sent in proxyHeader, naming whom
+	// access tokens are issued to; nil without a trusted proxy.
+	users       *jwtIssuer
+	proxyHeader string
+	now         func() time.Time
 }
 
 type SeenInfo struct {
@@ -113,21 +119,36 @@ func New(store Store) *Service {
 // NewProofMode returns a Service whose devices prove possession of their key
 // with a DPoP proof on every request and remote registration, and hold no
 // long-lived token but access tokens from IssueAccessToken. origins are the
-// origins clients reach this server on.
-func NewProofMode(store Store, origins []string) (*Service, error) {
+// origins clients reach this server on; a non-zero proxy issues those tokens
+// only to the users it vouches for.
+func NewProofMode(store Store, origins []string, proxy ProxyConfig) (*Service, error) {
 	if len(origins) == 0 {
-		return nil, errors.New("proof mode needs the origins clients reach this server on")
+		return nil, errors.New("origins: proof mode needs the origins clients reach this server on")
 	}
 	s := New(store)
 	s.requireProof = true
 	for _, raw := range origins {
 		origin := normalizeOrigin(strings.TrimSpace(raw))
 		if origin == "" {
-			return nil, fmt.Errorf("%q is not an http(s) origin", raw)
+			return nil, fmt.Errorf("origins: %q is not an http(s) origin", raw)
 		}
 		s.origins = append(s.origins, origin)
 	}
+	proxy = ProxyConfig{Header: strings.TrimSpace(proxy.Header), JWKS: strings.TrimSpace(proxy.JWKS), Issuer: strings.TrimSpace(proxy.Issuer), Audience: strings.TrimSpace(proxy.Audience)}
+	if proxy == (ProxyConfig{}) {
+		return s, nil
+	}
+	if proxy.Header == "" || proxy.JWKS == "" || proxy.Issuer == "" || proxy.Audience == "" {
+		return nil, errors.New("proxy: needs header, jwks, issuer and audience")
+	}
+	s.proxyHeader = proxy.Header
+	s.users = &jwtIssuer{jwks: proxy.JWKS, issuer: proxy.Issuer, audience: proxy.Audience, client: &http.Client{Timeout: 10 * time.Second}}
 	return s, nil
+}
+
+// ProxyHeader names the request header a trusted auth proxy sends its JWT in.
+func (s *Service) ProxyHeader() string {
+	return s.proxyHeader
 }
 
 func (s *Service) RequireProof() bool {

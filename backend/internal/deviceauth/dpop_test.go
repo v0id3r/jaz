@@ -23,7 +23,7 @@ const testOrigin = "https://jaz.example"
 func TestDeviceProofBindsAccessTokensToTheDeviceKey(t *testing.T) {
 	for _, alg := range []string{"EdDSA", "ES256"} {
 		t.Run(alg, func(t *testing.T) {
-			service, now := newProofService(t)
+			service, now := newProofService(t, ProxyConfig{})
 			key, stranger := newTestKey(t, alg), newTestKey(t, alg)
 			registered, err := service.RegisterApproved(key.registration("Laptop"))
 			if err != nil || registered.Token != "" {
@@ -90,7 +90,7 @@ func withPrivate(jwk map[string]string) map[string]string {
 }
 
 func TestSpentProofsOutliveTheirAcceptanceWindow(t *testing.T) {
-	service, now := newProofService(t)
+	service, now := newProofService(t, ProxyConfig{})
 	key := newTestKey(t, "EdDSA")
 	if _, err := service.RegisterApproved(key.registration("Laptop")); err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func TestSpentProofsOutliveTheirAcceptanceWindow(t *testing.T) {
 }
 
 func TestRemoteRegistrationProvesTheDeviceKey(t *testing.T) {
-	service, now := newProofService(t)
+	service, now := newProofService(t, ProxyConfig{})
 	if _, err := service.RegisterApproved(newTestKey(t, "EdDSA").registration("Laptop")); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestRemoteRegistrationProvesTheDeviceKey(t *testing.T) {
 }
 
 func TestAccessTokensRequireTheDeviceClientAssertion(t *testing.T) {
-	service, now := newProofService(t)
+	service, now := newProofService(t, ProxyConfig{})
 	key, stranger, unpaired, revoked := newTestKey(t, "EdDSA"), newTestKey(t, "ES256"), newTestKey(t, "EdDSA"), newTestKey(t, "ES256")
 	for _, k := range []testKey{key, revoked} {
 		if _, err := service.RegisterApproved(k.registration("Laptop")); err != nil {
@@ -186,14 +186,14 @@ func TestAccessTokensRequireTheDeviceClientAssertion(t *testing.T) {
 			if proof == "" {
 				proof = tokenProof(test.key, now())
 			}
-			_, err := service.IssueAccessToken(test.assertion, Proof{JWT: proof, Method: "POST", Path: "/v1/devices/token"})
+			_, err := service.IssueAccessToken(test.assertion, Proof{JWT: proof, Method: "POST", Path: "/v1/devices/token"}, "")
 			if !errors.Is(err, test.want) || (test.want == nil && err != nil) {
 				t.Fatalf("IssueAccessToken() error = %v, want %v", err, test.want)
 			}
 		})
 	}
 	tokenMode := New(service.store)
-	if _, err := tokenMode.IssueAccessToken(assertion(key, claims(key, nil)), Proof{}); !errors.Is(err, ErrUnsupportedGrant) {
+	if _, err := tokenMode.IssueAccessToken(assertion(key, claims(key, nil)), Proof{}, ""); !errors.Is(err, ErrUnsupportedGrant) {
 		t.Fatalf("IssueAccessToken() without proof mode = %v", err)
 	}
 }
@@ -220,18 +220,18 @@ func TestProofOriginsAreConfiguredOrTheLocalRequestOrigin(t *testing.T) {
 	}
 }
 
-func newProofService(t *testing.T) (*Service, func() time.Time) {
+func newProofService(t *testing.T, proxy ProxyConfig) (*Service, func() time.Time) {
 	t.Helper()
 	store, err := sqlite.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := NewProofMode(store, []string{testOrigin})
+	service, err := NewProofMode(store, []string{testOrigin}, proxy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now().UTC()
+	start := time.Now().UTC().Truncate(time.Second)
 	now := func() time.Time { return start }
 	service.now = now
 	return service, now
@@ -297,7 +297,7 @@ func issueToken(t *testing.T, service *Service, k testKey) string {
 	assertion := signJWS(k, map[string]any{"typ": "client-authentication+jwt", "alg": k.alg}, map[string]any{
 		"iss": k.id, "sub": k.id, "aud": testOrigin, "jti": rand.Text(), "iat": service.now().Unix(), "exp": service.now().Add(30 * time.Second).Unix(),
 	})
-	token, err := service.IssueAccessToken(assertion, Proof{JWT: tokenProof(k, service.now()), Method: "POST", Path: "/v1/devices/token"})
+	token, err := service.IssueAccessToken(assertion, Proof{JWT: tokenProof(k, service.now()), Method: "POST", Path: "/v1/devices/token"}, "")
 	if err != nil || token.Token == "" || token.ExpiresIn != int(accessTokenTTL/time.Second) {
 		t.Fatalf("IssueAccessToken() = %+v, %v", token, err)
 	}
@@ -305,12 +305,12 @@ func issueToken(t *testing.T, service *Service, k testKey) string {
 }
 
 func TestProofModeNormalizesItsOrigins(t *testing.T) {
-	service, err := NewProofMode(nil, []string{" https://Jaz.example:443 ", "http://10.0.0.5:5299", "wss://[::1]:443"})
+	service, err := NewProofMode(nil, []string{" https://Jaz.example:443 ", "http://10.0.0.5:5299", "wss://[::1]:443"}, ProxyConfig{})
 	if err != nil || !slices.Equal(service.origins, []string{"https://jaz.example", "http://10.0.0.5:5299", "https://[::1]"}) {
 		t.Fatalf("NewProofMode() = %v, %v", service, err)
 	}
 	for _, origins := range [][]string{nil, {"jaz.example"}, {"ftp://jaz.example"}} {
-		if _, err := NewProofMode(nil, origins); err == nil {
+		if _, err := NewProofMode(nil, origins, ProxyConfig{}); err == nil {
 			t.Errorf("NewProofMode(%q) accepted", origins)
 		}
 	}
