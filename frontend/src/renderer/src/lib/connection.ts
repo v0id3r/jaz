@@ -173,7 +173,7 @@ function readCandidateAccess(value: Attempt, candidate: Candidate): Promise<Acce
 // In proof mode the device key is the credential, so nothing is saved and a
 // token kept from token mode is dropped.
 async function connectWithKey(value: Attempt, remembered: boolean): Promise<Access> {
-  const access = await readKeyAccess(value.url, (await getDeviceIdentity()).device_id, value.controller.signal)
+  const access = await readKeyAccess(value.url, (await getDeviceIdentity(true)).device_id, value.controller.signal)
   if (access.ok && current(value)) {
     forgetApiAuthToken(value.url)
     activate(value, { url: value.url, token: '', deviceId: access.deviceId, ticket: access.ticket, remembered })
@@ -239,7 +239,7 @@ async function keyProof(url: string, proofRequired: boolean): Promise<Record<str
 }
 
 async function register(value: Attempt, credential: string, proofRequired: boolean): Promise<string | null> {
-  const profile = await getDeviceProfile()
+  const profile = await getDeviceProfile(proofRequired)
   if (!current(value)) {
     return null
   }
@@ -256,11 +256,11 @@ async function register(value: Attempt, credential: string, proofRequired: boole
   if (!current(value)) {
     return null
   }
-  if (response.status === 200 && (body?.token || body?.device)) {
-    return verify(value, { url: value.url, token: body.token ?? '', deviceId: profile.device_id, remembered: false })
+  if (response.status === 200 && (proofRequired ? body?.device : body?.token)) {
+    return verify(value, { url: value.url, token: body?.token ?? '', deviceId: profile.device_id, remembered: false })
   }
   if (response.status === 202 && body?.pairing && body.pairing_secret) {
-    pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id)
+    pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id, proofRequired)
     return null
   }
   const error = body?.error || 'Device registration failed'
@@ -268,7 +268,7 @@ async function register(value: Attempt, credential: string, proofRequired: boole
   return error
 }
 
-function pending(value: Attempt, pairing: PendingPairing, deviceId: string): void {
+function pending(value: Attempt, pairing: PendingPairing, deviceId: string, proofRequired: boolean): void {
   if (!current(value)) {
     return
   }
@@ -286,7 +286,7 @@ function pending(value: Attempt, pairing: PendingPairing, deviceId: string): voi
       if (!current(value)) {
         return
       }
-      if (response.ok && body?.pairing?.status === 'approved') {
+      if (response.ok && body?.pairing?.status === 'approved' && (proofRequired || body.token)) {
         await verify(value, { url: value.url, token: body.token ?? '', deviceId, remembered: false })
         return
       }
@@ -305,7 +305,7 @@ function pending(value: Attempt, pairing: PendingPairing, deviceId: string): voi
 }
 
 async function pair(value: Attempt, proofRequired: boolean): Promise<string | null> {
-  const profile = await getDeviceProfile()
+  const profile = await getDeviceProfile(proofRequired)
   if (!current(value)) {
     return null
   }
@@ -326,7 +326,7 @@ async function pair(value: Attempt, proofRequired: boolean): Promise<string | nu
     block(error)
     return error
   }
-  pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id)
+  pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id, proofRequired)
   return null
 }
 

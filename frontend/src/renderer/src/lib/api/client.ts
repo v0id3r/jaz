@@ -156,6 +156,13 @@ export async function apiWebSocket(path: string): Promise<WebSocket> {
   const socket = new WebSocket(url, token ? ['jaz', `jaz-auth.${token}`, ...(proof ? [`jaz-dpop.${proof}`] : [])] : [])
   const unsubscribe = onApiSessionChange(() => socket.close())
   socket.addEventListener('close', unsubscribe, { once: true })
+  if (keyed) {
+    // Browsers hide why a handshake failed. A request replaces the token if
+    // the backend forgot it, so the next handshake can succeed.
+    let opened = false
+    socket.addEventListener('open', () => { opened = true }, { once: true })
+    socket.addEventListener('close', () => { if (!opened) void apiFetch('/v1/auth/check').catch(() => {}) }, { once: true })
+  }
   return socket
 }
 
