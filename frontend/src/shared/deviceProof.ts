@@ -1,5 +1,6 @@
 // A DPoP proof (RFC 9449) that the device key signed this one request. The
 // server matches htu by path, so the origin a proxy rewrites does not matter.
+// publicKey is the raw key: 32 bytes of Ed25519 or a 65-byte P-256 point.
 export async function buildDeviceProof(
   publicKey: string,
   sign: (input: Uint8Array) => Promise<Uint8Array>,
@@ -8,7 +9,10 @@ export async function buildDeviceProof(
   token?: string,
 ): Promise<string> {
   const target = new URL(url)
-  const header = { typ: 'dpop+jwt', alg: 'EdDSA', jwk: { kty: 'OKP', crv: 'Ed25519', x: publicKey } }
+  const raw = Uint8Array.from(atob(publicKey.replaceAll('-', '+').replaceAll('_', '/')), (c) => c.charCodeAt(0))
+  const header = raw.length === 65
+    ? { typ: 'dpop+jwt', alg: 'ES256', jwk: { kty: 'EC', crv: 'P-256', x: base64Url(raw.subarray(1, 33)), y: base64Url(raw.subarray(33)) } }
+    : { typ: 'dpop+jwt', alg: 'EdDSA', jwk: { kty: 'OKP', crv: 'Ed25519', x: publicKey } }
   const claims = {
     jti: crypto.randomUUID(),
     htm: method.toUpperCase(),

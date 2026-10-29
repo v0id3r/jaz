@@ -45,16 +45,20 @@ async function getDeviceMetadata(): Promise<DeviceMetadata> {
 export async function deviceProof(method: string, url: string, token?: string): Promise<string> {
   if (clientRuntime.deviceProof) return clientRuntime.deviceProof(method, url, token)
   const key = await browserKey()
-  return key ? buildDeviceProof(key.identity.public_key, async (input) => new Uint8Array(await crypto.subtle.sign('Ed25519', key.privateKey, input as BufferSource)), method, url, token) : ''
+  const algorithm = key?.privateKey.algorithm.name === 'ECDSA' ? P256 : 'Ed25519'
+  return key ? buildDeviceProof(key.identity.public_key, async (input) => new Uint8Array(await crypto.subtle.sign(algorithm, key.privateKey, input as BufferSource)), method, url, token) : ''
 }
 
 type BrowserKey = { identity: DeviceIdentity; privateKey: CryptoKey }
 
 let browserKeyPromise: Promise<BrowserKey | null> | undefined
 
-// A non-extractable Ed25519 key kept in IndexedDB. Only browsers that lack
-// IndexedDB or Ed25519 fall back to the keyless identity and send no proofs;
-// any other failure surfaces and is retried on the next call.
+const P256 = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' }
+
+// A non-extractable Ed25519 key kept in IndexedDB, or P-256 where the browser
+// lacks Ed25519. Only browsers without IndexedDB or either algorithm fall back
+// to the keyless identity and send no proofs; any other failure surfaces and
+// is retried on the next call.
 function browserKey(): Promise<BrowserKey | null> {
   browserKeyPromise ??= loadBrowserKey().catch((error) => {
     browserKeyPromise = undefined
@@ -75,8 +79,7 @@ async function loadBrowserKey(): Promise<BrowserKey | null> {
   const read = () => idbRequest<CryptoKeyPair | undefined>(keys('readonly').get('device'))
   let pair = await read()
   if (!pair) {
-    const created = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])
-      .catch((error: unknown) => (error as DOMException)?.name === 'NotSupportedError' ? null : Promise.reject(error)) as CryptoKeyPair | null
+    const created = await generateDeviceKey({ name: 'Ed25519' }) ?? await generateDeviceKey(P256)
     if (!created) return null
     // add() fails when another tab stored its key first; every tab then uses that one.
     await idbRequest(keys('readwrite').add(created, 'device')).catch(() => {})
@@ -85,6 +88,11 @@ async function loadBrowserKey(): Promise<BrowserKey | null> {
   if (!pair) throw new Error('Could not store the device key')
   const raw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey))
   return { identity: { device_id: await sha256Hex(raw), public_key: base64Url(raw) }, privateKey: pair.privateKey }
+}
+
+function generateDeviceKey(algorithm: AlgorithmIdentifier | EcKeyGenParams): Promise<CryptoKeyPair | null> {
+  return (crypto.subtle.generateKey(algorithm, false, ['sign', 'verify']) as Promise<CryptoKeyPair>)
+    .catch((error: unknown) => (error as DOMException)?.name === 'NotSupportedError' ? null : Promise.reject(error))
 }
 
 function idbRequest<T>(request: IDBRequest): Promise<T> {

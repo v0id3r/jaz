@@ -17,3 +17,13 @@ test('a device proof is a JWS of the request signed by the device key and bound 
   expect(registration.ath).toBeUndefined()
   expect(registration.jti).not.toBe(decode(claims).jti)
 })
+
+test('a P-256 device key signs ES256 proofs with its point as the JWK', async () => {
+  const ecdsa = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' }
+  const pair = await crypto.subtle.generateKey(ecdsa, false, ['sign', 'verify'])
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey))
+  const sign = async (input) => new Uint8Array(await crypto.subtle.sign(ecdsa, pair.privateKey, input))
+  const [header, claims, signature] = (await buildDeviceProof(base64Url(raw), sign, 'GET', 'https://jaz.example/v1/sessions', 'jaz_token')).split('.')
+  expect(decode(header)).toEqual({ typ: 'dpop+jwt', alg: 'ES256', jwk: { kty: 'EC', crv: 'P-256', x: base64Url(raw.subarray(1, 33)), y: base64Url(raw.subarray(33)) } })
+  expect(await crypto.subtle.verify(ecdsa, pair.publicKey, Buffer.from(signature, 'base64url'), new TextEncoder().encode(header + '.' + claims))).toBe(true)
+})
