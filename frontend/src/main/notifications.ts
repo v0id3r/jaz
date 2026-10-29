@@ -6,11 +6,7 @@ import { threadNotificationPath, type ThreadCompletion } from '../shared/notific
 import { createThreadCompletionMonitor } from './notificationMonitor'
 import { logMain } from '@main/diagnostics'
 
-export function createThreadNotificationMonitor(
-  openInMain: (path: string) => void,
-  proof: (method: string, url: string, token: string) => Promise<string>,
-  credential: (baseUrl: string, token: string, rejected?: string) => Promise<string>,
-) {
+export function createThreadNotificationMonitor(openInMain: (path: string) => void, fetcher: typeof fetch) {
   return createThreadCompletionMonitor((completion: ThreadCompletion) => {
     if (BrowserWindow.getFocusedWindow() || !Notification.isSupported()) return
     const notification = new Notification({
@@ -20,7 +16,7 @@ export function createThreadNotificationMonitor(
     })
     notification.on('click', () => openInMain(threadNotificationPath(completion.id)))
     notification.show()
-  }, fetch, proof, credential)
+  }, fetcher)
 }
 
 // Resolves whether macOS showed a test notification. Until the user answers

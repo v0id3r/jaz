@@ -170,8 +170,8 @@ function readCandidateAccess(value: Attempt, candidate: Candidate): Promise<Acce
     : readAccess(value.url, candidate.token, value.controller.signal, candidate.deviceId || undefined)
 }
 
-// Proof mode keeps no saved credential. Refusals that only mean the backend
-// does not take this key here fall back to a saved token or pairing.
+// In proof mode the device key is the credential, so nothing is saved and a
+// token kept from token mode is dropped.
 async function connectWithKey(value: Attempt, remembered: boolean): Promise<Access> {
   const access = await readKeyAccess(value.url, (await getDeviceIdentity()).device_id, value.controller.signal)
   if (access.ok && current(value)) {
@@ -233,18 +233,17 @@ async function serialized<T>(value: Attempt, issue: () => Promise<T>): Promise<T
   return next
 }
 
-// Registration proves the device holds the key it registers; it has no token yet.
-async function keyProof(url: string): Promise<Record<string, string>> {
-  const proof = await deviceProof('POST', url)
-  return proof ? { DPoP: proof } : {}
+// In proof mode registration proves the device holds the key it registers.
+async function keyProof(url: string, proofRequired: boolean): Promise<Record<string, string>> {
+  return proofRequired ? { DPoP: await deviceProof('POST', url) } : {}
 }
 
-async function register(value: Attempt, credential: string): Promise<string | null> {
+async function register(value: Attempt, credential: string, proofRequired: boolean): Promise<string | null> {
   const profile = await getDeviceProfile()
   if (!current(value)) {
     return null
   }
-  const proof = await keyProof(value.url + '/v1/devices/register')
+  const proof = await keyProof(value.url + '/v1/devices/register', proofRequired)
   const response = await serialized(value, () => fetch(value.url + '/v1/devices/register', {
     method: 'POST', redirect: 'error',
     headers: { Authorization: `Bearer ${credential}`, ...proof, 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
@@ -305,12 +304,12 @@ function pending(value: Attempt, pairing: PendingPairing, deviceId: string): voi
   pairingTimer = setTimeout(() => void poll(), 2000)
 }
 
-async function pair(value: Attempt): Promise<string | null> {
+async function pair(value: Attempt, proofRequired: boolean): Promise<string | null> {
   const profile = await getDeviceProfile()
   if (!current(value)) {
     return null
   }
-  const proof = await keyProof(value.url + '/v1/devices/pairing-requests')
+  const proof = await keyProof(value.url + '/v1/devices/pairing-requests', proofRequired)
   if (!current(value)) {
     return null
   }
@@ -342,9 +341,6 @@ export async function connectRemote(input: string): Promise<string | null> {
   const value = begin(url)
   clearConnectionPreference()
   try {
-    if (parsed.key.startsWith('invite_')) {
-      return await register(value, parsed.key)
-    }
     const health = await readHealth(url, value.controller.signal)
     if (!current(value)) {
       return null
@@ -353,36 +349,42 @@ export async function connectRemote(input: string): Promise<string | null> {
       block(health.error)
       return health.error
     }
+    if (health.proofRequired) {
+      const access = await connectWithKey(value, remembered)
+      if (!current(value) || access.ok) {
+        return null
+      }
+      if (access.code === 'invalid_client') {
+        return parsed.key ? await register(value, parsed.key, true) : await pair(value, true)
+      }
+      block(access.error)
+      return access.error
+    }
+    if (parsed.key.startsWith('invite_')) {
+      return await register(value, parsed.key, false)
+    }
     if (!health.authRequired) {
       activate(value, { url, token: '', deviceId: '', remembered: false })
       return null
     }
     let token = parsed.key || cached
     if (!token) {
-      const keyed = await connectWithKey(value, remembered)
-      if (!current(value) || keyed.ok) {
-        return null
-      }
-      if (keyed.recoverable) {
-        block(keyed.error)
-        return keyed.error
-      }
       token = restoreApiAuthToken(url)
       remembered = Boolean(token)
     }
     if (!token) {
-      return await pair(value)
+      return await pair(value, false)
     }
     const access = await readAccess(url, token, value.controller.signal)
     if (!current(value)) {
       return null
     }
     if (access.ok && access.kind === 'root') {
-      return await register(value, token)
+      return await register(value, token, false)
     }
     if (!access.ok) {
       if (access.code === 'device_approval_required' && parsed.key) {
-        return await register(value, token)
+        return await register(value, token, false)
       }
       block(access.error)
       return access.error
@@ -573,15 +575,18 @@ async function restore(url: string): Promise<void> {
       activate(value, { url, token: '', deviceId: '', remembered: false })
       return
     }
-    if (token === undefined) {
-      const keyed = await connectWithKey(value, true)
-      if (!current(value) || keyed.ok) {
+    if (health.proofRequired) {
+      const access = await connectWithKey(value, true)
+      if (!current(value) || access.ok) {
         return
       }
-      if (keyed.recoverable) {
+      if (access.recoverable) {
         pollTimer = setTimeout(() => void retry(), 5000)
-        return
       }
+      else {
+        block(access.code === 'invalid_client' ? 'Connect again with an authorized link or request approval' : access.error)
+      }
+      return
     }
     try {
       token ??= restoreApiAuthToken(url)
