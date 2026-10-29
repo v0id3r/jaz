@@ -38,9 +38,11 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			return
 		}
 		var deviceErr error
+		var deviceToken string
 		if s.Devices != nil {
+			deviceToken = s.deviceToken(r)
 			info := httpapi.RequestInfoFrom(r)
-			principal, err := s.Devices.Authenticate(s.deviceToken(r), devicesapi.RequestProof(r), deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
+			principal, err := s.Devices.Authenticate(deviceToken, devicesapi.RequestProof(r), deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
 			if err == nil {
 				s.serveDevice(w, r, principal, next)
 				return
@@ -71,16 +73,20 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			s.writeUnauthorized(w, "invalid_token", "invalid_token", deviceErr)
 			return
 		}
-		s.writeUnauthorized(w, "unauthorized", map[bool]string{true: "invalid_token"}[token != ""], fmt.Errorf("missing or invalid backend API key"))
+		challengeError := ""
+		if token != "" || deviceToken != "" {
+			challengeError = "invalid_token"
+		}
+		s.writeUnauthorized(w, "unauthorized", challengeError, fmt.Errorf("missing or invalid backend API key"))
 	})
 }
 
 // deviceToken is the credential offered for device auth. In proof mode it is
 // a DPoP-bound access token, which must not be accepted as a bearer token
-// (RFC 9449 §7.2).
+// (RFC 9449 §7.2), nor a bearer token as one.
 func (s *Server) deviceToken(r *http.Request) string {
-	if scheme, _, _ := strings.Cut(r.Header.Get("Authorization"), " "); s.Devices.RequireProof && strings.EqualFold(scheme, "Bearer") {
-		return ""
+	if s.Devices.RequireProof {
+		return requestCredential(r, "DPoP")
 	}
 	return requestAuthKey(r)
 }
@@ -168,7 +174,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 		"device_id": principal.DeviceID,
 	}
 	if principal.Kind == deviceauth.PrincipalDevice {
-		ticket, err := s.Devices.IssueResourceTicket(requestAuthKey(r))
+		ticket, err := s.Devices.IssueResourceTicket(s.deviceToken(r))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -179,8 +185,14 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func requestAuthKey(r *http.Request) string {
-	if token := bearerToken(r.Header.Get("Authorization")); token != "" {
-		return token
+	return requestCredential(r, "Bearer")
+}
+
+// requestCredential reads a credential presented under scheme, or as the
+// subprotocol a browser WebSocket handshake carries it in.
+func requestCredential(r *http.Request, scheme string) string {
+	if fields := strings.Fields(r.Header.Get("Authorization")); len(fields) == 2 && strings.EqualFold(fields[0], scheme) {
+		return fields[1]
 	}
 	return httpapi.WebSocketProtocol(r, "jaz-auth.")
 }
@@ -203,14 +215,6 @@ func queryAuthAllowed(r *http.Request) bool {
 	return action == "events" ||
 		strings.HasPrefix(action, "attachments/") ||
 		(action == "file" && rawSessionFileRequested(r))
-}
-
-func bearerToken(header string) string {
-	fields := strings.Fields(header)
-	if len(fields) == 2 && (strings.EqualFold(fields[0], "Bearer") || strings.EqualFold(fields[0], "DPoP")) {
-		return fields[1]
-	}
-	return ""
 }
 
 func internalMCPRequest(r *http.Request) bool {

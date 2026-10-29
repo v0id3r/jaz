@@ -160,11 +160,6 @@ func keyVerifier(alg string, raw []byte) func(signed, sig []byte) bool {
 	return nil
 }
 
-func validP256(raw []byte) bool {
-	_, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
-	return err == nil
-}
-
 func decodeSegment(segment string, out any) error {
 	raw, err := base64.RawURLEncoding.DecodeString(segment)
 	if err != nil {

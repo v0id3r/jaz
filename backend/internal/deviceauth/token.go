@@ -93,12 +93,15 @@ func (s *Service) authenticateClient(assertion string, proof Proof) (storage.Dev
 		return storage.Device{}, ErrInvalidClient
 	}
 	device, err := s.store.LoadDevice(claims.Sub)
-	if err != nil || device.Status != storage.DeviceStatusApproved {
+	if errors.Is(err, storage.ErrDeviceNotFound) {
 		return storage.Device{}, ErrInvalidClient
+	}
+	if err != nil {
+		return storage.Device{}, err
 	}
 	raw, _ := base64.RawURLEncoding.DecodeString(device.PublicKey)
 	verify := keyVerifier(header.Alg, raw)
-	if verify == nil || !verify(jws.signed, jws.sig) || s.spendProof("client:"+claims.JTI) != nil {
+	if device.Status != storage.DeviceStatusApproved || verify == nil || !verify(jws.signed, jws.sig) || s.spendProof("client:"+claims.JTI) != nil {
 		return storage.Device{}, ErrInvalidClient
 	}
 	return device, nil

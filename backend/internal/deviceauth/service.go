@@ -52,7 +52,8 @@ type Service struct {
 	// device tokens with access tokens from IssueAccessToken.
 	RequireProof bool
 	// Origins are the normalized origins clients reach this server on; proofs
-	// and client assertions must name one of them.
+	// and client assertions must name one of them or, on a direct loopback
+	// request, its own origin.
 	Origins []string
 	store   Store
 	access  access
@@ -376,7 +377,7 @@ func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
 
 func normalizeDeviceIdentity(publicKey, deviceID string) (string, string, error) {
 	raw, err := decodeRawPublicKey(publicKey)
-	if err != nil || len(raw) != 32 && !validP256(raw) {
+	if err != nil || keyVerifier("EdDSA", raw) == nil && keyVerifier("ES256", raw) == nil {
 		return "", "", ErrInvalidIdentity
 	}
 	sum := sha256.Sum256(raw)
