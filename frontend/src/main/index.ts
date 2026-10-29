@@ -58,7 +58,7 @@ installBrowserPasswords()
 let mainWindow: BrowserWindow | null = null
 const updates = createUpdateController(() => mainWindow)
 const previewURLTargets = new Set<number>()
-const threadNotifications = createThreadNotificationMonitor(openInMain)
+const threadNotifications = createThreadNotificationMonitor(openInMain, deviceProof)
 const connectionSession = createConnectionSession({
   rendererPath: join(__dirname, '../renderer/index.html'),
   startLocal: startLocalBackend,
