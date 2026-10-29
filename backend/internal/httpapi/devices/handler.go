@@ -288,7 +288,8 @@ func inputFromRequest(r *http.Request) (deviceauth.Registration, error) {
 			Model:      strings.TrimSpace(r.Header.Get("X-Jaz-Device-Model")),
 			AppVersion: strings.TrimSpace(r.Header.Get("X-Jaz-App-Version")),
 		},
-		Seen: deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent},
+		Seen:  deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent},
+		Proof: deviceauth.Proof{JWT: r.Header.Get(deviceauth.ProofHeader), Method: r.Method, Path: r.URL.Path},
 	}
 	if r.Body == nil {
 		return reg, nil
@@ -345,7 +346,7 @@ func writeDeviceAuthError(w http.ResponseWriter, err error) {
 		httpapi.WriteError(w, http.StatusForbidden, err)
 		return
 	}
-	if errors.Is(err, deviceauth.ErrUnauthorized) {
+	if errors.Is(err, deviceauth.ErrUnauthorized) || errors.Is(err, deviceauth.ErrProofInvalid) {
 		httpapi.WriteError(w, http.StatusUnauthorized, err)
 		return
 	}

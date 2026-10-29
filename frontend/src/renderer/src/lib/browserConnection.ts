@@ -3,11 +3,19 @@ import type { BrowserCommand } from '@shared/browserControl'
 
 export function connectBrowser(path: string, execute: (request: BrowserCommand) => unknown, cancel: () => void = () => {}): () => void {
   let stopped = false
-  let socket: WebSocket
+  let socket: WebSocket | undefined
   let retry: ReturnType<typeof setTimeout>
-  const connect = () => {
-    socket = apiWebSocket(path)
-    const current = socket
+  const connect = async () => {
+    const current = await apiWebSocket(path).catch(() => null)
+    if (stopped) {
+      current?.close()
+      return
+    }
+    if (!current) {
+      retry = setTimeout(connect, 2000)
+      return
+    }
+    socket = current
     current.onmessage = async (event) => {
       if (stopped) return
       let request: BrowserCommand & { id: number }
@@ -34,11 +42,11 @@ export function connectBrowser(path: string, execute: (request: BrowserCommand) 
       retry = setTimeout(connect, 2000)
     }
   }
-  connect()
+  void connect()
   return () => {
     stopped = true
     clearTimeout(retry)
-    socket.close()
+    socket?.close()
     cancel()
   }
 }

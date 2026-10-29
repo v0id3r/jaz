@@ -72,6 +72,7 @@ type Config struct {
 
 type DevicesConfig struct {
 	DisablePairing bool
+	RequireProof   bool
 }
 
 type Release struct {

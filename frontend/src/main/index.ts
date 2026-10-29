@@ -19,7 +19,7 @@ import { attachBrowserNavigationCommands, attachBrowserNavigationShortcuts } fro
 import { attachWindowOpenHandler } from '@main/browserPopups'
 import { attachWindowLifecycle, installMainDiagnostics } from './diagnostics'
 import { installCredentialEncryption } from './credentialEncryption'
-import { getDeviceIdentity, getDeviceMetadata } from './deviceIdentity'
+import { deviceProof, getDeviceIdentity, getDeviceMetadata } from './deviceIdentity'
 import { registerDictation } from './dictation'
 import { configureAppPermissions } from './permissions'
 import { createThreadNotificationMonitor } from './notifications'
@@ -63,6 +63,7 @@ const connectionSession = createConnectionSession({
   rendererPath: join(__dirname, '../renderer/index.html'),
   startLocal: startLocalBackend,
   profile: () => ({ ...getDeviceIdentity(), ...getDeviceMetadata() }),
+  proof: deviceProof,
   stopConsumers: () => threadNotifications.stop(),
 })
 
@@ -386,6 +387,10 @@ app.whenReady().then(() => {
     })
   })
   ipcMain.handle('jaz:get-device-identity', () => getDeviceIdentity())
+  ipcMain.handle('jaz:device-proof', (event, method: string, url: string, token?: string) => {
+    connectionSession.authorize(event)
+    return deviceProof(method, url, token)
+  })
   ipcMain.handle('jaz:get-device-metadata', () => getDeviceMetadata())
   ipcMain.handle('jaz:configure-thread-notifications', (event, config) => {
     connectionSession.authorizeOwner(event)

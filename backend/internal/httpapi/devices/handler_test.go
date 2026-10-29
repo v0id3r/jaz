@@ -138,7 +138,7 @@ func TestRegisterUsesRootPrincipalForApprovedRegistration(t *testing.T) {
 	if got.Token == "" || got.Pairing != nil || got.Device.Status != "approved" {
 		t.Fatalf("register response = %#v", got)
 	}
-	if _, err := service.Authenticate(got.Token, deviceauth.SeenInfo{}); err != nil {
+	if _, err := service.Authenticate(got.Token, deviceauth.Proof{}, deviceauth.SeenInfo{}); err != nil {
 		t.Fatalf("token auth: %v", err)
 	}
 }

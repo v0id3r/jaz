@@ -40,9 +40,15 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		}
 		if s.Devices != nil {
 			info := httpapi.RequestInfoFrom(r)
-			principal, err := s.Devices.Authenticate(token, deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
+			principal, err := s.Devices.Authenticate(token, requestProof(r), deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
 			if err == nil {
 				s.serveDevice(w, r, principal, next)
+				return
+			}
+			// Distinct from unauthorized so clients keep a token whose proof was
+			// merely stale or replayed instead of discarding it and re-pairing.
+			if errors.Is(err, deviceauth.ErrProofInvalid) {
+				writeAuthError(w, http.StatusUnauthorized, "invalid_dpop_proof", err)
 				return
 			}
 			if errors.Is(err, deviceauth.ErrApprovalRequired) {
@@ -162,12 +168,26 @@ func requestAuthKey(r *http.Request) string {
 	if token := bearerToken(r.Header.Get("Authorization")); token != "" {
 		return token
 	}
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		for _, protocol := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
-			protocol = strings.TrimSpace(protocol)
-			if strings.HasPrefix(protocol, "jaz-auth.") {
-				return strings.TrimPrefix(protocol, "jaz-auth.")
-			}
+	return webSocketProtocol(r, "jaz-auth.")
+}
+
+// requestProof reads the DPoP proof from its header or, since browsers cannot
+// set headers on a WebSocket handshake, from a subprotocol.
+func requestProof(r *http.Request) deviceauth.Proof {
+	jwt := r.Header.Get(deviceauth.ProofHeader)
+	if jwt == "" {
+		jwt = webSocketProtocol(r, "jaz-dpop.")
+	}
+	return deviceauth.Proof{JWT: jwt, Method: r.Method, Path: r.URL.Path}
+}
+
+func webSocketProtocol(r *http.Request, prefix string) string {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return ""
+	}
+	for _, protocol := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(protocol), prefix); ok {
+			return value
 		}
 	}
 	return ""
@@ -195,7 +215,7 @@ func queryAuthAllowed(r *http.Request) bool {
 
 func bearerToken(header string) string {
 	fields := strings.Fields(header)
-	if len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
+	if len(fields) == 2 && (strings.EqualFold(fields[0], "Bearer") || strings.EqualFold(fields[0], "DPoP")) {
 		return fields[1]
 	}
 	return ""
