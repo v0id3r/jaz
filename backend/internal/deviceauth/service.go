@@ -58,11 +58,10 @@ type Service struct {
 	access  access
 	proofs  spentProofs
 	tokens  accessTokens
-	// users verifies the auth proxy JWT sent in proxyHeader, naming whom
-	// access tokens are issued to; nil without a trusted proxy.
-	users       *jwtIssuer
-	proxyHeader string
-	now         func() time.Time
+	// proxy names whom access tokens are issued to and who owns the host;
+	// nil without a trusted auth proxy.
+	proxy *trustedProxy
+	now   func() time.Time
 }
 
 type SeenInfo struct {
@@ -89,6 +88,9 @@ type Registration struct {
 	Profile  DeviceProfile
 	Seen     SeenInfo
 	Proof    Proof
+	// ProxyJWT is the trusted auth proxy's JWT; a host owner's pairing
+	// request is approved at once.
+	ProxyJWT string
 }
 
 type Principal struct {
@@ -96,6 +98,14 @@ type Principal struct {
 	DeviceID        string `json:"device_id,omitempty"`
 	EnrollmentToken string `json:"-"`
 	CredentialHash  string `json:"-"`
+	// Owner marks a device whose access token was issued to a host owner the
+	// trusted auth proxy vouched for.
+	Owner bool `json:"-"`
+}
+
+// Manages reports whether the principal may manage devices and enrollment.
+func (p Principal) Manages() bool {
+	return p.Kind == PrincipalRoot || p.Owner
 }
 
 type RegisterResult struct {
@@ -134,21 +144,29 @@ func NewProofMode(store Store, origins []string, proxy ProxyConfig) (*Service, e
 		}
 		s.origins = append(s.origins, origin)
 	}
-	proxy = ProxyConfig{Header: strings.TrimSpace(proxy.Header), JWKS: strings.TrimSpace(proxy.JWKS), Issuer: strings.TrimSpace(proxy.Issuer), Audience: strings.TrimSpace(proxy.Audience)}
-	if proxy == (ProxyConfig{}) {
+	proxy.Header, proxy.JWKS, proxy.Issuer, proxy.Audience = strings.TrimSpace(proxy.Header), strings.TrimSpace(proxy.JWKS), strings.TrimSpace(proxy.Issuer), strings.TrimSpace(proxy.Audience)
+	if proxy.IsZero() {
 		return s, nil
 	}
 	if proxy.Header == "" || proxy.JWKS == "" || proxy.Issuer == "" || proxy.Audience == "" {
 		return nil, errors.New("proxy: needs header, jwks, issuer and audience")
 	}
-	s.proxyHeader = proxy.Header
-	s.users = &jwtIssuer{jwks: proxy.JWKS, issuer: proxy.Issuer, audience: proxy.Audience, client: &http.Client{Timeout: 10 * time.Second}}
+	s.proxy = &trustedProxy{
+		header:    proxy.Header,
+		issuer:    &jwtIssuer{jwks: proxy.JWKS, issuer: proxy.Issuer, audience: proxy.Audience, client: &http.Client{Timeout: 10 * time.Second}},
+		users:     proxy.Users,
+		roles:     proxy.Roles,
+		roleClaim: proxy.RoleClaim,
+	}
 	return s, nil
 }
 
 // ProxyHeader names the request header a trusted auth proxy sends its JWT in.
 func (s *Service) ProxyHeader() string {
-	return s.proxyHeader
+	if s.proxy == nil {
+		return ""
+	}
+	return s.proxy.header
 }
 
 func (s *Service) RequireProof() bool {
@@ -187,7 +205,7 @@ func (s *Service) Authenticate(token string, proof Proof, seen SeenInfo) (Princi
 		}
 		seen = normalizeSeenInfo(seen)
 		_ = s.store.UpdateDeviceSeen(device.ID, seen.IP, seen.UserAgent, s.now())
-		return Principal{Kind: PrincipalDevice, DeviceID: device.ID, CredentialHash: TokenHash(token)}, nil
+		return Principal{Kind: PrincipalDevice, DeviceID: device.ID, CredentialHash: TokenHash(token), Owner: s.ownerToken(TokenHash(token))}, nil
 	case storage.DeviceStatusPending:
 		return Principal{}, ErrApprovalRequired
 	default:
@@ -234,7 +252,11 @@ func (s *Service) CreatePairing(reg Registration) (storage.DevicePairing, string
 	if err != nil {
 		return storage.DevicePairing{}, "", err
 	}
-	return s.createPairing(reg)
+	pairing, secret, err := s.createPairing(reg)
+	if err == nil && s.ownerRequest(reg.ProxyJWT) {
+		pairing, err = s.ApprovePairing(pairing.ID)
+	}
+	return pairing, secret, err
 }
 
 func (s *Service) createPairing(reg Registration) (storage.DevicePairing, string, error) {

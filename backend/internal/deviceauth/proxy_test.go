@@ -13,6 +13,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/wins/jaz/backend/internal/storage"
 )
 
 const testIssuer, testAudience = "proxy.example", "https://jaz.example"
@@ -114,9 +116,9 @@ func TestProxyJWTsAreVerifiedAgainstTheIssuerKeys(t *testing.T) {
 		{"missing", "", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			user, _, err := service.users.verify(test.token, now())
-			if test.valid != (err == nil && user == "alice@"+testIssuer) || err != nil && !errors.Is(err, ErrUserInvalid) {
-				t.Fatalf("verify() = %q, %v; want valid %v", user, err, test.valid)
+			user, err := service.proxy.issuer.verify(test.token, now())
+			if test.valid != (err == nil && user.id == "alice@"+testIssuer) || err != nil && !errors.Is(err, ErrUserInvalid) {
+				t.Fatalf("verify() = %q, %v; want valid %v", user.id, err, test.valid)
 			}
 		})
 	}
@@ -129,7 +131,7 @@ func TestProxyKeysFollowTheIssuer(t *testing.T) {
 	proxy := newTestProxy(t)
 	service, now := newProofService(t, proxy.config)
 	verify := func(kid string, at time.Duration) error {
-		_, _, err := service.users.verify(proxy.sign(kid, userClaims("ES256", now().Add(at), nil)), now().Add(at))
+		_, err := service.proxy.issuer.verify(proxy.sign(kid, userClaims("ES256", now().Add(at), nil)), now().Add(at))
 		return err
 	}
 	proxy.published = []string{"ec"}
@@ -210,5 +212,47 @@ func TestProxyUserGetsTheDeviceTokensAndKeepsTheDevice(t *testing.T) {
 func TestProofModeNeedsACompleteProxy(t *testing.T) {
 	if _, err := NewProofMode(nil, []string{testOrigin}, ProxyConfig{Header: "Proxy-Jwt", JWKS: "https://proxy.example/jwks"}); err == nil {
 		t.Fatal("NewProofMode() accepted a proxy without issuer and audience")
+	}
+}
+
+func TestProxyOwnersManageDevicesAndPairAtOnce(t *testing.T) {
+	proxy := newTestProxy(t)
+	proxy.config.Users, proxy.config.Roles, proxy.config.RoleClaim = []string{"alice"}, []string{"admin"}, "roles"
+	service, now := newProofService(t, proxy.config)
+	userJWT := func(user string, roles ...string) string {
+		return proxy.sign("ec", userClaims("ES256", now(), func(c map[string]any) { c["sub"], c["roles"] = user, roles }))
+	}
+	for _, test := range []struct {
+		name  string
+		jwt   string
+		owner bool
+	}{
+		{"listed user", userJWT("alice"), true},
+		{"listed role", userJWT("bob", "access", "admin"), true},
+		{"anyone else", userJWT("carol", "access"), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			key := newTestKey(t, "EdDSA")
+			if _, err := service.RegisterApproved(key.registration("Laptop")); err != nil {
+				t.Fatal(err)
+			}
+			assertion := signJWS(key, map[string]any{"alg": key.alg}, map[string]any{
+				"iss": key.id, "sub": key.id, "aud": testOrigin, "jti": rand.Text(), "iat": now().Unix(), "exp": now().Add(30 * time.Second).Unix(),
+			})
+			token, err := service.IssueAccessToken(assertion, Proof{JWT: tokenProof(key, now()), Method: "POST", Path: "/v1/devices/token"}, test.jwt)
+			if err != nil || service.ownerToken(TokenHash(token.Token)) != test.owner {
+				t.Fatalf("token = %+v, %v; want owner %v", token, err, test.owner)
+			}
+			phone := newTestKey(t, "ES256")
+			newcomer := phone.registration("Phone")
+			newcomer.ProxyJWT = test.jwt
+			newcomer.Proof = Proof{Method: "POST", Path: "/v1/devices/pairing-requests", JWT: signProof(phone, phone, map[string]any{
+				"jti": rand.Text(), "htm": "POST", "htu": testOrigin + "/v1/devices/pairing-requests", "iat": now().Unix(),
+			})}
+			pairing, _, err := service.CreatePairing(newcomer)
+			if err != nil || (pairing.Status == storage.PairingStatusApproved) != test.owner {
+				t.Fatalf("pairing = %s, %v; want approved %v", pairing.Status, err, test.owner)
+			}
+		})
 	}
 }

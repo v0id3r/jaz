@@ -36,7 +36,7 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 	}))
 	t.Cleanup(jwks.Close)
 	devices, err := deviceauth.NewProofMode(store, []string{"https://jaz.example"}, deviceauth.ProxyConfig{
-		Header: "Teleport-Jwt-Assertion", JWKS: jwks.URL, Issuer: "teleport.example", Audience: "https://jaz.example",
+		Header: "Teleport-Jwt-Assertion", JWKS: jwks.URL, Issuer: "teleport.example", Audience: "https://jaz.example", Users: []string{"alice"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +52,7 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 	}
 	srv := (&Server{Store: store, Devices: devices, AuthKey: "root", Routes: Routes{
 		{Pattern: "POST /v1/devices/token", Handler: http.HandlerFunc(devicesapi.NewHandler(devices, nil, serverconfig.Config{}).Token)},
+		{Pattern: "GET /v1/devices", Handler: http.HandlerFunc(devicesapi.NewHandler(devices, nil, serverconfig.Config{}).List)},
 		{Pattern: "GET /v1/sessions/s1/terminal", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})},
 	}}).Handler()
 	sign := func(signer ed25519.PrivateKey, header, claims map[string]any) string {
@@ -110,6 +111,14 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 	token, _ := body["access_token"].(string)
 	if res.Code != http.StatusOK || token == "" || body["token_type"] != "DPoP" || res.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("token response = %d %v %v", res.Code, body, res.Header())
+	}
+	list := httptest.NewRequest(http.MethodGet, "/v1/devices", nil)
+	list.Header.Set("Authorization", "DPoP "+token)
+	list.Header.Set("DPoP", proof(key, "GET", "https://jaz.example/v1/devices", token))
+	listed := httptest.NewRecorder()
+	srv.ServeHTTP(listed, list)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"can_manage":true`) {
+		t.Fatalf("devices as the proxy's owner = %d %s, want can_manage", listed.Code, listed.Body)
 	}
 
 	target := "wss://jaz.example/v1/sessions/s1/terminal"

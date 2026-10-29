@@ -79,7 +79,8 @@ type DevicesConfig struct {
 	// the origin of a direct loopback request.
 	Origins []string
 	// Proxy trusts the users an auth proxy vouches for; a proof-mode device
-	// then gets access tokens only for the user it first got them for.
+	// then gets access tokens only for the user it first got them for, and
+	// the users and roles it lists as owners manage devices.
 	Proxy deviceauth.ProxyConfig
 }
 

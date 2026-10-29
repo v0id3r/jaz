@@ -52,7 +52,7 @@ func HTTPModule() fx.Option {
 
 func NewDeviceAuth(store *sqlitestore.Store, cfg Config) (*deviceauth.Service, error) {
 	if !cfg.Devices.RequireProof {
-		if cfg.Devices.Proxy != (deviceauth.ProxyConfig{}) {
+		if !cfg.Devices.Proxy.IsZero() {
 			return nil, errors.New("jaz.devices.proxy: needs jaz.devices.requireproof")
 		}
 		return deviceauth.New(store), nil

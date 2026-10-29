@@ -35,6 +35,7 @@ type accessTokens struct {
 type issuedToken struct {
 	deviceID  string
 	expiresAt time.Time
+	owner     bool
 }
 
 // IssueAccessToken serves the client_credentials grant of a device that
@@ -53,15 +54,16 @@ func (s *Service) IssueAccessToken(assertion string, proof Proof, proxyJWT strin
 		return AccessToken{}, ErrProofInvalid
 	}
 	now := s.now()
-	expiresAt := now.Add(accessTokenTTL)
-	if s.users != nil {
-		userExpiresAt, err := s.authenticateUser(device, proxyJWT)
+	issued := issuedToken{deviceID: device.ID, expiresAt: now.Add(accessTokenTTL)}
+	if s.proxy != nil {
+		user, err := s.authenticateUser(device, proxyJWT)
 		if err != nil {
 			return AccessToken{}, err
 		}
-		if userExpiresAt.Before(expiresAt) {
-			expiresAt = userExpiresAt
+		if user.expiresAt.Before(issued.expiresAt) {
+			issued.expiresAt = user.expiresAt
 		}
+		issued.owner = s.proxy.owns(user)
 	}
 	token, err := newToken()
 	if err != nil {
@@ -78,8 +80,8 @@ func (s *Service) IssueAccessToken(assertion string, proof Proof, proxyJWT strin
 			delete(t.issued, hash)
 		}
 	}
-	t.issued[TokenHash(token)] = issuedToken{deviceID: device.ID, expiresAt: expiresAt}
-	return AccessToken{Token: token, ExpiresIn: int(expiresAt.Sub(now) / time.Second)}, nil
+	t.issued[TokenHash(token)] = issued
+	return AccessToken{Token: token, ExpiresIn: int(issued.expiresAt.Sub(now) / time.Second)}, nil
 }
 
 // authenticateClient verifies a private_key_jwt client assertion (RFC 7523,
@@ -141,6 +143,13 @@ func (s *Service) loadCredential(hash string) (storage.Device, error) {
 		return storage.Device{}, ErrTokenInvalid
 	}
 	return s.store.LoadDevice(entry.deviceID)
+}
+
+// ownerToken reports whether an access token was issued to a host owner.
+func (s *Service) ownerToken(hash string) bool {
+	s.tokens.mu.Lock()
+	defer s.tokens.mu.Unlock()
+	return s.tokens.issued[hash].owner
 }
 
 // deviceCredential mints the long-lived device token. In proof mode the device

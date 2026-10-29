@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,11 +23,40 @@ import (
 // Cloudflare Access, Pomerium, ...) vouches for with a JWT in Header, signed by
 // a key of the JWKS it publishes. In proof mode a device then gets access
 // tokens only for such a user, and only for the first one it got them for.
+// Users (subjects) and Roles (listed in the RoleClaim claim) own the host:
+// their devices manage devices and their pairing requests are approved at once.
 type ProxyConfig struct {
-	Header   string
-	JWKS     string
-	Issuer   string
-	Audience string
+	Header    string
+	JWKS      string
+	Issuer    string
+	Audience  string
+	Users     []string
+	Roles     []string
+	RoleClaim string
+}
+
+// IsZero reports whether no proxy is configured.
+func (c ProxyConfig) IsZero() bool {
+	return c.Header+c.JWKS+c.Issuer+c.Audience+c.RoleClaim == "" && len(c.Users)+len(c.Roles) == 0
+}
+
+// trustedProxy is the configured auth proxy: the header it sends its JWT in,
+// the issuer that verifies it and who among its users owns the host.
+type trustedProxy struct {
+	header       string
+	issuer       *jwtIssuer
+	users, roles []string
+	roleClaim    string
+}
+
+// owns reports whether the verified user owns the host.
+func (p *trustedProxy) owns(user verifiedUser) bool {
+	var claims map[string]json.RawMessage
+	var roles []string
+	if p.roleClaim != "" && json.Unmarshal(user.payload, &claims) == nil {
+		_ = json.Unmarshal(claims[p.roleClaim], &roles)
+	}
+	return slices.Contains(p.users, user.subject) || slices.ContainsFunc(roles, func(role string) bool { return slices.Contains(p.roles, role) })
 }
 
 // ErrUserInvalid refuses an access token to a request without a valid auth
@@ -51,9 +81,16 @@ type jwtIssuer struct {
 
 type jwk struct{ Kid, Kty, Crv, X, Y, N, E string }
 
-// verify returns the user (sub@iss) of a valid token and when it expires. The
-// issuer's clock may run up to proofMaxAge ahead of ours.
-func (i *jwtIssuer) verify(token string, now time.Time) (string, time.Time, error) {
+// verifiedUser is whom a valid token names: id is sub@iss, payload its claims.
+type verifiedUser struct {
+	id, subject string
+	payload     []byte
+	expiresAt   time.Time
+}
+
+// verify returns the user of a valid token. The issuer's clock may run up to
+// proofMaxAge ahead of ours.
+func (i *jwtIssuer) verify(token string, now time.Time) (verifiedUser, error) {
 	var header struct{ Alg, Kid string }
 	var claims struct {
 		Iss string   `json:"iss"`
@@ -64,7 +101,7 @@ func (i *jwtIssuer) verify(token string, now time.Time) (string, time.Time, erro
 	}
 	jws, ok := parseJWS(token, &header, &claims)
 	if !ok {
-		return "", time.Time{}, ErrUserInvalid
+		return verifiedUser{}, ErrUserInvalid
 	}
 	signed := func(keys []jwk) bool {
 		return slices.ContainsFunc(keys, func(key jwk) bool {
@@ -77,14 +114,15 @@ func (i *jwtIssuer) verify(token string, now time.Time) (string, time.Time, erro
 		keys, err = i.keySet(now, true)
 	}
 	if err != nil {
-		return "", time.Time{}, err
+		return verifiedUser{}, err
 	}
 	exp := time.Unix(claims.Exp, 0)
 	if !signed(keys) || claims.Iss != i.issuer || !slices.Contains(claims.Aud, i.audience) || claims.Sub == "" ||
 		!now.Before(exp) || now.Add(proofMaxAge).Before(time.Unix(claims.Nbf, 0)) {
-		return "", time.Time{}, ErrUserInvalid
+		return verifiedUser{}, ErrUserInvalid
 	}
-	return claims.Sub + "@" + claims.Iss, exp, nil
+	payload, _ := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[1])
+	return verifiedUser{id: claims.Sub + "@" + claims.Iss, subject: claims.Sub, payload: payload, expiresAt: exp}, nil
 }
 
 // audience is an aud claim, a single string or a list (RFC 7519 §4.1.3).
@@ -147,20 +185,29 @@ func (k jwk) verifier(alg string) func(signed, sig []byte) bool {
 }
 
 // authenticateUser binds a device to the user the auth proxy vouches for, if
-// it belongs to nobody yet, and returns when that user's identity expires.
-func (s *Service) authenticateUser(device storage.Device, token string) (time.Time, error) {
-	user, expiresAt, err := s.users.verify(token, s.now())
+// it belongs to nobody yet, and returns that user.
+func (s *Service) authenticateUser(device storage.Device, token string) (verifiedUser, error) {
+	user, err := s.proxy.issuer.verify(token, s.now())
 	if err != nil {
-		return time.Time{}, err
+		return verifiedUser{}, err
 	}
-	if device.User != user {
-		bound, err := s.store.BindDeviceUser(device.ID, user)
+	if device.User != user.id {
+		bound, err := s.store.BindDeviceUser(device.ID, user.id)
 		if err != nil {
-			return time.Time{}, err
+			return verifiedUser{}, err
 		}
 		if !bound {
-			return time.Time{}, ErrUserInvalid
+			return verifiedUser{}, ErrUserInvalid
 		}
 	}
-	return expiresAt, nil
+	return user, nil
+}
+
+// ownerRequest reports whether a request's proxy JWT names a host owner.
+func (s *Service) ownerRequest(token string) bool {
+	if s.proxy == nil {
+		return false
+	}
+	user, err := s.proxy.issuer.verify(token, s.now())
+	return err == nil && s.proxy.owns(user)
 }
