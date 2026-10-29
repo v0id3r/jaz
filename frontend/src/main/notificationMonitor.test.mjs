@@ -112,4 +112,30 @@ describe('thread completion monitor', () => {
     expect(authorizations).toEqual(['Bearer old', 'Bearer new'])
     monitor.stop()
   })
+
+  test('asks for a new access token after the backend rejects one', async () => {
+    const authorizations = []
+    const credentials = []
+    let status = 401
+    const monitor = createThreadCompletionMonitor(
+      () => {},
+      (_url, init) => {
+        authorizations.push(init?.headers?.Authorization)
+        return Promise.resolve({ ok: status === 200, status, json: () => Promise.resolve({ items: [] }) })
+      },
+      async () => '',
+      async (baseUrl, token, rejected) => {
+        credentials.push({ baseUrl, token, rejected })
+        return rejected ? 'access-2' : 'access-1'
+      },
+    )
+
+    await monitor.configure({ enabled: true, baseUrl: 'https://jaz.example', token: '' })
+    status = 200
+    await monitor.poll()
+    await monitor.poll()
+    expect(credentials.map((call) => call.rejected)).toEqual([undefined, 'access-1', undefined])
+    expect(authorizations).toEqual(['Bearer access-1', 'Bearer access-2', 'Bearer access-1'])
+    monitor.stop()
+  })
 })

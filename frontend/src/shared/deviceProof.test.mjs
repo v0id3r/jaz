@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { base64Url, buildDeviceProof } from './deviceProof'
+import { base64Url, buildDeviceProof, deviceAccessTokens, DeviceTokenError, requestDeviceAccessToken } from './deviceProof'
 
 const decode = (segment) => JSON.parse(Buffer.from(segment, 'base64url').toString())
 
@@ -26,4 +26,62 @@ test('a P-256 device key signs ES256 proofs with its point as the JWK', async ()
   const [header, claims, signature] = (await buildDeviceProof(base64Url(raw), sign, 'GET', 'https://jaz.example/v1/sessions', 'jaz_token')).split('.')
   expect(decode(header)).toEqual({ typ: 'dpop+jwt', alg: 'ES256', jwk: { kty: 'EC', crv: 'P-256', x: base64Url(raw.subarray(1, 33)), y: base64Url(raw.subarray(33)) } })
   expect(await crypto.subtle.verify(ecdsa, pair.publicKey, Buffer.from(signature, 'base64url'), new TextEncoder().encode(header + '.' + claims))).toBe(true)
+})
+
+test('a device asks for an access token with a client assertion and a proof by its key', async () => {
+  const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])
+  const publicKey = base64Url(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)))
+  const sign = async (input) => new Uint8Array(await crypto.subtle.sign('Ed25519', pair.privateKey, input))
+  const original = globalThis.fetch
+  let sent
+  globalThis.fetch = async (url, init) => {
+    sent = { url, init }
+    return Response.json({ access_token: 'jaz_access', token_type: 'DPoP', expires_in: 600 })
+  }
+  try {
+    const token = await requestDeviceAccessToken('https://Jaz.Example', { device_id: 'device', public_key: publicKey }, sign)
+    expect(token.token).toBe('jaz_access')
+    expect(token.expiresAt).toBeGreaterThan(Date.now() + 590_000)
+  } finally {
+    globalThis.fetch = original
+  }
+  expect(sent.url).toBe('https://Jaz.Example/v1/devices/token')
+  const form = new URLSearchParams(sent.init.body)
+  expect(form.get('grant_type')).toBe('client_credentials')
+  expect(form.get('client_assertion_type')).toBe('urn:ietf:params:oauth:client-assertion-type:jwt-bearer')
+  const [header, claims] = form.get('client_assertion').split('.')
+  expect(decode(header)).toEqual({ typ: 'client-authentication+jwt', alg: 'EdDSA' })
+  expect(decode(claims)).toMatchObject({ iss: 'device', sub: 'device', aud: 'https://jaz.example' })
+  expect(decode(sent.init.headers.DPoP.split('.')[1])).toMatchObject({ htm: 'POST', htu: 'https://jaz.example/v1/devices/token' })
+  globalThis.fetch = async () => Response.json({ error: 'invalid_client' }, { status: 401 })
+  try {
+    const failure = await requestDeviceAccessToken('https://jaz.example', { device_id: 'device', public_key: publicKey }, sign).catch((error) => error)
+    expect(failure).toBeInstanceOf(DeviceTokenError)
+    expect(failure.code).toBe('invalid_client')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('access tokens are shared per backend and renewed when rejected, expiring or failed', async () => {
+  let issued = 0
+  let lifetime = 600_000
+  let fail = true
+  const tokens = deviceAccessTokens(async () => {
+    if (fail) {
+      fail = false
+      throw new DeviceTokenError('token_request_failed')
+    }
+    issued += 1
+    return { token: `t${issued}`, expiresAt: Date.now() + lifetime }
+  })
+  expect(await tokens('https://a').catch((error) => error.code)).toBe('token_request_failed')
+  expect(await Promise.all([tokens('https://a'), tokens('https://a')])).toEqual(['t1', 't1'])
+  expect(await tokens('https://a', 'old')).toBe('t1')
+  expect(await tokens('https://a', 't1')).toBe('t2')
+  expect(await tokens('https://b')).toBe('t3')
+  lifetime = 10_000
+  expect(await tokens('https://a', 't2')).toBe('t4')
+  lifetime = 600_000
+  expect(await tokens('https://a')).toBe('t5')
 })

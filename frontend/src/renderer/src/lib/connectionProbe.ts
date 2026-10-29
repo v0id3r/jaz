@@ -1,6 +1,8 @@
 import { CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER, deviceRequestHeaders, secureBackendConnection } from '@/lib/api/client'
 import { clientRuntime } from '@/lib/clientRuntime'
 import { deviceAccess, type ResourceTicket } from '@shared/connectionSession'
+import { DeviceTokenError } from '@shared/deviceProof'
+import { deviceAccessToken } from '@/lib/deviceIdentity'
 
 export type ProbeFailure = { ok: false; error: string; recoverable: boolean; code?: string }
 export type Access = { ok: true; kind: 'device' | 'root'; deviceId: string; ticket?: ResourceTicket } | ProbeFailure
@@ -69,4 +71,18 @@ export async function readAccess(url: string, token: string, signal?: AbortSigna
   } catch {
     return { ok: false, error: 'Backend auth check failed', recoverable: true }
   }
+}
+
+// Access for a device whose key is the credential: it first needs an access
+// token, which the backend refuses with invalid_client until it approves the key.
+export async function readKeyAccess(url: string, deviceId: string, signal?: AbortSignal): Promise<Access> {
+  let token: string
+  try {
+    token = await deviceAccessToken(url)
+  } catch (error) {
+    const code = error instanceof DeviceTokenError ? error.code : ''
+    const settled = code === 'invalid_client' || code === 'unsupported_grant_type' || code === 'unsupported_device_key'
+    return { ok: false, error: code === 'invalid_client' ? 'This device is not approved on this server' : 'Could not get a device access token', recoverable: !settled, code }
+  }
+  return readAccess(url, token, signal, deviceId)
 }

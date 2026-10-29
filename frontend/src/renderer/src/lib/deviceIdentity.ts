@@ -1,4 +1,4 @@
-import { base64Url, buildDeviceProof } from '@shared/deviceProof'
+import { base64Url, buildDeviceProof, DeviceTokenError, deviceAccessTokens, requestDeviceAccessToken } from '@shared/deviceProof'
 import { clientRuntime } from './clientRuntime'
 
 export type DeviceIdentity = {
@@ -45,8 +45,27 @@ async function getDeviceMetadata(): Promise<DeviceMetadata> {
 export async function deviceProof(method: string, url: string, token?: string): Promise<string> {
   if (clientRuntime.deviceProof) return clientRuntime.deviceProof(method, url, token)
   const key = await browserKey()
-  const algorithm = key?.privateKey.algorithm.name === 'ECDSA' ? P256 : 'Ed25519'
-  return key ? buildDeviceProof(key.identity.public_key, async (input) => new Uint8Array(await crypto.subtle.sign(algorithm, key.privateKey, input as BufferSource)), method, url, token) : ''
+  return key ? buildDeviceProof(key.identity.public_key, browserSigner(key), method, url, token) : ''
+}
+
+// An access token for a proof-mode backend, where the device key is the
+// credential; fails with DeviceTokenError carrying the OAuth error code.
+export async function deviceAccessToken(baseUrl: string, rejected?: string): Promise<string> {
+  if (!clientRuntime.deviceAccessToken) return browserAccessTokens(baseUrl, rejected)
+  const result = await clientRuntime.deviceAccessToken(baseUrl, rejected)
+  if ('error' in result) throw new DeviceTokenError(result.error)
+  return result.token
+}
+
+const browserAccessTokens = deviceAccessTokens(async (baseUrl) => {
+  const key = await browserKey()
+  if (!key) throw new DeviceTokenError('unsupported_device_key')
+  return requestDeviceAccessToken(baseUrl, key.identity, browserSigner(key))
+})
+
+function browserSigner(key: BrowserKey) {
+  const algorithm = key.privateKey.algorithm.name === 'ECDSA' ? P256 : 'Ed25519'
+  return async (input: Uint8Array) => new Uint8Array(await crypto.subtle.sign(algorithm, key.privateKey, input as BufferSource))
 }
 
 type BrowserKey = { identity: DeviceIdentity; privateKey: CryptoKey }

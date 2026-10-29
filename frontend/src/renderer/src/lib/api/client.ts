@@ -3,12 +3,15 @@ import { DEFAULT_API_BASE_URL, clientRuntime } from '@/lib/clientRuntime'
 import { isPreviewProxyTargetHostname } from '@shared/preview'
 import type { ResourceTicket } from '@shared/connectionSession'
 import { deviceAuthHeaders } from '@shared/deviceProof'
-import { deviceProof } from '@/lib/deviceIdentity'
+import { deviceAccessToken, deviceProof } from '@/lib/deviceIdentity'
 
 export { ApiError } from '@/lib/api/response'
 
 const AUTH_KEY_PREFIX = 'jaz.backendAuth.'
 const authTokens = new Map<string, string>()
+// Backends in proof mode, where the device key is the credential and each
+// request presents a short-lived access token it obtains.
+const keyCredentials = new Set<string>()
 const resourceTickets = new Map<string, ResourceTicket>()
 let credentialRevision = 0
 const sessionListeners = new Set<() => void>()
@@ -144,7 +147,7 @@ export async function apiWebSocket(path: string): Promise<WebSocket> {
   }
   const revision = credentialRevision
   const url = apiWebSocketUrl(path)
-  const token = cachedApiAuthToken()
+  const token = await apiAuthToken()
   const proof = token ? await deviceProof('GET', url, token) : ''
   if (revision !== credentialRevision) {
     throw new Error('The connection changed before the socket opened')
@@ -176,6 +179,15 @@ export function cachedApiAuthToken(url = apiBaseUrl()): string {
   return authTokens.get(authStorageKey(url)) ?? ''
 }
 
+export function apiUsesDeviceKey(url = apiBaseUrl()): boolean {
+  return keyCredentials.has(authStorageKey(url))
+}
+
+// The token a request presents; rejected names one the backend refused.
+async function apiAuthToken(url = apiBaseUrl(), rejected?: string): Promise<string> {
+  return apiUsesDeviceKey(url) ? deviceAccessToken(normalizeBaseUrl(url), rejected) : cachedApiAuthToken(url)
+}
+
 export function restoreApiAuthToken(url: string): string {
   const stored = localStorage.getItem(authStorageKey(url))?.trim() ?? ''
   if (!stored) {
@@ -200,12 +212,17 @@ export function rememberApiAuthToken(url: string, current: () => boolean): void 
   localStorage.setItem(authStorageKey(url), 'enc:v1:' + ciphertext)
 }
 
-export function setApiAuthToken(url: string, token?: string | null, ticket?: ResourceTicket): void {
+export function setApiAuthToken(url: string, token?: string | null, ticket?: ResourceTicket, deviceKey = false): void {
   const key = authStorageKey(url)
   if (token) {
     authTokens.set(key, token)
   } else {
     authTokens.delete(key)
+  }
+  if (deviceKey) {
+    keyCredentials.add(key)
+  } else {
+    keyCredentials.delete(key)
   }
   setResourceTicket(url, ticket)
   if (normalizeBaseUrl(url) === baseUrl) {
@@ -215,6 +232,7 @@ export function setApiAuthToken(url: string, token?: string | null, ticket?: Res
 
 export function clearApiSession(): void {
   authTokens.clear()
+  keyCredentials.clear()
   resourceTickets.clear()
   notifySessionChange()
 }
@@ -251,11 +269,11 @@ export async function deviceRequestHeaders(method: string, url: string, token: s
   return deviceAuthHeaders(token, await deviceProof(method, url, token))
 }
 
-async function withAPIHeaders(target: string, init: RequestInit, url: string): Promise<RequestInit> {
+async function withAPIHeaders(target: string, init: RequestInit, url: string, rejected?: string): Promise<RequestInit> {
   if (!secureBackendConnection(url)) {
     throw new Error('Remote connections require HTTPS')
   }
-  const token = cachedApiAuthToken(url)
+  const token = await apiAuthToken(url, rejected)
   const headers = new Headers(init.headers)
   if (!headers.has(CLIENT_PLATFORM_HEADER)) {
     headers.set(CLIENT_PLATFORM_HEADER, CLIENT_PLATFORM)
@@ -285,20 +303,27 @@ export async function apiFetch(path: string, init?: RequestInit, url = apiBaseUr
   assertBackendRelativePath(path, 'apiFetch')
   const signal = init?.signal ? AbortSignal.any([init.signal, sessionRequests.signal]) : sessionRequests.signal
   const revision = credentialRevision
-  const options = await withAPIHeaders(`${url}${path}`, { ...init, signal }, url)
-  const sent = new Headers(options.headers).get('Authorization')?.split(' ')[1]
-  return fetch(`${url}${path}`, options).then(async (response) => {
-    if ((response.status === 401 || response.status === 403) && sent && sent === cachedApiAuthToken(url)) {
-      const body = await response.clone().json().catch(() => null) as { code?: string } | null
-      if (revision === credentialRevision && url === apiBaseUrl() &&
-        (body?.code === 'unauthorized' || body?.code === 'device_approval_required')) {
-        for (const handler of rejectionListeners) {
-          handler()
-        }
-      }
+  const send = async (rejected?: string) => {
+    const options = await withAPIHeaders(`${url}${path}`, { ...init, signal }, url, rejected)
+    const sent = new Headers(options.headers).get('Authorization')?.split(' ')[1]
+    const response = await fetch(`${url}${path}`, options)
+    const body = response.status === 401 || response.status === 403
+      ? await response.clone().json().catch(() => null) as { code?: string } | null
+      : null
+    return { sent, response, body }
+  }
+  let { sent, response, body } = await send()
+  // The backend forgot or expired the access token; the device key gets another.
+  if (body?.code === 'invalid_token' && apiUsesDeviceKey(url)) {
+    ({ sent, response, body } = await send(sent))
+  }
+  if (body && sent && (sent === cachedApiAuthToken(url) || apiUsesDeviceKey(url)) &&
+    revision === credentialRevision && url === apiBaseUrl() && (body.code === 'unauthorized' || body.code === 'device_approval_required')) {
+    for (const handler of rejectionListeners) {
+      handler()
     }
-    return response
-  })
+  }
+  return response
 }
 
 export function apiEventSourceUrl(path: string): string {

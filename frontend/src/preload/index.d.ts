@@ -41,6 +41,7 @@ declare global {
       startLocalBackend: () => Promise<{ ok: boolean; url?: string; key?: string; error?: string }>
       getDeviceIdentity: () => Promise<{ device_id: string; public_key: string }>
       deviceProof: (method: string, url: string, token?: string) => Promise<string>
+      deviceAccessToken: (baseUrl: string, rejected?: string) => Promise<{ token: string } | { error: string }>
       getDeviceMetadata: () => Promise<{
         name: string
         platform: string

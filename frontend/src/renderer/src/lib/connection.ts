@@ -3,13 +3,13 @@ import {
   apiBaseUrl, cachedApiAuthToken, clearApiSession, CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER,
   consumeStartupConnectUrl, isLocalBackendUrl, localBaseUrl, normalizeBaseUrl,
   parseBackendConnectUrl, rememberApiAuthToken, restoreApiAuthToken, secureBackendConnection,
-  setApiAuthToken, setApiBaseUrl, onApiAuthRejected,
+  setApiAuthToken, setApiBaseUrl, onApiAuthRejected, forgetApiAuthToken, apiUsesDeviceKey,
 } from '@/lib/api/client'
 import { rememberBackend, removeKnownBackend } from '@/lib/backends'
 import { clientRuntime } from '@/lib/clientRuntime'
-import { deviceProof, getDeviceProfile } from '@/lib/deviceIdentity'
+import { deviceProof, getDeviceIdentity, getDeviceProfile } from '@/lib/deviceIdentity'
 import { queryClient } from '@/lib/query/queryClient'
-import { readAccess, readHealth, readJSON } from '@/lib/connectionProbe'
+import { readAccess, readHealth, readJSON, readKeyAccess, type Access } from '@/lib/connectionProbe'
 import type { ResourceTicket, SessionSnapshot, VerifiedSession } from '@shared/connectionSession'
 
 export { isLocalBackendUrl } from '@/lib/api/client'
@@ -143,7 +143,7 @@ function activate(value: Attempt, candidate: Candidate): void {
       session: { url: candidate.url, token: candidate.token, deviceId: candidate.deviceId, remembered: candidate.remembered } })
     value.revision = authoritative.revision
   }
-  setApiAuthToken(candidate.url, candidate.token, candidate.ticket)
+  setApiAuthToken(candidate.url, candidate.token, candidate.ticket, keyCandidate(candidate))
   setState({ status: 'connected', url: candidate.url, pairing: null, error: null })
   if (ownsConnection) {
     if (candidate.url === LOCAL_URL && clientRuntime.kind === 'electron') {
@@ -159,8 +159,30 @@ function activate(value: Attempt, candidate: Candidate): void {
   }
 }
 
+// A device without a token is in proof mode: its key is the credential.
+function keyCandidate(candidate: Candidate): boolean {
+  return !candidate.token && Boolean(candidate.deviceId)
+}
+
+function readCandidateAccess(value: Attempt, candidate: Candidate): Promise<Access> {
+  return keyCandidate(candidate)
+    ? readKeyAccess(value.url, candidate.deviceId, value.controller.signal)
+    : readAccess(value.url, candidate.token, value.controller.signal, candidate.deviceId || undefined)
+}
+
+// Proof mode keeps no saved credential. Refusals that only mean the backend
+// does not take this key here fall back to a saved token or pairing.
+async function connectWithKey(value: Attempt, remembered: boolean): Promise<Access> {
+  const access = await readKeyAccess(value.url, (await getDeviceIdentity()).device_id, value.controller.signal)
+  if (access.ok && current(value)) {
+    forgetApiAuthToken(value.url)
+    activate(value, { url: value.url, token: '', deviceId: access.deviceId, ticket: access.ticket, remembered })
+  }
+  return access
+}
+
 async function verify(value: Attempt, candidate: Candidate): Promise<string | null> {
-  const access = await readAccess(value.url, candidate.token, value.controller.signal, candidate.deviceId || undefined)
+  const access = await readCandidateAccess(value, candidate)
   if (!current(value)) {
     return null
   }
@@ -188,7 +210,7 @@ function schedulePoll(value: Attempt, candidate: Candidate): void {
     if (!current(value)) {
       return
     }
-    const access = health.ok && candidate.token ? await readAccess(value.url, candidate.token, value.controller.signal, candidate.deviceId) : health
+    const access = health.ok && (candidate.token || candidate.deviceId) ? await readCandidateAccess(value, candidate) : health
     if (!current(value)) {
       return
     }
@@ -231,12 +253,12 @@ async function register(value: Attempt, credential: string): Promise<string | nu
   if (!response || !current(value)) {
     return null
   }
-  const body = await readJSON<{ token?: string; error?: string; pairing?: { id: string; expires_at: string }; pairing_secret?: string }>(response)
+  const body = await readJSON<{ token?: string; device?: unknown; error?: string; pairing?: { id: string; expires_at: string }; pairing_secret?: string }>(response)
   if (!current(value)) {
     return null
   }
-  if (response.ok && body?.token) {
-    return verify(value, { url: value.url, token: body.token, deviceId: profile.device_id, remembered: false })
+  if (response.status === 200 && (body?.token || body?.device)) {
+    return verify(value, { url: value.url, token: body.token ?? '', deviceId: profile.device_id, remembered: false })
   }
   if (response.status === 202 && body?.pairing && body.pairing_secret) {
     pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id)
@@ -265,8 +287,8 @@ function pending(value: Attempt, pairing: PendingPairing, deviceId: string): voi
       if (!current(value)) {
         return
       }
-      if (response.ok && body?.pairing?.status === 'approved' && body.token) {
-        await verify(value, { url: value.url, token: body.token, deviceId, remembered: false })
+      if (response.ok && body?.pairing?.status === 'approved') {
+        await verify(value, { url: value.url, token: body.token ?? '', deviceId, remembered: false })
         return
       }
       if (!response.ok || body?.pairing?.status === 'rejected' || body?.pairing?.status === 'expired') {
@@ -337,6 +359,14 @@ export async function connectRemote(input: string): Promise<string | null> {
     }
     let token = parsed.key || cached
     if (!token) {
+      const keyed = await connectWithKey(value, remembered)
+      if (!current(value) || keyed.ok) {
+        return null
+      }
+      if (keyed.recoverable) {
+        block(keyed.error)
+        return keyed.error
+      }
       token = restoreApiAuthToken(url)
       remembered = Boolean(token)
     }
@@ -429,7 +459,8 @@ export function rememberConnection(): string | null {
   const value = attempt
   const token = cachedApiAuthToken(state.url)
   try {
-    rememberApiAuthToken(state.url, () => {
+    // A device key needs nothing saved; remembering only keeps the preference.
+    if (!apiUsesDeviceKey(state.url)) rememberApiAuthToken(state.url, () => {
       if (!value || !current(value)) {
         return false
       }
@@ -469,7 +500,7 @@ async function hydrate(snapshot: SessionSnapshot): Promise<void> {
   invalidate()
   if (snapshot.phase === 'connected' && snapshot.session) {
     const value = begin(snapshot.url, false)
-    if (snapshot.session.token) {
+    if (snapshot.session.token || snapshot.session.deviceId) {
       await verify(value, snapshot.session)
     } else {
       activate(value, snapshot.session)
@@ -541,6 +572,16 @@ async function restore(url: string): Promise<void> {
     if (!health.authRequired) {
       activate(value, { url, token: '', deviceId: '', remembered: false })
       return
+    }
+    if (token === undefined) {
+      const keyed = await connectWithKey(value, true)
+      if (!current(value) || keyed.ok) {
+        return
+      }
+      if (keyed.recoverable) {
+        pollTimer = setTimeout(() => void retry(), 5000)
+        return
+      }
     }
     try {
       token ??= restoreApiAuthToken(url)

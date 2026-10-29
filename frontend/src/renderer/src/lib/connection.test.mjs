@@ -55,7 +55,7 @@ async function settle() {
   }
 }
 
-async function fixture({ auth, pairing = false, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature } = {}) {
+async function fixture({ auth, pairing = false, pairingToken = 'jaz_device-token', deviceAccessToken, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature } = {}) {
   const stored = new Map(storedValues)
   const configured = []
   const timers = new Map()
@@ -92,6 +92,7 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       startLocalBackend,
       ...(notifications ? { configureThreadNotifications: (config) => configured.push(config) } : {}),
       getDeviceIdentity: async () => ({ device_id: 'identity', public_key: 'public' }),
+      deviceAccessToken,
       getDeviceMetadata: async () => ({ name: 'Test device' }),
     },
   })
@@ -125,7 +126,7 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       return Response.json({ pairing: { id: 'pair-1', expires_at: new Date(Date.now() + 60_000).toISOString() }, pairing_secret: 'proof' }, { status: 202 })
     }
     if (target.pathname === '/v1/devices/pairing-requests/pair-1') {
-      return Response.json({ pairing: { status: 'approved' }, token: 'jaz_device-token' })
+      return Response.json({ pairing: { status: 'approved' }, ...(pairingToken ? { token: pairingToken } : {}) })
     }
     if (target.pathname === '/v1/auth/check') {
       return auth(init)
@@ -533,4 +534,70 @@ test('reusing a remembered current token keeps restart provenance without unlock
   expect(await connection.connectRemote(url + '#key=jaz_fresh')).toBeNull()
   expect(connection.connectionPreference()).toBeNull()
   expect(stored.get('jaz.backendAuth.' + url)).toBe('enc:v1:sealed-jaz_first')
+})
+
+function accessTokens(isApproved = () => true) {
+  const calls = []
+  return {
+    calls,
+    async deviceAccessToken(url, rejected) {
+      calls.push({ url, rejected })
+      return isApproved() ? { token: `access-${calls.length}` } : { error: 'invalid_client' }
+    },
+  }
+}
+
+test('proof mode pairs the key, saves nothing, and renews a token the backend forgot', async () => {
+  let approved = false
+  const tokens = accessTokens(() => approved)
+  const presented = []
+  const { connection, session, stored, pollPairing } = await fixture({
+    pairing: true,
+    pairingToken: '',
+    deviceAccessToken: tokens.deviceAccessToken,
+    auth: (init) => {
+      presented.push(init.headers.Authorization)
+      return Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' })
+    },
+    feature: (init) => {
+      presented.push(init.headers.get('Authorization'))
+      return presented.length === 2
+        ? Response.json({ error: 'gone', code: 'invalid_token' }, { status: 401 })
+        : Response.json({ ok: true })
+    },
+  })
+  expect(await connection.connectRemote('https://jaz.example')).toBeNull()
+  expect(connection.useConnection().status).toBe('pending_approval')
+  approved = true
+  await pollPairing()
+  expect(connection.useConnection().status).toBe('connected')
+  expect(connection.apiUsesDeviceKey()).toBe(true)
+  expect(connection.cachedApiAuthToken()).toBe('')
+  expect(session.read().snapshot.session).toMatchObject({ token: '', deviceId: 'identity' })
+  expect(connection.rememberConnection()).toBeNull()
+  expect([...stored.keys()].some((key) => key.startsWith('jaz.backendAuth.'))).toBe(false)
+  expect((await connection.apiFetch('/fixture/feature')).status).toBe(200)
+  expect(presented).toEqual(['Bearer access-2', 'Bearer access-3', 'Bearer access-4'])
+  expect(tokens.calls.slice(-2).map((call) => call.rejected)).toEqual([undefined, 'access-3'])
+})
+
+test('proof mode restores with the device key and drops a leftover saved token unopened', async () => {
+  const target = 'https://jaz.example'
+  let unlocks = 0
+  const tokens = accessTokens()
+  const { connection, stored } = await fixture({
+    storedValues: [
+      ['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: target })],
+      ['jaz.backendAuth.' + target, 'enc:v1:legacy-token'],
+    ],
+    decryptCredential() {
+      unlocks += 1
+    },
+    deviceAccessToken: tokens.deviceAccessToken,
+    auth: () => Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' }),
+  })
+  expect(connection.useConnection().status).toBe('connected')
+  expect(connection.apiUsesDeviceKey(target)).toBe(true)
+  expect(stored.has('jaz.backendAuth.' + target)).toBe(false)
+  expect(unlocks).toBe(0)
 })
