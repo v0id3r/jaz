@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -191,14 +192,14 @@ func TestAccessTokensRequireTheDeviceClientAssertion(t *testing.T) {
 			}
 		})
 	}
-	service.RequireProof = false
-	if _, err := service.IssueAccessToken(assertion(key, claims(key, nil)), Proof{}); !errors.Is(err, ErrUnsupportedGrant) {
+	tokenMode := New(service.store)
+	if _, err := tokenMode.IssueAccessToken(assertion(key, claims(key, nil)), Proof{}); !errors.Is(err, ErrUnsupportedGrant) {
 		t.Fatalf("IssueAccessToken() without proof mode = %v", err)
 	}
 }
 
 func TestProofOriginsAreConfiguredOrTheLocalRequestOrigin(t *testing.T) {
-	service := &Service{Origins: []string{"https://jaz.example"}}
+	service := &Service{origins: []string{"https://jaz.example"}}
 	local := Proof{LocalOrigin: "http://127.0.0.1:5299"}
 	for _, test := range []struct {
 		value string
@@ -226,9 +227,10 @@ func newProofService(t *testing.T) (*Service, func() time.Time) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := New(store)
-	service.RequireProof = true
-	service.Origins = []string{testOrigin}
+	service, err := NewProofMode(store, []string{testOrigin})
+	if err != nil {
+		t.Fatal(err)
+	}
 	start := time.Now().UTC()
 	now := func() time.Time { return start }
 	service.now = now
@@ -300,4 +302,16 @@ func issueToken(t *testing.T, service *Service, k testKey) string {
 		t.Fatalf("IssueAccessToken() = %+v, %v", token, err)
 	}
 	return token.Token
+}
+
+func TestProofModeNormalizesItsOrigins(t *testing.T) {
+	service, err := NewProofMode(nil, []string{" https://Jaz.example:443 ", "http://10.0.0.5:5299", "wss://[::1]:443"})
+	if err != nil || !slices.Equal(service.origins, []string{"https://jaz.example", "http://10.0.0.5:5299", "https://[::1]"}) {
+		t.Fatalf("NewProofMode() = %v, %v", service, err)
+	}
+	for _, origins := range [][]string{nil, {"jaz.example"}, {"ftp://jaz.example"}} {
+		if _, err := NewProofMode(nil, origins); err == nil {
+			t.Errorf("NewProofMode(%q) accepted", origins)
+		}
+	}
 }

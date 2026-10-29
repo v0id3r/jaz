@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/wins/jaz/backend/internal/acp"
 	"github.com/wins/jaz/backend/internal/canvas"
@@ -51,17 +50,12 @@ func HTTPModule() fx.Option {
 }
 
 func NewDeviceAuth(store *sqlitestore.Store, cfg Config) (*deviceauth.Service, error) {
-	devices := deviceauth.New(store)
-	devices.RequireProof = cfg.Devices.RequireProof
-	for _, raw := range cfg.Devices.Origins {
-		origin := deviceauth.NormalizeOrigin(strings.TrimSpace(raw))
-		if origin == "" {
-			return nil, fmt.Errorf("jaz.devices.origins: %q is not an http(s) origin", raw)
-		}
-		devices.Origins = append(devices.Origins, origin)
+	if !cfg.Devices.RequireProof {
+		return deviceauth.New(store), nil
 	}
-	if devices.RequireProof && len(devices.Origins) == 0 {
-		return nil, fmt.Errorf("jaz.devices.requireproof needs jaz.devices.origins: the origins clients reach this server on")
+	devices, err := deviceauth.NewProofMode(store, cfg.Devices.Origins)
+	if err != nil {
+		return nil, fmt.Errorf("jaz.devices.origins: %v", err)
 	}
 	return devices, nil
 }

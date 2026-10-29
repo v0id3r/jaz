@@ -41,7 +41,7 @@ type issuedToken struct {
 // authenticates with a private_key_jwt assertion and binds the token to the
 // same key with a DPoP proof (RFC 9449 §5).
 func (s *Service) IssueAccessToken(assertion string, proof Proof) (AccessToken, error) {
-	if !s.RequireProof {
+	if !s.requireProof {
 		return AccessToken{}, ErrUnsupportedGrant
 	}
 	device, err := s.authenticateClient(assertion, proof)
@@ -88,7 +88,7 @@ func (s *Service) authenticateClient(assertion string, proof Proof) (storage.Dev
 	jws, ok := parseJWS(assertion, &header, &claims)
 	now, iat, exp := s.now(), time.Unix(claims.IAT, 0), time.Unix(claims.Exp, 0)
 	if !ok || header.Typ != "" && header.Typ != "client-authentication+jwt" || claims.Sub == "" || claims.Iss != claims.Sub ||
-		claims.JTI == "" || len(claims.JTI) > proofMaxJTILen || claims.Aud != NormalizeOrigin(claims.Aud) || !s.ownOrigin(claims.Aud, proof) ||
+		claims.JTI == "" || len(claims.JTI) > proofMaxJTILen || claims.Aud != normalizeOrigin(claims.Aud) || !s.ownOrigin(claims.Aud, proof) ||
 		now.Sub(iat).Abs() > proofMaxAge || !now.Before(exp) || exp.Sub(iat) > proofMaxAge {
 		return storage.Device{}, ErrInvalidClient
 	}
@@ -120,7 +120,7 @@ func (t *accessTokens) revoke(deviceID string) {
 // loadCredential resolves the device behind a credential hash: an issued
 // access token in proof mode, the long-lived device token otherwise.
 func (s *Service) loadCredential(hash string) (storage.Device, error) {
-	if !s.RequireProof {
+	if !s.requireProof {
 		return s.store.LoadDeviceByTokenHash(hash)
 	}
 	s.tokens.mu.Lock()
@@ -135,7 +135,7 @@ func (s *Service) loadCredential(hash string) (storage.Device, error) {
 // deviceCredential mints the long-lived device token. In proof mode the device
 // key is the credential, so the token column only keeps a unique placeholder.
 func (s *Service) deviceCredential(deviceID string) (token, hash string, err error) {
-	if s.RequireProof {
+	if s.requireProof {
 		return "", "key:" + deviceID, nil
 	}
 	token, err = newToken()
