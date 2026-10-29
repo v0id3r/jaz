@@ -44,7 +44,7 @@ func (h Handler) Token(w http.ResponseWriter, r *http.Request) {
 		writeTokenError(w, http.StatusBadRequest, "invalid_client")
 		return
 	}
-	token, err := h.service.IssueAccessToken(r.PostForm.Get("client_assertion"), RequestProof(r))
+	token, err := h.service.IssueAccessToken(r.PostForm.Get("client_assertion"), RequestProof(r), r.Header.Get(h.service.ProxyHeader()))
 	switch {
 	case errors.Is(err, deviceauth.ErrUnsupportedGrant):
 		writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type")
@@ -52,6 +52,9 @@ func (h Handler) Token(w http.ResponseWriter, r *http.Request) {
 		writeTokenError(w, http.StatusBadRequest, "invalid_client")
 	case errors.Is(err, deviceauth.ErrProofInvalid):
 		writeTokenError(w, http.StatusBadRequest, "invalid_dpop_proof")
+	// The user the proxy vouches for is the resource owner credential here.
+	case errors.Is(err, deviceauth.ErrUserInvalid):
+		writeTokenError(w, http.StatusBadRequest, "invalid_grant")
 	case err != nil:
 		httpapi.WriteError(w, http.StatusInternalServerError, err)
 	default:

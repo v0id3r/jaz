@@ -46,6 +46,9 @@ type Device struct {
 	LastSeenIP string    `json:"last_seen_ip,omitempty"`
 	UserAgent  string    `json:"user_agent,omitempty"`
 	AppVersion string    `json:"app_version,omitempty"`
+	// User is the identity a trusted auth proxy vouched for when the device
+	// first got an access token; approving the device again clears it.
+	User string `json:"user,omitempty"`
 }
 
 type SaveApprovedDevice struct {
