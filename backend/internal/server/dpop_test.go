@@ -26,9 +26,10 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	devices := deviceauth.New(store)
-	devices.RequireProof = true
-	devices.Origins = []string{"https://jaz.example"}
+	devices, err := deviceauth.NewProofMode(store, []string{"https://jaz.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	public, key, _ := ed25519.GenerateKey(rand.Reader)
 	sum := sha256.Sum256(public)
 	deviceID := hex.EncodeToString(sum[:])

@@ -88,7 +88,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		AuthRequired: s.AuthKey != "",
 		Capabilities: healthCapabilities{
 			SessionFileRead: true,
-			DeviceProof:     s.Devices != nil && s.Devices.RequireProof,
+			DeviceProof:     s.Devices != nil && s.Devices.RequireProof(),
 		},
 	})
 }
