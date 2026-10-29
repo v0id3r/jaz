@@ -47,14 +47,11 @@ type Store interface {
 }
 
 type Service struct {
-	// RequireProof makes every device request and remote registration prove
-	// possession of the device key with a DPoP proof, and replaces long-lived
-	// device tokens with access tokens from IssueAccessToken.
-	RequireProof bool
-	// Origins are the normalized origins clients reach this server on; proofs
+	requireProof bool
+	// origins are the normalized origins clients reach this server on; proofs
 	// and client assertions must name one of them or, on a direct loopback
 	// request, its own origin.
-	Origins []string
+	origins []string
 	store   Store
 	access  access
 	proofs  spentProofs
@@ -111,6 +108,30 @@ type contextKey struct{}
 
 func New(store Store) *Service {
 	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// NewProofMode returns a Service whose devices prove possession of their key
+// with a DPoP proof on every request and remote registration, and hold no
+// long-lived token but access tokens from IssueAccessToken. origins are the
+// origins clients reach this server on.
+func NewProofMode(store Store, origins []string) (*Service, error) {
+	if len(origins) == 0 {
+		return nil, errors.New("proof mode needs the origins clients reach this server on")
+	}
+	s := New(store)
+	s.requireProof = true
+	for _, raw := range origins {
+		origin := normalizeOrigin(strings.TrimSpace(raw))
+		if origin == "" {
+			return nil, fmt.Errorf("%q is not an http(s) origin", raw)
+		}
+		s.origins = append(s.origins, origin)
+	}
+	return s, nil
+}
+
+func (s *Service) RequireProof() bool {
+	return s.requireProof
 }
 
 func WithPrincipal(ctx context.Context, principal Principal) context.Context {

@@ -55,7 +55,7 @@ type spentProofs struct {
 // publicKey (the credential is bound to a key this client no longer holds)
 // and ErrProofInvalid for every other defect.
 func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
-	if !s.RequireProof {
+	if !s.requireProof {
 		return nil
 	}
 	var header struct {
@@ -90,8 +90,8 @@ func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
 // assertion's aud) names this server: one of its configured origins, or the
 // origin a local request reached it on.
 func (s *Service) ownOrigin(value string, proof Proof) bool {
-	origin := NormalizeOrigin(value)
-	return origin != "" && (slices.Contains(s.Origins, origin) || origin == NormalizeOrigin(proof.LocalOrigin))
+	origin := normalizeOrigin(value)
+	return origin != "" && (slices.Contains(s.origins, origin) || origin == normalizeOrigin(proof.LocalOrigin))
 }
 
 // jws is a compact JWS whose header and claims were decoded.
@@ -106,9 +106,9 @@ func parseJWS(token string, header, claims any) (jws, bool) {
 	return jws{signed: []byte(parts[0] + "." + parts[1]), sig: sig}, err == nil
 }
 
-// NormalizeOrigin reduces a URL to its scheme://host[:port] origin, folding
+// normalizeOrigin reduces a URL to its scheme://host[:port] origin, folding
 // WebSocket schemes and default ports into their HTTP form, or returns "".
-func NormalizeOrigin(raw string) string {
+func normalizeOrigin(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return ""

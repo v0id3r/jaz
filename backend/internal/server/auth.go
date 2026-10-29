@@ -85,7 +85,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 // a DPoP-bound access token, which must not be accepted as a bearer token
 // (RFC 9449 §7.2), nor a bearer token as one.
 func (s *Server) deviceToken(r *http.Request) string {
-	if s.Devices.RequireProof {
+	if s.Devices.RequireProof() {
 		return requestCredential(r, "DPoP")
 	}
 	return requestAuthKey(r)
@@ -95,7 +95,7 @@ func (s *Server) deviceToken(r *http.Request) string {
 // with challengeError unless the request presented no credential; the code in
 // the body stays what Jaz clients branch on.
 func (s *Server) writeUnauthorized(w http.ResponseWriter, code, challengeError string, err error) {
-	if s.Devices != nil && s.Devices.RequireProof {
+	if s.Devices != nil && s.Devices.RequireProof() {
 		challenge := `DPoP algs="` + deviceauth.ProofAlgs + `"`
 		if challengeError != "" {
 			challenge += `, error="` + challengeError + `"`
