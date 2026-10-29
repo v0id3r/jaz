@@ -148,14 +148,15 @@ export function createConnectionSession(deps: Dependencies) {
     const session = request.session
     if (request.revision !== snapshot.revision || (snapshot.phase !== 'pending' && snapshot.phase !== 'connected') ||
       session.url !== snapshot.url || !validBackendOrigin(session.url) || typeof session.token !== 'string' || typeof session.deviceId !== 'string' || typeof session.remembered !== 'boolean' ||
-      (session.token && (!session.token.startsWith('jaz_') || !session.deviceId))) {
+      (session.token && (!session.token.startsWith('jaz_') || !session.deviceId)) ||
+      (session.deviceKey !== undefined && (typeof session.deviceKey !== 'boolean' || session.deviceKey && (session.token || !session.deviceId)))) {
       throw new Error('Connection session was replaced')
     }
     if (localFlight?.settled) {
       localFlight = null
     }
     return change({ phase: 'connected', url: session.url,
-      session: { url: session.url, token: session.token, deviceId: session.deviceId, remembered: session.remembered },
+      session: { url: session.url, token: session.token, deviceId: session.deviceId, ...(session.deviceKey && { deviceKey: true }), remembered: session.remembered },
       error: null, localPending: false }, record.window)
   }
 
@@ -204,7 +205,7 @@ export function createConnectionSession(deps: Dependencies) {
       throw new Error('Local device verification failed')
     }
     const access = deviceAccess(await check.json(), profile.device_id)
-    return { url: LOCAL_URL, token: body.token ?? '', deviceId: access.deviceId, ticket: access.ticket, remembered: false }
+    return { url: LOCAL_URL, token: body.token ?? '', deviceId: access.deviceId, ...(keyed && { deviceKey: true }), ticket: access.ticket, remembered: false }
   }
 
   async function local(event: IpcMainInvokeEvent, document: number, revision: number): Promise<LocalSession> {

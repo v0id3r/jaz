@@ -140,10 +140,10 @@ function activate(value: Attempt, candidate: Candidate): void {
   }
   if (ownsConnection && bridge && desktop) {
     authoritative = bridge.update({ operation: 'commit', document: desktop.document, revision: value.revision,
-      session: { url: candidate.url, token: candidate.token, deviceId: candidate.deviceId, remembered: candidate.remembered } })
+      session: { url: candidate.url, token: candidate.token, deviceId: candidate.deviceId, deviceKey: candidate.deviceKey, remembered: candidate.remembered } })
     value.revision = authoritative.revision
   }
-  setApiAuthToken(candidate.url, candidate.token, candidate.ticket, keyCandidate(candidate))
+  setApiAuthToken(candidate.url, candidate.token, candidate.ticket, candidate.deviceKey)
   setState({ status: 'connected', url: candidate.url, pairing: null, error: null })
   if (ownsConnection) {
     if (candidate.url === LOCAL_URL && clientRuntime.kind === 'electron') {
@@ -159,13 +159,8 @@ function activate(value: Attempt, candidate: Candidate): void {
   }
 }
 
-// A device without a token is in proof mode: its key is the credential.
-function keyCandidate(candidate: Candidate): boolean {
-  return !candidate.token && Boolean(candidate.deviceId)
-}
-
 function readCandidateAccess(value: Attempt, candidate: Candidate): Promise<Access> {
-  return keyCandidate(candidate)
+  return candidate.deviceKey
     ? readKeyAccess(value.url, candidate.deviceId, value.controller.signal)
     : readAccess(value.url, candidate.token, value.controller.signal, candidate.deviceId || undefined)
 }
@@ -176,7 +171,7 @@ async function connectWithKey(value: Attempt, remembered: boolean): Promise<Acce
   const access = await readKeyAccess(value.url, (await getDeviceIdentity(true)).device_id, value.controller.signal)
   if (access.ok && current(value)) {
     forgetApiAuthToken(value.url)
-    activate(value, { url: value.url, token: '', deviceId: access.deviceId, ticket: access.ticket, remembered })
+    activate(value, { url: value.url, token: '', deviceId: access.deviceId, deviceKey: true, ticket: access.ticket, remembered })
   }
   return access
 }
@@ -210,7 +205,7 @@ function schedulePoll(value: Attempt, candidate: Candidate): void {
     if (!current(value)) {
       return
     }
-    const access = health.ok && (candidate.token || candidate.deviceId) ? await readCandidateAccess(value, candidate) : health
+    const access = health.ok && (candidate.token || candidate.deviceKey) ? await readCandidateAccess(value, candidate) : health
     if (!current(value)) {
       return
     }
@@ -257,7 +252,7 @@ async function register(value: Attempt, credential: string, proofRequired: boole
     return null
   }
   if (response.status === 200 && (proofRequired ? body?.device : body?.token)) {
-    return verify(value, { url: value.url, token: body?.token ?? '', deviceId: profile.device_id, remembered: false })
+    return verify(value, { url: value.url, token: body?.token ?? '', deviceId: profile.device_id, deviceKey: proofRequired, remembered: false })
   }
   if (response.status === 202 && body?.pairing && body.pairing_secret) {
     pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id, proofRequired)
@@ -287,7 +282,7 @@ function pending(value: Attempt, pairing: PendingPairing, deviceId: string, proo
         return
       }
       if (response.ok && body?.pairing?.status === 'approved' && (proofRequired || body.token)) {
-        await verify(value, { url: value.url, token: body.token ?? '', deviceId, remembered: false })
+        await verify(value, { url: value.url, token: body.token ?? '', deviceId, deviceKey: proofRequired, remembered: false })
         return
       }
       if (!response.ok || body?.pairing?.status === 'rejected' || body?.pairing?.status === 'expired') {
@@ -474,7 +469,7 @@ export function rememberConnection(): string | null {
     }
     if (bridge && desktop) {
       authoritative = bridge.update({ operation: 'commit', document: desktop.document, revision: value.revision,
-        session: { url: state.url, token, deviceId: authoritative?.session?.deviceId || '', remembered: true } })
+        session: { url: state.url, token, deviceId: authoritative?.session?.deviceId || '', deviceKey: apiUsesDeviceKey(state.url), remembered: true } })
       value.revision = authoritative.revision
     }
     savePreference({ mode: 'remote', remoteUrl: state.url })
@@ -502,7 +497,7 @@ async function hydrate(snapshot: SessionSnapshot): Promise<void> {
   invalidate()
   if (snapshot.phase === 'connected' && snapshot.session) {
     const value = begin(snapshot.url, false)
-    if (snapshot.session.token || snapshot.session.deviceId) {
+    if (snapshot.session.token || snapshot.session.deviceKey) {
       await verify(value, snapshot.session)
     } else {
       activate(value, snapshot.session)

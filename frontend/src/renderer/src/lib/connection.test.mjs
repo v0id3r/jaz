@@ -609,7 +609,7 @@ test('proof mode pairs the key, saves nothing, and renews a token the backend fo
   expect(connection.useConnection().status).toBe('connected')
   expect(connection.apiUsesDeviceKey()).toBe(true)
   expect(connection.cachedApiAuthToken()).toBe('')
-  expect(session.read().snapshot.session).toMatchObject({ token: '', deviceId: 'identity' })
+  expect(session.read().snapshot.session).toMatchObject({ token: '', deviceId: 'identity', deviceKey: true })
   expect(connection.rememberConnection()).toBeNull()
   expect([...stored.keys()].some((key) => key.startsWith('jaz.backendAuth.'))).toBe(false)
   expect((await connection.apiFetch('/fixture/feature')).status).toBe(200)
