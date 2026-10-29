@@ -315,7 +315,6 @@ func (s *Service) RevokeDevice(id string) (storage.Device, error) {
 	device, err := s.store.RevokeDevice(strings.TrimSpace(id), s.now())
 	if err == nil {
 		s.cancelAccessLocked(device.ID)
-		s.tokens.revoke(device.ID)
 	}
 	return device, err
 }

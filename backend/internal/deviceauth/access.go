@@ -88,8 +88,11 @@ func (s *Service) AuthenticateResourceTicket(token string) (Principal, error) {
 	return Principal{Kind: PrincipalDevice, DeviceID: device.ID, CredentialHash: entry.tokenHash}, nil
 }
 
+// cancelAccessLocked ends what a device's earlier approval granted: its open
+// requests and its access tokens.
 func (s *Service) cancelAccessLocked(deviceID string) {
 	for _, cancel := range s.access.active[deviceID] {
 		cancel()
 	}
+	s.tokens.revoke(deviceID)
 }
