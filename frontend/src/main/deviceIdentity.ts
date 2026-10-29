@@ -1,10 +1,11 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, type KeyObject } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { arch, hostname, platform } from 'node:os'
 import { dirname, join } from 'node:path'
-import { app } from 'electron'
+import { app, safeStorage } from 'electron'
 import { buildDeviceProof } from '@shared/deviceProof'
+import { keychainAvailable } from '@main/keychain'
 
 export type DeviceIdentity = {
   device_id: string
@@ -19,12 +20,11 @@ export type DeviceMetadata = {
   app_version: string
 }
 
-type StoredIdentity = DeviceIdentity & {
-  version: 1
-  public_key_pem: string
-  private_key_pem: string
-  created_at_ms: number
-}
+// Version 2 keeps the private key sealed by the system keychain, so a copy of
+// userData alone cannot sign device proofs. Version 1 holds it in plain text
+// and is sealed on first read wherever a keychain is available.
+type StoredIdentity = DeviceIdentity & { public_key_pem: string; created_at_ms: number } &
+  ({ version: 1; private_key_pem: string } | { version: 2; private_key_sealed: string })
 
 const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 
@@ -35,10 +35,24 @@ export function getDeviceIdentity(): DeviceIdentity {
 
 function storedIdentity(): StoredIdentity {
   const existing = readStoredIdentity()
-  if (existing) return existing
-  const created = createIdentity()
-  writeStoredIdentity(created)
-  return created
+  if (existing?.version === 2 || (existing && !keychainAvailable())) return existing
+  const plain = existing ?? createIdentity()
+  const stored = keychainAvailable() ? sealIdentity(plain) : plain
+  writeStoredIdentity(stored)
+  return stored
+}
+
+function sealIdentity({ private_key_pem, ...identity }: Extract<StoredIdentity, { version: 1 }>): StoredIdentity {
+  return { ...identity, version: 2, private_key_sealed: safeStorage.encryptString(private_key_pem).toString('base64') }
+}
+
+function privateKeyPem(identity: StoredIdentity): string {
+  if (identity.version === 1) return identity.private_key_pem
+  try {
+    return safeStorage.decryptString(Buffer.from(identity.private_key_sealed, 'base64'))
+  } catch (error) {
+    throw new Error('Could not unlock the device key. Allow Jaz access to your system keychain, then restart Jaz.', { cause: error })
+  }
 }
 
 let signingKey: { publicKey: string; key: KeyObject } | undefined
@@ -47,7 +61,11 @@ let signingKey: { publicKey: string; key: KeyObject } | undefined
 export function deviceProof(method: string, url: string, token?: string): Promise<string> {
   if (!signingKey) {
     const identity = storedIdentity()
-    signingKey = { publicKey: identity.public_key, key: createPrivateKey(identity.private_key_pem) }
+    const pem = privateKeyPem(identity)
+    if (!keyPairMatches(identity.public_key_pem, pem)) {
+      throw new Error('Device identity keys do not match')
+    }
+    signingKey = { publicKey: identity.public_key, key: createPrivateKey(pem) }
   }
   const { publicKey, key } = signingKey
   return buildDeviceProof(publicKey, async (input) => sign(null, input, key), method, url, token)
@@ -76,19 +94,18 @@ function readStoredIdentity(): StoredIdentity | null {
     throw new Error('Could not read the existing device identity', { cause: error })
   }
   try {
-    const parsed = JSON.parse(contents) as Partial<StoredIdentity>
+    const identity = JSON.parse(contents) as StoredIdentity
     if (
-      parsed.version !== 1 ||
-      typeof parsed.public_key_pem !== 'string' ||
-      typeof parsed.private_key_pem !== 'string'
+      typeof identity.public_key_pem !== 'string' ||
+      !(identity.version === 1 && typeof identity.private_key_pem === 'string') &&
+      !(identity.version === 2 && typeof identity.private_key_sealed === 'string')
     ) {
       throw new Error('Invalid device identity format')
     }
-    const identity = parsed as StoredIdentity
     const raw = rawPublicKey(identity.public_key_pem)
-    const publicKey = base64Url(raw)
-    const deviceID = deviceIDForRawKey(raw)
-    if (identity.device_id !== deviceID || identity.public_key !== publicKey || !keyPairMatches(identity)) {
+    // A sealed private key is checked against the public one when it is unsealed.
+    if (identity.device_id !== deviceIDForRawKey(raw) || identity.public_key !== base64Url(raw) ||
+      (identity.version === 1 && !keyPairMatches(identity.public_key_pem, identity.private_key_pem))) {
       throw new Error('Device identity keys do not match')
     }
     return identity
@@ -97,7 +114,7 @@ function readStoredIdentity(): StoredIdentity | null {
   }
 }
 
-function createIdentity(): StoredIdentity {
+function createIdentity(): Extract<StoredIdentity, { version: 1 }> {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519')
   const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' })
   const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' })
@@ -112,10 +129,13 @@ function createIdentity(): StoredIdentity {
   }
 }
 
+// Written beside the target and renamed over it, so sealing an existing
+// identity can never leave it half-written.
 function writeStoredIdentity(identity: StoredIdentity): void {
   const file = identityPath()
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-  writeFileSync(file, `${JSON.stringify(identity, null, 2)}\n`, { mode: 0o600 })
+  writeFileSync(file + '.tmp', `${JSON.stringify(identity, null, 2)}\n`, { mode: 0o600 })
+  renameSync(file + '.tmp', file)
 }
 
 function identityPath(): string {
@@ -131,11 +151,11 @@ function rawPublicKey(publicKeyPem: string): Buffer {
   return spki
 }
 
-function keyPairMatches(identity: Pick<StoredIdentity, 'public_key_pem' | 'private_key_pem'>): boolean {
+function keyPairMatches(publicKeyPem: string, privateKeyPem: string): boolean {
   try {
     const payload = Buffer.from('jaz-device-identity-self-check')
-    const signature = sign(null, payload, createPrivateKey(identity.private_key_pem))
-    return verify(null, payload, createPublicKey(identity.public_key_pem), signature)
+    const signature = sign(null, payload, createPrivateKey(privateKeyPem))
+    return verify(null, payload, createPublicKey(publicKeyPem), signature)
   } catch {
     return false
   }

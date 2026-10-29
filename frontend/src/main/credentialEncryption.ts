@@ -1,5 +1,6 @@
 import { ipcMain, safeStorage } from 'electron'
 import { trustedWindow } from '@main/permissions'
+import { keychainAvailable } from '@main/keychain'
 
 export function installCredentialEncryption(): void {
   ipcMain.on('jaz:credential-encryption', (event, operation: unknown, value: unknown) => {
@@ -8,7 +9,7 @@ export function installCredentialEncryption(): void {
       if (typeof value !== 'string' || value.length > 16_384 || (operation !== 'encrypt' && operation !== 'decrypt')) {
         throw new Error('Invalid credential request')
       }
-      if (!safeStorage.isEncryptionAvailable() || (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text')) {
+      if (!keychainAvailable()) {
         throw new Error('Saved connections require an available system keychain')
       }
       event.returnValue = { value: operation === 'encrypt'
