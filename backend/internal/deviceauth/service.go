@@ -367,7 +367,7 @@ func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
 
 func normalizeDeviceIdentity(publicKey, deviceID string) (string, string, error) {
 	raw, err := decodeRawPublicKey(publicKey)
-	if err != nil || len(raw) != 32 {
+	if err != nil || len(raw) != 32 && !validP256(raw) {
 		return "", "", ErrInvalidIdentity
 	}
 	sum := sha256.Sum256(raw)
