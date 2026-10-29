@@ -47,6 +47,8 @@ func HTTPModule() fx.Option {
 	)
 }
 
-func NewDeviceAuth(store *sqlitestore.Store) *deviceauth.Service {
-	return deviceauth.New(store)
+func NewDeviceAuth(store *sqlitestore.Store, cfg Config) *deviceauth.Service {
+	devices := deviceauth.New(store)
+	devices.RequireProof = cfg.Devices.RequireProof
+	return devices
 }

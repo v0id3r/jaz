@@ -4,6 +4,7 @@ import { BrowserWindow, Notification, shell } from 'electron'
 import appIcon from '../assets/jaz-icon-1024.png?asset'
 import { threadNotificationPath, type ThreadCompletion } from '../shared/notifications'
 import { createThreadCompletionMonitor } from './notificationMonitor'
+import { deviceProof } from './deviceIdentity'
 import { logMain } from '@main/diagnostics'
 
 export function createThreadNotificationMonitor(openInMain: (path: string) => void) {
@@ -16,7 +17,7 @@ export function createThreadNotificationMonitor(openInMain: (path: string) => vo
     })
     notification.on('click', () => openInMain(threadNotificationPath(completion.id)))
     notification.show()
-  })
+  }, fetch, deviceProof)
 }
 
 // Resolves whether macOS showed a test notification. Until the user answers

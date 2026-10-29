@@ -1,15 +1,24 @@
 import type { ComputerAPI } from '@shared/computerControl'
 import { ComputerRepl } from '@/lib/computerRepl'
 
-export function connectComputer(url: string, host: ComputerAPI, sessionId: string, protocols: string[] = []): () => void {
+// open is called per attempt: each handshake needs a fresh device proof.
+export function connectComputer(open: () => Promise<WebSocket>, host: ComputerAPI, sessionId: string): () => void {
   const repl = new ComputerRepl(host, sessionId)
   let stopped = false
-  let socket: WebSocket
+  let socket: WebSocket | undefined
   let retry: ReturnType<typeof setTimeout>
   let active: number | undefined
-  const connect = () => {
-    socket = new WebSocket(url, protocols)
-    const current = socket
+  const connect = async () => {
+    const current = await open().catch(() => null)
+    if (stopped) {
+      current?.close()
+      return
+    }
+    if (!current) {
+      retry = setTimeout(connect, 2000)
+      return
+    }
+    socket = current
     current.onmessage = async (event) => {
       if (stopped) {
         return
@@ -61,11 +70,11 @@ export function connectComputer(url: string, host: ComputerAPI, sessionId: strin
       }
     }
   }
-  connect()
+  void connect()
   return () => {
     stopped = true
     clearTimeout(retry)
-    socket.close()
+    socket?.close()
     repl.cancel()
   }
 }

@@ -12,6 +12,7 @@ import {
   type SessionSnapshot,
 } from '@shared/connectionSession'
 import type { DeviceIdentity, DeviceMetadata } from '@main/deviceIdentity'
+import { deviceAuthHeaders } from '@shared/deviceProof'
 
 const LOCAL_URL = 'http://127.0.0.1:5299'
 type WindowDocument = { window: BrowserWindow; document: number; frame?: WebFrameMain; active: boolean }
@@ -19,6 +20,7 @@ type Dependencies = {
   rendererPath: string
   startLocal: () => Promise<{ ok: boolean; url?: string; key?: string; error?: string }>
   profile: () => DeviceIdentity & DeviceMetadata
+  proof: (method: string, url: string, token: string) => Promise<string>
   stopConsumers: () => void
 }
 
@@ -194,7 +196,8 @@ export function createConnectionSession(deps: Dependencies) {
       throw new Error(body.error || 'Local device registration failed')
     }
     const check = await fetch(LOCAL_URL + '/v1/auth/check', {
-      redirect: 'error', headers: { Authorization: `Bearer ${body.token}`, 'X-Jaz-Client-Platform': 'desktop' }, signal: AbortSignal.timeout(3000),
+      redirect: 'error', signal: AbortSignal.timeout(3000),
+      headers: { ...deviceAuthHeaders(body.token, await deps.proof('GET', LOCAL_URL + '/v1/auth/check', body.token)), 'X-Jaz-Client-Platform': 'desktop' },
     })
     if (!check.ok) {
       throw new Error('Local device verification failed')

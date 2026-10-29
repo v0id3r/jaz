@@ -143,6 +143,8 @@ if (process.argv.includes(CLAUDE_VOICE_ARGUMENT)) {
       ipcRenderer.invoke('jaz:start-local-backend'),
     getDeviceIdentity: (): Promise<{ device_id: string; public_key: string }> =>
       ipcRenderer.invoke('jaz:get-device-identity'),
+    deviceProof: (method: string, url: string, token?: string): Promise<string> =>
+      ipcRenderer.invoke('jaz:device-proof', method, url, token),
     getDeviceMetadata: (): Promise<{
       name: string
       platform: string

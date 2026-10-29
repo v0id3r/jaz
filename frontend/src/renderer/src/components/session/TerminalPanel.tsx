@@ -64,14 +64,13 @@ export function TerminalPanel({
       cols: String(term.cols),
       rows: String(term.rows),
     })
-    const socket = apiWebSocket(`/v1/sessions/${session.id}/terminal?${params}`)
-    socketRef.current = socket
+    let socket: WebSocket | null = null
     setStatus('connecting')
     setError('')
     setExitCode(null)
 
     const send = (message: object) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
     }
     const fitNow = () => {
       if (disposed || !host.clientWidth || !host.clientHeight) return
@@ -87,44 +86,54 @@ export function TerminalPanel({
     const dataDisposable = term.onData((data) => send({ type: 'input', data }))
     const resizeDisposable = term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }))
 
-    socket.onopen = () => {
+    const fail = (message = 'Terminal connection failed.') => {
       if (disposed) return
-      setStatus('connected')
-      window.setTimeout(fitNow, 0)
-    }
-    socket.onmessage = (event) => {
-      if (disposed || typeof event.data !== 'string') return
-      const msg = parseServerMessage(event.data)
-      if (!msg) return
-      if (msg.type === 'ready') {
-        setRemoteCwd(msg.cwd || cwd)
-        setStatus('connected')
-      } else if (msg.type === 'output') {
-        term.write(msg.data ?? '')
-      } else if (msg.type === 'exit') {
-        setExitCode(msg.code ?? null)
-        setStatus('exited')
-        if (msg.error) setError(msg.error)
-      } else if (msg.type === 'error') {
-        setError(msg.error || 'Terminal error.')
-        setStatus('error')
-      }
-    }
-    socket.onerror = () => {
-      if (disposed) return
-      setError('Terminal connection failed.')
+      setError(message)
       setStatus('error')
     }
-    socket.onclose = () => {
-      if (disposed) return
-      socketRef.current = null
-      if (restartPendingRef.current) {
-        restartPendingRef.current = false
-        setConnectNonce((n) => n + 1)
+    const attach = (opened: WebSocket) => {
+      if (disposed) {
+        opened.close()
         return
       }
-      setStatus((current) => (current === 'exited' || current === 'error' ? current : 'closed'))
+      socket = opened
+      socketRef.current = opened
+      opened.onopen = () => {
+        if (disposed) return
+        setStatus('connected')
+        window.setTimeout(fitNow, 0)
+      }
+      opened.onmessage = (event) => {
+        if (disposed || typeof event.data !== 'string') return
+        const msg = parseServerMessage(event.data)
+        if (!msg) return
+        if (msg.type === 'ready') {
+          setRemoteCwd(msg.cwd || cwd)
+          setStatus('connected')
+        } else if (msg.type === 'output') {
+          term.write(msg.data ?? '')
+        } else if (msg.type === 'exit') {
+          setExitCode(msg.code ?? null)
+          setStatus('exited')
+          if (msg.error) setError(msg.error)
+        } else if (msg.type === 'error') {
+          setError(msg.error || 'Terminal error.')
+          setStatus('error')
+        }
+      }
+      opened.onerror = () => fail()
+      opened.onclose = () => {
+        if (disposed) return
+        socketRef.current = null
+        if (restartPendingRef.current) {
+          restartPendingRef.current = false
+          setConnectNonce((n) => n + 1)
+          return
+        }
+        setStatus((current) => (current === 'exited' || current === 'error' ? current : 'closed'))
+      }
     }
+    apiWebSocket(`/v1/sessions/${session.id}/terminal?${params}`).then(attach, (error: Error) => fail(error.message))
     window.setTimeout(fitNow, 0)
 
     return () => {
@@ -133,9 +142,9 @@ export function TerminalPanel({
       dataDisposable.dispose()
       resizeDisposable.dispose()
       restartPendingRef.current = false
-      socket.close()
+      socket?.close()
       term.dispose()
-      if (socketRef.current === socket) socketRef.current = null
+      if (socket && socketRef.current === socket) socketRef.current = null
       if (termRef.current === term) termRef.current = null
     }
   }, [connectNonce, cwd, session.id])

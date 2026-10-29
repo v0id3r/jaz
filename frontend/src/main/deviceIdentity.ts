@@ -1,9 +1,10 @@
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto'
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, type KeyObject } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { arch, hostname, platform } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
+import { buildDeviceProof } from '@shared/deviceProof'
 
 export type DeviceIdentity = {
   device_id: string
@@ -28,11 +29,28 @@ type StoredIdentity = DeviceIdentity & {
 const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 
 export function getDeviceIdentity(): DeviceIdentity {
+  const { device_id, public_key } = storedIdentity()
+  return { device_id, public_key }
+}
+
+function storedIdentity(): StoredIdentity {
   const existing = readStoredIdentity()
-  if (existing) return { device_id: existing.device_id, public_key: existing.public_key }
+  if (existing) return existing
   const created = createIdentity()
   writeStoredIdentity(created)
-  return { device_id: created.device_id, public_key: created.public_key }
+  return created
+}
+
+let signingKey: { publicKey: string; key: KeyObject } | undefined
+
+// Builds the proof here so the renderer never gets a general signing oracle.
+export function deviceProof(method: string, url: string, token?: string): Promise<string> {
+  if (!signingKey) {
+    const identity = storedIdentity()
+    signingKey = { publicKey: identity.public_key, key: createPrivateKey(identity.private_key_pem) }
+  }
+  const { publicKey, key } = signingKey
+  return buildDeviceProof(publicKey, async (input) => sign(null, input, key), method, url, token)
 }
 
 export function getDeviceMetadata(): DeviceMetadata {

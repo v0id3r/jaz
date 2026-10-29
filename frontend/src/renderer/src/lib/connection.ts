@@ -7,7 +7,7 @@ import {
 } from '@/lib/api/client'
 import { rememberBackend, removeKnownBackend } from '@/lib/backends'
 import { clientRuntime } from '@/lib/clientRuntime'
-import { getDeviceProfile } from '@/lib/deviceIdentity'
+import { deviceProof, getDeviceProfile } from '@/lib/deviceIdentity'
 import { queryClient } from '@/lib/query/queryClient'
 import { readAccess, readHealth, readJSON } from '@/lib/connectionProbe'
 import type { ResourceTicket, SessionSnapshot, VerifiedSession } from '@shared/connectionSession'
@@ -211,14 +211,21 @@ async function serialized<T>(value: Attempt, issue: () => Promise<T>): Promise<T
   return next
 }
 
+// Registration proves the device holds the key it registers; it has no token yet.
+async function keyProof(url: string): Promise<Record<string, string>> {
+  const proof = await deviceProof('POST', url)
+  return proof ? { DPoP: proof } : {}
+}
+
 async function register(value: Attempt, credential: string): Promise<string | null> {
   const profile = await getDeviceProfile()
   if (!current(value)) {
     return null
   }
+  const proof = await keyProof(value.url + '/v1/devices/register')
   const response = await serialized(value, () => fetch(value.url + '/v1/devices/register', {
     method: 'POST', redirect: 'error',
-    headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
+    headers: { Authorization: `Bearer ${credential}`, ...proof, 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
     body: JSON.stringify({ ...profile, kind: clientRuntime.deviceKind }), signal: AbortSignal.timeout(5000),
   }))
   if (!response || !current(value)) {
@@ -281,8 +288,12 @@ async function pair(value: Attempt): Promise<string | null> {
   if (!current(value)) {
     return null
   }
+  const proof = await keyProof(value.url + '/v1/devices/pairing-requests')
+  if (!current(value)) {
+    return null
+  }
   const response = await fetch(value.url + '/v1/devices/pairing-requests', {
-    method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
+    method: 'POST', redirect: 'error', headers: { ...proof, 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
     body: JSON.stringify({ ...profile, kind: clientRuntime.deviceKind }), signal: AbortSignal.any([value.controller.signal, AbortSignal.timeout(5000)]),
   })
   const body = await readJSON<{ pairing?: { id: string; expires_at: string }; pairing_secret?: string; error?: string }>(response)

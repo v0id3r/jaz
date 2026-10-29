@@ -78,7 +78,7 @@ func TestRegisterApprovedApprovesDeviceAfterBootstrap(t *testing.T) {
 	if approved.Token == "" || approved.Pairing != nil || approved.Device.Status != storage.DeviceStatusApproved {
 		t.Fatalf("approved registration = %#v", approved)
 	}
-	if _, err := service.Authenticate(approved.Token, SeenInfo{}); err != nil {
+	if _, err := service.Authenticate(approved.Token, Proof{}, SeenInfo{}); err != nil {
 		t.Fatalf("approved token auth: %v", err)
 	}
 
@@ -149,7 +149,7 @@ func TestCreatePairingReplacesPendingRequestForDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Authenticate(poll.Token, SeenInfo{}); err != nil {
+	if _, err := service.Authenticate(poll.Token, Proof{}, SeenInfo{}); err != nil {
 		t.Fatalf("replacement token auth: %v", err)
 	}
 }

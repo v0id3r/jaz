@@ -29,6 +29,7 @@ export interface ClientRuntime {
   setWindowButtonsVisible?: (visible: boolean) => void
   startLocalBackend?: () => Promise<{ ok: boolean; url?: string; key?: string; error?: string }>
   getDeviceIdentity?: () => Promise<{ device_id: string; public_key: string }>
+  deviceProof?: (method: string, url: string, token?: string) => Promise<string>
   getDeviceMetadata?: () => Promise<{
     name: string
     platform: string
@@ -80,6 +81,7 @@ function createRuntime(): ClientRuntime {
       setWindowButtonsVisible: electron.setWindowButtonsVisible,
       startLocalBackend: electron.startLocalBackend,
       getDeviceIdentity: electron.getDeviceIdentity,
+      deviceProof: electron.deviceProof,
       encryptCredential: electron.encryptCredential,
       decryptCredential: electron.decryptCredential,
       getDeviceMetadata: electron.getDeviceMetadata,

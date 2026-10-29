@@ -1,3 +1,4 @@
+import { base64Url, buildDeviceProof } from '@shared/deviceProof'
 import { clientRuntime } from './clientRuntime'
 
 export type DeviceIdentity = {
@@ -16,6 +17,7 @@ export type DeviceMetadata = {
 export type DeviceProfile = DeviceIdentity & DeviceMetadata
 
 const DEVICE_IDENTITY_KEY = 'jaz.deviceIdentity'
+const DEVICE_KEY_DB = 'jaz-device-key'
 
 export async function getDeviceIdentity(): Promise<DeviceIdentity> {
   if (clientRuntime.getDeviceIdentity) return clientRuntime.getDeviceIdentity()
@@ -39,7 +41,62 @@ async function getDeviceMetadata(): Promise<DeviceMetadata> {
   }
 }
 
+// The device proof for one request, or '' where this runtime holds no device key.
+export async function deviceProof(method: string, url: string, token?: string): Promise<string> {
+  if (clientRuntime.deviceProof) return clientRuntime.deviceProof(method, url, token)
+  const key = await browserKey()
+  return key ? buildDeviceProof(key.identity.public_key, async (input) => new Uint8Array(await crypto.subtle.sign('Ed25519', key.privateKey, input as BufferSource)), method, url, token) : ''
+}
+
+type BrowserKey = { identity: DeviceIdentity; privateKey: CryptoKey }
+
+let browserKeyPromise: Promise<BrowserKey | null> | undefined
+
+// A non-extractable Ed25519 key kept in IndexedDB. Only browsers that lack
+// IndexedDB or Ed25519 fall back to the keyless identity and send no proofs;
+// any other failure surfaces and is retried on the next call.
+function browserKey(): Promise<BrowserKey | null> {
+  browserKeyPromise ??= loadBrowserKey().catch((error) => {
+    browserKeyPromise = undefined
+    throw error
+  })
+  return browserKeyPromise
+}
+
+async function loadBrowserKey(): Promise<BrowserKey | null> {
+  if (typeof indexedDB === 'undefined' || !crypto.subtle) return null
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const open = indexedDB.open(DEVICE_KEY_DB, 1)
+    open.onupgradeneeded = () => open.result.createObjectStore('keys')
+    open.onsuccess = () => resolve(open.result)
+    open.onerror = () => reject(open.error)
+  })
+  const keys = (mode: IDBTransactionMode) => db.transaction('keys', mode).objectStore('keys')
+  const read = () => idbRequest<CryptoKeyPair | undefined>(keys('readonly').get('device'))
+  let pair = await read()
+  if (!pair) {
+    const created = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])
+      .catch((error: unknown) => (error as DOMException)?.name === 'NotSupportedError' ? null : Promise.reject(error)) as CryptoKeyPair | null
+    if (!created) return null
+    // add() fails when another tab stored its key first; every tab then uses that one.
+    await idbRequest(keys('readwrite').add(created, 'device')).catch(() => {})
+    pair = await read()
+  }
+  if (!pair) throw new Error('Could not store the device key')
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey))
+  return { identity: { device_id: await sha256Hex(raw), public_key: base64Url(raw) }, privateKey: pair.privateKey }
+}
+
+function idbRequest<T>(request: IDBRequest): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result as T)
+    request.onerror = () => reject(request.error)
+  })
+}
+
 async function getBrowserDeviceIdentity(): Promise<DeviceIdentity> {
+  const key = await browserKey()
+  if (key) return key.identity
   const stored = readStoredBrowserIdentity()
   if (stored) return stored
   const bytes = new Uint8Array(32)
@@ -68,12 +125,6 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const input = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
   const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', input))
   return Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
-function base64Url(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/g, '')
 }
 
 function defaultBrowserDeviceName(platform: string): string {

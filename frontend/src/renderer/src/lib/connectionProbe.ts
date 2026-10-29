@@ -1,4 +1,4 @@
-import { CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER, secureBackendConnection } from '@/lib/api/client'
+import { CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER, deviceRequestHeaders, secureBackendConnection } from '@/lib/api/client'
 import { clientRuntime } from '@/lib/clientRuntime'
 import { deviceAccess, type ResourceTicket } from '@shared/connectionSession'
 
@@ -48,10 +48,13 @@ export async function readAccess(url: string, token: string, signal?: AbortSigna
   }
   try {
     const response = await fetch(url + '/v1/auth/check', {
-      headers: { Authorization: `Bearer ${token}`, [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
+      headers: { ...await deviceRequestHeaders('GET', url + '/v1/auth/check', token), [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
       redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000),
     })
     const body = await readJSON<{ ok?: boolean; auth_kind?: string; error?: string; code?: string }>(response)
+    if (body?.code === 'invalid_dpop_proof') {
+      return { ok: false, error: body.error || 'Device proof was rejected', recoverable: true, code: body.code }
+    }
     if (!response.ok) {
       return { ok: false, error: response.status === 401 ? 'Backend key was rejected' : body?.error || 'Backend authentication failed', recoverable: response.status >= 500, code: body?.code }
     }

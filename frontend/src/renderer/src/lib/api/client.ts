@@ -2,6 +2,8 @@ import { readAPIResponse } from '@/lib/api/response'
 import { DEFAULT_API_BASE_URL, clientRuntime } from '@/lib/clientRuntime'
 import { isPreviewProxyTargetHostname } from '@shared/preview'
 import type { ResourceTicket } from '@shared/connectionSession'
+import { deviceAuthHeaders } from '@shared/deviceProof'
+import { deviceProof } from '@/lib/deviceIdentity'
 
 export { ApiError } from '@/lib/api/response'
 
@@ -134,16 +136,20 @@ export function apiWebSocketUrl(path: string): string {
   return url.toString()
 }
 
-export function apiWebSocketProtocols(): string[] {
+// Browsers cannot set headers on a WebSocket handshake, so the token and its
+// proof travel as subprotocols.
+export async function apiWebSocket(path: string): Promise<WebSocket> {
   if (!secureBackendConnection(apiBaseUrl())) {
     throw new Error('Remote connections require HTTPS')
   }
+  const revision = credentialRevision
+  const url = apiWebSocketUrl(path)
   const token = cachedApiAuthToken()
-  return token ? ['jaz', `jaz-auth.${token}`] : []
-}
-
-export function apiWebSocket(path: string): WebSocket {
-  const socket = new WebSocket(apiWebSocketUrl(path), apiWebSocketProtocols())
+  const proof = token ? await deviceProof('GET', url, token) : ''
+  if (revision !== credentialRevision) {
+    throw new Error('The connection changed before the socket opened')
+  }
+  const socket = new WebSocket(url, token ? ['jaz', `jaz-auth.${token}`, ...(proof ? [`jaz-dpop.${proof}`] : [])] : [])
   const unsubscribe = onApiSessionChange(() => socket.close())
   socket.addEventListener('close', unsubscribe, { once: true })
   return socket
@@ -241,7 +247,11 @@ function notifySessionChange(): void {
   }
 }
 
-function withAPIHeaders(init: RequestInit = {}, url = apiBaseUrl()): RequestInit {
+export async function deviceRequestHeaders(method: string, url: string, token: string): Promise<Record<string, string>> {
+  return deviceAuthHeaders(token, await deviceProof(method, url, token))
+}
+
+async function withAPIHeaders(target: string, init: RequestInit, url: string): Promise<RequestInit> {
   if (!secureBackendConnection(url)) {
     throw new Error('Remote connections require HTTPS')
   }
@@ -251,7 +261,9 @@ function withAPIHeaders(init: RequestInit = {}, url = apiBaseUrl()): RequestInit
     headers.set(CLIENT_PLATFORM_HEADER, CLIENT_PLATFORM)
   }
   if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`)
+    for (const [name, value] of Object.entries(await deviceRequestHeaders(init.method ?? 'GET', target, token))) {
+      headers.set(name, value)
+    }
   }
   return { ...init, headers }
 }
@@ -269,14 +281,14 @@ function appendAuthQuery(rawUrl: string, url = apiBaseUrl()): string {
   return parsed.toString()
 }
 
-export function apiFetch(path: string, init?: RequestInit, url = apiBaseUrl()): Promise<Response> {
+export async function apiFetch(path: string, init?: RequestInit, url = apiBaseUrl()): Promise<Response> {
   assertBackendRelativePath(path, 'apiFetch')
   const signal = init?.signal ? AbortSignal.any([init.signal, sessionRequests.signal]) : sessionRequests.signal
   const revision = credentialRevision
-  const options = withAPIHeaders({ ...init, signal }, url)
-  const bearer = new Headers(options.headers).get('Authorization')
+  const options = await withAPIHeaders(`${url}${path}`, { ...init, signal }, url)
+  const sent = new Headers(options.headers).get('Authorization')?.split(' ')[1]
   return fetch(`${url}${path}`, options).then(async (response) => {
-    if ((response.status === 401 || response.status === 403) && bearer === `Bearer ${cachedApiAuthToken(url)}`) {
+    if ((response.status === 401 || response.status === 403) && sent && sent === cachedApiAuthToken(url)) {
       const body = await response.clone().json().catch(() => null) as { code?: string } | null
       if (revision === credentialRevision && url === apiBaseUrl() &&
         (body?.code === 'unauthorized' || body?.code === 'device_approval_required')) {

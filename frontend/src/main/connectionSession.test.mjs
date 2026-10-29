@@ -41,6 +41,7 @@ function fixture({ start, registration, principal = 'device', deviceId = 'identi
       return start ? start() : { ok: true, url: 'http://127.0.0.1:5299', key: 'root-grant' }
     },
     profile: () => ({ device_id: 'identity', public_key: 'public', name: 'Fixture Mac', platform: 'macOS', device_family: 'Mac', model_identifier: '', app_version: 'fixture' }),
+    proof: async () => '',
     stopConsumers: () => {
       stopped += 1
     },
