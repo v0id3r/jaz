@@ -59,7 +59,7 @@ func TestDeviceProofBindsRequestsAndRegistrationsToTheDeviceKey(t *testing.T) {
 		{"another device key", signDeviceProof(t, stranger, stranger, claims(nil)), ErrUnauthorized},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := service.Authenticate(registered.Token, Proof{JWT: test.proof, Method: "GET", Path: "/v1/sessions"}, SeenInfo{})
+			_, err := service.Authenticate(registered.Token, Proof{JWT: test.proof, Method: "GET", Path: "/v1/sessions"}, Identity{}, SeenInfo{})
 			if !errors.Is(err, test.want) || (test.want == nil && err != nil) {
 				t.Fatalf("Authenticate() error = %v, want %v", err, test.want)
 			}
@@ -67,11 +67,11 @@ func TestDeviceProofBindsRequestsAndRegistrationsToTheDeviceKey(t *testing.T) {
 	}
 	now = now.Add(90 * time.Second)
 	early := signDeviceProof(t, key, key, claims(func(c map[string]any) { c["iat"] = now.Add(proofMaxAge).Unix() }))
-	if _, err := service.Authenticate(registered.Token, Proof{JWT: early, Method: "GET", Path: "/v1/sessions"}, SeenInfo{}); err != nil {
+	if _, err := service.Authenticate(registered.Token, Proof{JWT: early, Method: "GET", Path: "/v1/sessions"}, Identity{}, SeenInfo{}); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(proofMaxAge)
-	if _, err := service.Authenticate(registered.Token, Proof{JWT: early, Method: "GET", Path: "/v1/sessions"}, SeenInfo{}); !errors.Is(err, ErrProofInvalid) {
+	if _, err := service.Authenticate(registered.Token, Proof{JWT: early, Method: "GET", Path: "/v1/sessions"}, Identity{}, SeenInfo{}); !errors.Is(err, ErrProofInvalid) {
 		t.Fatalf("a still-fresh proof was replayable after the spent set rotated: %v", err)
 	}
 	newcomer := proofRegistration(stranger, "Phone")

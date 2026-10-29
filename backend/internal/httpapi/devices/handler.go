@@ -278,7 +278,9 @@ func writePairingAction(w http.ResponseWriter, pairing storage.DevicePairing, er
 
 func inputFromRequest(r *http.Request) (deviceauth.Registration, error) {
 	info := httpapi.RequestInfoFrom(r)
+	principal, _ := deviceauth.PrincipalFromContext(r.Context())
 	reg := deviceauth.Registration{
+		User: principal.User,
 		Identity: deviceauth.DeviceIdentity{
 			DeviceID:  strings.TrimSpace(r.Header.Get("X-Jaz-Device-ID")),
 			PublicKey: strings.TrimSpace(r.Header.Get("X-Jaz-Device-Public-Key")),
@@ -349,7 +351,7 @@ func writeDeviceAuthError(w http.ResponseWriter, err error) {
 		httpapi.WriteError(w, http.StatusForbidden, err)
 		return
 	}
-	if errors.Is(err, deviceauth.ErrUnauthorized) || errors.Is(err, deviceauth.ErrProofInvalid) {
+	if errors.Is(err, deviceauth.ErrUnauthorized) || errors.Is(err, deviceauth.ErrProofInvalid) || errors.Is(err, deviceauth.ErrUserRequired) {
 		httpapi.WriteError(w, http.StatusUnauthorized, err)
 		return
 	}

@@ -15,7 +15,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 ORDER BY
   CASE status
@@ -48,7 +49,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 WHERE id = sqlc.arg(id)
 LIMIT 1;
@@ -70,7 +72,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 WHERE token_hash = sqlc.arg(token_hash)
 LIMIT 1;
@@ -124,7 +127,8 @@ INSERT INTO devices (
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 ) VALUES (
   sqlc.arg(id),
   sqlc.arg(name),
@@ -140,7 +144,8 @@ INSERT INTO devices (
   sqlc.arg(last_seen_at_ms),
   sqlc.arg(last_seen_ip),
   sqlc.arg(user_agent),
-  sqlc.arg(app_version)
+  sqlc.arg(app_version),
+  sqlc.arg(user_identity)
 )
 ON CONFLICT(id) DO UPDATE SET
   name = excluded.name,
@@ -156,7 +161,14 @@ ON CONFLICT(id) DO UPDATE SET
   last_seen_at_ms = excluded.last_seen_at_ms,
   last_seen_ip = excluded.last_seen_ip,
   user_agent = excluded.user_agent,
-  app_version = excluded.app_version;
+  app_version = excluded.app_version,
+  user_identity = excluded.user_identity;
+
+-- name: BindDeviceUser :exec
+UPDATE devices
+SET user_identity = sqlc.arg(user_identity)
+WHERE id = sqlc.arg(id)
+  AND user_identity = '';
 
 -- name: UpdateDeviceSeen :execrows
 UPDATE devices

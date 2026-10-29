@@ -10,6 +10,7 @@ import (
 
 type Querier interface {
 	ApprovePairingRequest(ctx context.Context, arg ApprovePairingRequestParams) (int64, error)
+	BindDeviceUser(ctx context.Context, arg BindDeviceUserParams) error
 	ClaimPairingRequest(ctx context.Context, arg ClaimPairingRequestParams) (int64, error)
 	CountApprovedDevices(ctx context.Context) (int64, error)
 	CreatePairingRequest(ctx context.Context, arg CreatePairingRequestParams) error

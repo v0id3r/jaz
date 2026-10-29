@@ -43,6 +43,9 @@ type Device struct {
 	LastSeenIP string    `json:"last_seen_ip,omitempty"`
 	UserAgent  string    `json:"user_agent,omitempty"`
 	AppVersion string    `json:"app_version,omitempty"`
+	// User is the auth proxy identity the device belongs to, empty until one
+	// vouches for it.
+	User string `json:"user,omitempty"`
 }
 
 type SaveApprovedDevice struct {
@@ -60,6 +63,7 @@ type SaveApprovedDevice struct {
 	LastSeenIP string
 	UserAgent  string
 	AppVersion string
+	User       string
 }
 
 type DevicePairing struct {

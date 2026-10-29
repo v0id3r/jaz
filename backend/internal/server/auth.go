@@ -24,7 +24,8 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			return
 		}
 		if publicDeviceRequest(r) {
-			principal := deviceauth.Principal{Owner: s.DeviceProxy.Owner(r)}
+			identity := s.DeviceProxy.Identify(r)
+			principal := deviceauth.Principal{User: identity.User, Owner: identity.Owner}
 			next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 			return
 		}
@@ -38,17 +39,23 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			return
 		}
 		token := requestAuthKey(r)
+		identity := s.DeviceProxy.Identify(r)
 		if s.Devices != nil && r.Method == http.MethodPost && r.URL.Path == "/v1/devices/register" && strings.HasPrefix(token, "invite_") {
-			principal := deviceauth.Principal{Kind: deviceauth.PrincipalEnrollment, EnrollmentToken: token}
+			principal := deviceauth.Principal{Kind: deviceauth.PrincipalEnrollment, EnrollmentToken: token, User: identity.User}
 			next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 			return
 		}
 		if s.Devices != nil {
 			info := httpapi.RequestInfoFrom(r)
-			principal, err := s.Devices.Authenticate(token, requestProof(r), deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
+			principal, err := s.Devices.Authenticate(token, requestProof(r), identity, deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
 			if err == nil {
-				principal.Owner = s.DeviceProxy.Owner(r)
 				s.serveDevice(w, r, principal, next)
+				return
+			}
+			// Kept apart from unauthorized: the request bypassed the auth proxy,
+			// which says nothing about the device token.
+			if errors.Is(err, deviceauth.ErrUserRequired) {
+				writeAuthError(w, http.StatusUnauthorized, "user_required", err)
 				return
 			}
 			// Distinct from unauthorized so clients keep a token whose proof was

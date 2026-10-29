@@ -157,7 +157,7 @@ func (s *Store) ClaimDevicePairing(id, secretHash, tokenHash string, at time.Tim
 		ID: d.ID, Name: d.Name, Kind: d.Kind, PublicKey: d.PublicKey,
 		Platform: d.Platform, Family: d.Family, Model: d.Model, TokenHash: tokenHash,
 		CreatedAt: d.CreatedAt, ApprovedAt: at, LastSeenAt: at,
-		LastSeenIP: d.LastSeenIP, UserAgent: d.UserAgent, AppVersion: d.AppVersion,
+		LastSeenIP: d.LastSeenIP, UserAgent: d.UserAgent, AppVersion: d.AppVersion, User: d.User,
 	})); err != nil {
 		return err
 	}

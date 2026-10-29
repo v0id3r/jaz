@@ -81,6 +81,7 @@ func approvedDeviceParams(input storage.SaveApprovedDevice) devicequeries.SaveAp
 		LastSeenIp:      input.LastSeenIP,
 		UserAgent:       input.UserAgent,
 		AppVersion:      input.AppVersion,
+		UserIdentity:    input.User,
 	}
 }
 
@@ -108,6 +109,13 @@ func (s *Store) RevokeDevice(id string, at time.Time) (storage.Device, error) {
 		return storage.Device{}, err
 	}
 	return s.LoadDevice(id)
+}
+
+// BindDeviceUser records the user of a device that has none yet.
+func (s *Store) BindDeviceUser(id, user string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return devicequeries.New(s.db).BindDeviceUser(context.Background(), devicequeries.BindDeviceUserParams{ID: id, UserIdentity: user})
 }
 
 func (s *Store) UpdateDeviceSeen(id, ip, userAgent string, at time.Time) error {
@@ -139,6 +147,7 @@ func deviceFromListRow(row devicequeries.ListDevicesRow) storage.Device {
 		LastSeenIP:   row.LastSeenIp,
 		UserAgent:    row.UserAgent,
 		AppVersion:   row.AppVersion,
+		User:         row.UserIdentity,
 	})
 }
 
@@ -159,6 +168,7 @@ func deviceFromGetRow(row devicequeries.GetDeviceRow) storage.Device {
 		LastSeenIP:   row.LastSeenIp,
 		UserAgent:    row.UserAgent,
 		AppVersion:   row.AppVersion,
+		User:         row.UserIdentity,
 	})
 }
 
@@ -179,6 +189,7 @@ func deviceFromTokenRow(row devicequeries.GetDeviceByTokenHashRow) storage.Devic
 		LastSeenIP:   row.LastSeenIp,
 		UserAgent:    row.UserAgent,
 		AppVersion:   row.AppVersion,
+		User:         row.UserIdentity,
 	})
 }
 
@@ -198,6 +209,7 @@ type deviceRecord struct {
 	LastSeenIP   string
 	UserAgent    string
 	AppVersion   string
+	User         string
 }
 
 func deviceFromRecord(row deviceRecord) storage.Device {
@@ -217,6 +229,7 @@ func deviceFromRecord(row deviceRecord) storage.Device {
 		LastSeenIP: row.LastSeenIP,
 		UserAgent:  row.UserAgent,
 		AppVersion: row.AppVersion,
+		User:       row.User,
 	}
 }
 

@@ -44,7 +44,7 @@ func TestTrustedProxyOwnerPairsAndManagesWithoutHostCredential(t *testing.T) {
 	}
 	handler := devicesapi.NewHandler(devices, store, serverconfig.Config{PublicURL: "https://jaz.example"})
 	srv := httptest.NewServer((&Server{Store: store, Devices: devices, AuthKey: "root",
-		DeviceProxy: deviceauth.NewProxy(deviceauth.ProxyConfig{JWKS: jwks.URL, Issuer: "teleport.example", Audience: "http://jaz-web:8080", Users: []string{"aleksei"}}),
+		DeviceProxy: deviceauth.NewProxy(deviceauth.ProxyConfig{Header: "Teleport-Jwt-Assertion", JWKS: jwks.URL, Issuer: "teleport.example", Audience: "http://jaz-web:8080", Users: []string{"aleksei"}}),
 		Routes: Routes{
 			{Pattern: "GET /v1/devices", Handler: http.HandlerFunc(handler.List)},
 			{Pattern: "POST /v1/devices/pairing-requests", Handler: http.HandlerFunc(handler.CreatePairing)},
@@ -94,6 +94,15 @@ func TestTrustedProxyOwnerPairsAndManagesWithoutHostCredential(t *testing.T) {
 	bearer["Teleport-Jwt-Assertion"] = assertion
 	if list := do(http.MethodGet, "/v1/devices", "", bearer); list["can_manage"] != true || list["current_device_id"] != existing.Device.ID {
 		t.Fatalf("the owner's device lost management or its device identity: %v", list)
+	}
+	devices.RequireUser = true
+	bearer["Teleport-Jwt-Assertion"] = stranger
+	if list := do(http.MethodGet, "/v1/devices", "", bearer); list["code"] != "unauthorized" {
+		t.Fatalf("another proxy identity used the owner's device: %v", list)
+	}
+	delete(bearer, "Teleport-Jwt-Assertion")
+	if list := do(http.MethodGet, "/v1/devices", "", bearer); list["code"] != "user_required" {
+		t.Fatalf("a request that bypassed the proxy was served: %v", list)
 	}
 }
 

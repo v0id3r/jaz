@@ -21,6 +21,7 @@ var (
 	ErrForbidden        = errors.New("device is not allowed")
 	ErrPairingExpired   = errors.New("pairing request expired")
 	ErrInvalidIdentity  = errors.New("device identity is invalid")
+	ErrUserRequired     = errors.New("auth proxy identity is required")
 )
 
 const (
@@ -36,6 +37,7 @@ type Store interface {
 	LoadDeviceByTokenHash(string) (storage.Device, error)
 	SaveApprovedDevice(storage.SaveApprovedDevice) (storage.Device, error)
 	UpdateDeviceSeen(id, ip, userAgent string, at time.Time) error
+	BindDeviceUser(id, user string) error
 	RevokeDevice(id string, at time.Time) (storage.Device, error)
 	CreateDevicePairing(storage.CreateDevicePairing) (storage.DevicePairing, error)
 	LoadDevicePairing(id string) (storage.DevicePairing, string, error)
@@ -49,10 +51,13 @@ type Service struct {
 	// RequireProof makes every device request and remote registration prove
 	// possession of the device key with a DPoP proof.
 	RequireProof bool
-	store        Store
-	access       access
-	proofs       spentProofs
-	now          func() time.Time
+	// RequireUser makes every device request and remote registration carry an
+	// auth proxy identity.
+	RequireUser bool
+	store       Store
+	access      access
+	proofs      spentProofs
+	now         func() time.Time
 }
 
 type SeenInfo struct {
@@ -79,6 +84,7 @@ type Registration struct {
 	Profile  DeviceProfile
 	Seen     SeenInfo
 	Proof    Proof
+	User     string
 }
 
 type Principal struct {
@@ -86,8 +92,10 @@ type Principal struct {
 	DeviceID        string `json:"device_id,omitempty"`
 	EnrollmentToken string `json:"-"`
 	CredentialHash  string `json:"-"`
-	// Owner marks a request the trusted auth proxy vouches for as the host owner.
-	Owner bool `json:"-"`
+	// User and Owner are what the trusted auth proxy vouches for; Owner marks
+	// the host owner.
+	User  string `json:"-"`
+	Owner bool   `json:"-"`
 }
 
 // Manages reports whether the principal may manage devices and enrollment.
@@ -126,7 +134,7 @@ func (s *Service) ApprovedDeviceCount() (int, error) {
 	return s.store.CountApprovedDevices()
 }
 
-func (s *Service) Authenticate(token string, proof Proof, seen SeenInfo) (Principal, error) {
+func (s *Service) Authenticate(token string, proof Proof, identity Identity, seen SeenInfo) (Principal, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return Principal{}, ErrUnauthorized
@@ -140,9 +148,12 @@ func (s *Service) Authenticate(token string, proof Proof, seen SeenInfo) (Princi
 		if err := s.verifyProof(proof, device.PublicKey, TokenHash(token)); err != nil {
 			return Principal{}, err
 		}
+		if err := s.checkUser(device, identity.User); err != nil {
+			return Principal{}, err
+		}
 		seen = normalizeSeenInfo(seen)
 		_ = s.store.UpdateDeviceSeen(device.ID, seen.IP, seen.UserAgent, s.now())
-		return Principal{Kind: PrincipalDevice, DeviceID: device.ID, CredentialHash: TokenHash(token)}, nil
+		return Principal{Kind: PrincipalDevice, DeviceID: device.ID, CredentialHash: TokenHash(token), User: identity.User, Owner: identity.Owner}, nil
 	case storage.DeviceStatusPending:
 		return Principal{}, ErrApprovalRequired
 	default:
@@ -211,6 +222,7 @@ func (s *Service) createPairing(reg Registration) (storage.DevicePairing, string
 		UserAgent:  reg.Seen.UserAgent,
 		AppVersion: reg.Profile.AppVersion,
 		Status:     storage.DeviceStatusPending,
+		User:       reg.User,
 	}
 	pairing, err := s.store.CreateDevicePairing(storage.CreateDevicePairing{
 		ID:         newID("pair"),
@@ -340,7 +352,24 @@ func (s *Service) acceptRegistration(reg Registration) (Registration, error) {
 	if err != nil {
 		return Registration{}, err
 	}
+	if s.RequireUser && reg.User == "" {
+		return Registration{}, ErrUserRequired
+	}
 	return reg, s.verifyProof(reg.Proof, reg.Identity.PublicKey, "")
+}
+
+// checkUser keeps a device with the identity it belongs to, binding one that
+// predates the auth proxy to the first identity that uses it.
+func (s *Service) checkUser(device storage.Device, user string) error {
+	switch {
+	case user == "" && s.RequireUser:
+		return ErrUserRequired
+	case user == "" || device.User == user:
+		return nil
+	case device.User == "":
+		return s.store.BindDeviceUser(device.ID, user)
+	}
+	return ErrUnauthorized
 }
 
 func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
@@ -364,6 +393,7 @@ func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
 		LastSeenIP: reg.Seen.IP,
 		UserAgent:  reg.Seen.UserAgent,
 		AppVersion: reg.Profile.AppVersion,
+		User:       reg.User,
 	})
 	if err != nil {
 		return RegisterResult{}, err
