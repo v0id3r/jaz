@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { arch, hostname, platform } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app, safeStorage } from 'electron'
-import { buildDeviceProof } from '@shared/deviceProof'
+import { buildDeviceProof, deviceAccessTokens, requestDeviceAccessToken } from '@shared/deviceProof'
 import { keychainAvailable } from '@main/keychain'
 
 export type DeviceIdentity = {
@@ -55,21 +55,32 @@ function privateKeyPem(identity: StoredIdentity): string {
   }
 }
 
-let signingKey: { publicKey: string; key: KeyObject } | undefined
+let signingKey: { identity: DeviceIdentity; key: KeyObject } | undefined
 
-// Builds the proof here so the renderer never gets a general signing oracle.
-export function deviceProof(method: string, url: string, token?: string): Promise<string> {
+function deviceSigner() {
   if (!signingKey) {
     const identity = storedIdentity()
     const pem = privateKeyPem(identity)
     if (!keyPairMatches(identity.public_key_pem, pem)) {
       throw new Error('Device identity keys do not match')
     }
-    signingKey = { publicKey: identity.public_key, key: createPrivateKey(pem) }
+    signingKey = { identity: { device_id: identity.device_id, public_key: identity.public_key }, key: createPrivateKey(pem) }
   }
-  const { publicKey, key } = signingKey
-  return buildDeviceProof(publicKey, async (input) => sign(null, input, key), method, url, token)
+  const { identity, key } = signingKey
+  return { identity, sign: async (input: Uint8Array) => new Uint8Array(sign(null, input, key)) }
 }
+
+// Proofs and assertions are built here so the renderer never gets a general
+// signing oracle.
+export function deviceProof(method: string, url: string, token?: string): Promise<string> {
+  const { identity, sign } = deviceSigner()
+  return buildDeviceProof(identity.public_key, sign, method, url, token)
+}
+
+export const deviceAccessToken = deviceAccessTokens((baseUrl) => {
+  const { identity, sign } = deviceSigner()
+  return requestDeviceAccessToken(baseUrl, identity, sign)
+})
 
 export function getDeviceMetadata(): DeviceMetadata {
   const devicePlatform = platformLabel()

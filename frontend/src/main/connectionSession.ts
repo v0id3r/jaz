@@ -21,6 +21,7 @@ type Dependencies = {
   startLocal: () => Promise<{ ok: boolean; url?: string; key?: string; error?: string }>
   profile: () => DeviceIdentity & DeviceMetadata
   proof: (method: string, url: string, token: string) => Promise<string>
+  accessToken: (baseUrl: string) => Promise<string>
   stopConsumers: () => void
 }
 
@@ -191,19 +192,22 @@ export function createConnectionSession(deps: Dependencies) {
       headers: { Authorization: `Bearer ${local.key}`, 'Content-Type': 'application/json', 'X-Jaz-Client-Platform': 'desktop' },
       body: JSON.stringify({ ...profile, kind: 'desktop' }), signal: AbortSignal.timeout(5000),
     })
-    const body = await response.json() as { token?: string; error?: string }
-    if (!response.ok || !body.token?.startsWith('jaz_')) {
+    const body = await response.json() as { token?: string; device?: unknown; error?: string }
+    // In proof mode registration only approves the device key, the credential.
+    const keyed = response.ok && !body.token && Boolean(body.device)
+    if (!response.ok || !(keyed || body.token?.startsWith('jaz_'))) {
       throw new Error(body.error || 'Local device registration failed')
     }
+    const token = body.token || await deps.accessToken(LOCAL_URL)
     const check = await fetch(LOCAL_URL + '/v1/auth/check', {
       redirect: 'error', signal: AbortSignal.timeout(3000),
-      headers: { ...deviceAuthHeaders(body.token, await deps.proof('GET', LOCAL_URL + '/v1/auth/check', body.token)), 'X-Jaz-Client-Platform': 'desktop' },
+      headers: { ...deviceAuthHeaders(token, await deps.proof('GET', LOCAL_URL + '/v1/auth/check', token)), 'X-Jaz-Client-Platform': 'desktop' },
     })
     if (!check.ok) {
       throw new Error('Local device verification failed')
     }
     const access = deviceAccess(await check.json(), profile.device_id)
-    return { url: LOCAL_URL, token: body.token, deviceId: access.deviceId, ticket: access.ticket, remembered: false }
+    return { url: LOCAL_URL, token: body.token ?? '', deviceId: access.deviceId, ticket: access.ticket, remembered: false }
   }
 
   async function local(event: IpcMainInvokeEvent, document: number, revision: number): Promise<LocalSession> {
