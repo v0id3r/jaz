@@ -48,6 +48,7 @@ afterEach(() => {
 function fixture(base = 'https://jaz.example', jaz) {
   const stored = new Map()
   const sockets = []
+  const instances = []
   replace('window', { location: { origin: 'https://web.jaz.chat' }, jaz })
   replace('localStorage', {
     getItem: (key) => stored.get(key) ?? null,
@@ -57,7 +58,10 @@ function fixture(base = 'https://jaz.example', jaz) {
   replace('WebSocket', class {
     constructor(url, protocols) {
       sockets.push({ url, protocols })
-      this.addEventListener = () => {}
+      const listeners = []
+      this.addEventListener = (type, listener) => listeners.push([type, listener])
+      this.emit = (type) => listeners.filter(([name]) => name === type).forEach(([, listener]) => listener())
+      instances.push(this)
       this.close = () => {}
     }
   })
@@ -66,7 +70,7 @@ function fixture(base = 'https://jaz.example', jaz) {
   const api = module.exports
   api.setApiBaseUrl(base)
   api.setApiAuthToken(base, 'device-credential')
-  return { api, sockets }
+  return { api, sockets, instances }
 }
 
 test('browser transports keep device credentials in headers and bound URLs to read tickets', async () => {
@@ -119,7 +123,7 @@ test('host management credentials stay bound to the local backend during a conne
 
 test('only a device key credential sends proofs, on every request and WebSocket handshake', async () => {
   const proofs = []
-  const { api, sockets } = fixture('https://jaz.example', {
+  const { api, sockets, instances } = fixture('https://jaz.example', {
     apiBaseUrl: 'http://127.0.0.1:5299',
     deviceProof: async (method, url, token) => proofs.push([method, url, token]) && `proof-${proofs.length}`,
     deviceAccessToken: async () => ({ token: 'access-token' }),
@@ -140,6 +144,17 @@ test('only a device key credential sends proofs, on every request and WebSocket 
     ['POST', 'https://jaz.example/v1/sessions', 'access-token'],
     ['GET', 'wss://jaz.example/v1/sessions/thread/terminal?cols=80', 'access-token'],
   ])
+  const checks = []
+  replace('fetch', async (url) => {
+    checks.push(url)
+    return Response.json({ ok: true })
+  })
+  instances[0].emit('open')
+  instances[0].emit('close')
+  await api.apiWebSocket('/v1/sessions/thread/terminal')
+  instances[1].emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(checks).toEqual(['https://jaz.example/v1/auth/check'])
 })
 
 test('HTTP remote addresses fail before any credential-bearing network call', async () => {
