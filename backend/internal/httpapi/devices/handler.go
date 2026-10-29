@@ -65,6 +65,7 @@ type deviceDTO struct {
 	LastSeenIP string     `json:"last_seen_ip,omitempty"`
 	UserAgent  string     `json:"user_agent,omitempty"`
 	AppVersion string     `json:"app_version,omitempty"`
+	User       string     `json:"user,omitempty"`
 }
 
 type pairingDTO struct {
@@ -434,6 +435,7 @@ func deviceDTOFromStorage(device storage.Device) deviceDTO {
 		LastSeenIP: device.LastSeenIP,
 		UserAgent:  device.UserAgent,
 		AppVersion: device.AppVersion,
+		User:       device.User,
 	}
 }
 

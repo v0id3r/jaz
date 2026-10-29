@@ -95,6 +95,13 @@ func TestTrustedProxyOwnerPairsAndManagesWithoutHostCredential(t *testing.T) {
 	if list := do(http.MethodGet, "/v1/devices", "", bearer); list["can_manage"] != true || list["current_device_id"] != existing.Device.ID {
 		t.Fatalf("the owner's device lost management or its device identity: %v", list)
 	}
+	users := map[any]any{}
+	for _, device := range do(http.MethodGet, "/v1/devices", "", bearer)["devices"].([]any) {
+		users[device.(map[string]any)["id"]] = device.(map[string]any)["user"]
+	}
+	if users[existing.Device.ID] != "aleksei@teleport.example" {
+		t.Fatalf("the device list does not show whom the device is bound to: %v", users)
+	}
 	devices.RequireUser = true
 	bearer["Teleport-Jwt-Assertion"] = stranger
 	if list := do(http.MethodGet, "/v1/devices", "", bearer); list["code"] != "unauthorized" {
