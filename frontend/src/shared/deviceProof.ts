@@ -14,10 +14,6 @@ export async function buildDeviceProof(publicKey: string, sign: Sign, method: st
   }, sign)
 }
 
-export function deviceAuthHeaders(token: string, proof: string): Record<string, string> {
-  return proof ? { Authorization: `DPoP ${token}`, DPoP: proof } : { Authorization: `Bearer ${token}` }
-}
-
 export class DeviceTokenError extends Error {
   constructor(readonly code: string) {
     super(code)
@@ -26,15 +22,20 @@ export class DeviceTokenError extends Error {
 
 export type DeviceAccessToken = { token: string; expiresAt: number }
 export type DeviceKey = { device_id: string; public_key: string }
+// The access token of a proof-mode backend at baseUrl; rejected names one the
+// backend refused, so a new one replaces it.
+export type DeviceAccessTokens = (baseUrl: string, rejected?: string) => Promise<string>
+type Prove = (method: string, url: string, token: string) => Promise<string>
 
 // Gets an access token from a proof-mode backend: the client_credentials grant
 // with a private_key_jwt assertion (RFC 7523) and a DPoP proof, both signed by
 // the device key. Fails with the OAuth error code, e.g. invalid_client for a
-// device the backend has not approved or unsupported_grant_type off proof mode.
+// device the backend has not approved.
 export async function requestDeviceAccessToken(baseUrl: string, key: DeviceKey, sign: Sign): Promise<DeviceAccessToken> {
   const url = baseUrl + '/v1/devices/token'
+  const now = Math.floor(Date.now() / 1000)
   const assertion = await signJWS({ typ: 'client-authentication+jwt', alg: keyHeader(key.public_key).alg }, {
-    iss: key.device_id, sub: key.device_id, aud: new URL(baseUrl).origin, jti: crypto.randomUUID(), exp: Math.floor(Date.now() / 1000) + 30,
+    iss: key.device_id, sub: key.device_id, aud: new URL(baseUrl).origin, jti: crypto.randomUUID(), iat: now, exp: now + 60,
   }, sign)
   const response = await fetch(url, {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
@@ -50,20 +51,36 @@ export async function requestDeviceAccessToken(baseUrl: string, key: DeviceKey, 
 
 // One access token per backend, renewed shortly before it expires or once the
 // backend rejects it.
-export function deviceAccessTokens(request: (baseUrl: string) => Promise<DeviceAccessToken>) {
+export function deviceAccessTokens(request: (baseUrl: string) => Promise<DeviceAccessToken>): DeviceAccessTokens {
   const cache = new Map<string, Promise<DeviceAccessToken>>()
-  const renew = (baseUrl: string) => {
-    const next = request(baseUrl)
-    cache.set(baseUrl, next)
-    next.catch(() => cache.get(baseUrl) === next && cache.delete(baseUrl))
-    return next
+  return async (baseUrl, rejected) => {
+    let pending = cache.get(baseUrl)
+    const current = await pending?.catch(() => undefined)
+    if (pending && current && current.token !== rejected && current.expiresAt - 30_000 > Date.now()) return current.token
+    // A concurrent caller may already have replaced the token this one refused.
+    if (!cache.has(baseUrl) || cache.get(baseUrl) === pending) {
+      pending = request(baseUrl)
+      cache.set(baseUrl, pending)
+      pending.catch(() => cache.get(baseUrl) === pending && cache.delete(baseUrl))
+    }
+    return (await cache.get(baseUrl)!).token
   }
-  return async (baseUrl: string, rejected?: string): Promise<string> => {
-    const pending = cache.get(baseUrl) ?? renew(baseUrl)
-    const current = await pending
-    if (current.token !== rejected && current.expiresAt - 30_000 > Date.now()) return current.token
-    return (await (cache.get(baseUrl) === pending ? renew(baseUrl) : cache.get(baseUrl) ?? renew(baseUrl))).token
+}
+
+// Sends a request with a DPoP-bound access token of the device key and gets a
+// new token once if the backend has forgotten it, as after a restart.
+export async function fetchWithDeviceKey(tokens: DeviceAccessTokens, prove: Prove, url: string, init: RequestInit = {}, fetcher: typeof fetch = fetch): Promise<Response> {
+  const baseUrl = new URL(url).origin
+  const send = async (token: string) => {
+    const headers = new Headers(init.headers)
+    headers.set('Authorization', `DPoP ${token}`)
+    headers.set('DPoP', await prove(init.method ?? 'GET', url, token))
+    return fetcher(url, { ...init, headers })
   }
+  const token = await tokens(baseUrl)
+  const response = await send(token)
+  const body = response.status === 401 ? await response.clone().json().catch(() => null) as { code?: unknown } | null : null
+  return body?.code === 'invalid_token' ? send(await tokens(baseUrl, token)) : response
 }
 
 function keyHeader(publicKey: string) {

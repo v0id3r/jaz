@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { arch, hostname, platform } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app, safeStorage } from 'electron'
-import { buildDeviceProof, deviceAccessTokens, requestDeviceAccessToken } from '@shared/deviceProof'
+import { buildDeviceProof, deviceAccessTokens, fetchWithDeviceKey, requestDeviceAccessToken } from '@shared/deviceProof'
 import { keychainAvailable } from '@main/keychain'
 
 export type DeviceIdentity = {
@@ -81,6 +81,11 @@ export const deviceAccessToken = deviceAccessTokens((baseUrl) => {
   const { identity, sign } = deviceSigner()
   return requestDeviceAccessToken(baseUrl, identity, sign)
 })
+
+// Fetches as this device on a backend in proof mode.
+export function deviceKeyFetch(url: string, init?: RequestInit): Promise<Response> {
+  return fetchWithDeviceKey(deviceAccessToken, deviceProof, url, init)
+}
 
 export function getDeviceMetadata(): DeviceMetadata {
   const devicePlatform = platformLabel()

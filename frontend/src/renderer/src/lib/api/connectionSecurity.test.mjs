@@ -117,11 +117,12 @@ test('host management credentials stay bound to the local backend during a conne
   ])
 })
 
-test('a device key proves every request and WebSocket handshake it sends the token with', async () => {
+test('only a device key credential sends proofs, on every request and WebSocket handshake', async () => {
   const proofs = []
   const { api, sockets } = fixture('https://jaz.example', {
     apiBaseUrl: 'http://127.0.0.1:5299',
     deviceProof: async (method, url, token) => proofs.push([method, url, token]) && `proof-${proofs.length}`,
+    deviceAccessToken: async () => ({ token: 'access-token' }),
   })
   let request
   replace('fetch', async (url, init) => {
@@ -129,13 +130,15 @@ test('a device key proves every request and WebSocket handshake it sends the tok
     return Response.json({ ok: true })
   })
   await api.apiFetch('/v1/sessions', { method: 'POST' })
-  expect(request.headers.get('Authorization')).toBe('DPoP device-credential')
-  expect(request.headers.get('DPoP')).toBe('proof-1')
+  expect([request.headers.get('Authorization'), request.headers.get('DPoP')]).toEqual(['Bearer device-credential', null])
+  api.setApiAuthToken(api.apiBaseUrl(), null, undefined, true)
+  await api.apiFetch('/v1/sessions', { method: 'POST' })
+  expect([request.headers.get('Authorization'), request.headers.get('DPoP')]).toEqual(['DPoP access-token', 'proof-1'])
   await api.apiWebSocket('/v1/sessions/thread/terminal?cols=80')
-  expect(sockets[0].protocols).toEqual(['jaz', 'jaz-auth.device-credential', 'jaz-dpop.proof-2'])
+  expect(sockets[0].protocols).toEqual(['jaz', 'jaz-auth.access-token', 'jaz-dpop.proof-2'])
   expect(proofs).toEqual([
-    ['POST', 'https://jaz.example/v1/sessions', 'device-credential'],
-    ['GET', 'wss://jaz.example/v1/sessions/thread/terminal?cols=80', 'device-credential'],
+    ['POST', 'https://jaz.example/v1/sessions', 'access-token'],
+    ['GET', 'wss://jaz.example/v1/sessions/thread/terminal?cols=80', 'access-token'],
   ])
 })
 

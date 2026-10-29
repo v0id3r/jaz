@@ -22,7 +22,7 @@ afterEach(() => {
   }
 })
 
-function fixture({ start, registration, principal = 'device', deviceId = 'identity' } = {}) {
+function fixture({ start, registration, principal = 'device', deviceId = 'identity', deviceProof = false } = {}) {
   delete process.env.ELECTRON_RENDERER_URL
   const rendererPath = '/fixture/app/out/renderer/index.html'
   const url = pathToFileURL(rendererPath).toString()
@@ -34,6 +34,7 @@ function fixture({ start, registration, principal = 'device', deviceId = 'identi
   let starts = 0
   let registrations = 0
   let stopped = 0
+  let keyChecks = 0
   const service = module.exports.createConnectionSession({
     rendererPath,
     startLocal: async () => {
@@ -41,7 +42,11 @@ function fixture({ start, registration, principal = 'device', deviceId = 'identi
       return start ? start() : { ok: true, url: 'http://127.0.0.1:5299', key: 'root-grant' }
     },
     profile: () => ({ device_id: 'identity', public_key: 'public', name: 'Fixture Mac', platform: 'macOS', device_family: 'Mac', model_identifier: '', app_version: 'fixture' }),
-    proof: async () => '',
+    fetchWithKey: async (target, init) => {
+      keyChecks += 1
+      expect([target, init.redirect, init.headers.Authorization]).toEqual(['http://127.0.0.1:5299/v1/auth/check', 'error', undefined])
+      return Response.json({ ok: true, auth_kind: principal, device_id: deviceId })
+    },
     stopConsumers: () => {
       stopped += 1
     },
@@ -50,12 +55,12 @@ function fixture({ start, registration, principal = 'device', deviceId = 'identi
     expect(target.startsWith('http://127.0.0.1:5299/')).toBe(true)
     expect(init.redirect).toBe('error')
     if (target.endsWith('/health')) {
-      return Response.json({ ok: true, auth_required: true })
+      return Response.json({ ok: true, auth_required: true, capabilities: { device_proof: deviceProof } })
     }
     if (target.endsWith('/register')) {
       registrations += 1
       expect(init.headers.Authorization).toBe('Bearer root-grant')
-      return registration ? registration() : Response.json({ token: 'jaz_device-bearer' })
+      return registration ? registration() : Response.json(deviceProof ? { device: { id: deviceId } } : { token: 'jaz_device-bearer' })
     }
     expect(init.headers.Authorization).toBe('Bearer jaz_device-bearer')
     return Response.json({ ok: true, auth_kind: principal, device_id: deviceId })
@@ -89,7 +94,7 @@ function fixture({ start, registration, principal = 'device', deviceId = 'identi
     value.local = (document, revision) => invocations.get('jaz:local-session')(value.event(), document, revision)
     return value
   }
-  return { service, window, url, counts: () => ({ starts, registrations, stopped }) }
+  return { service, window, url, counts: () => ({ starts, registrations, stopped, keyChecks }) }
 }
 
 test('handoff accepts actual app windows and exact documents, with owner-only publication', () => {
@@ -117,6 +122,16 @@ test('handoff accepts actual app windows and exact documents, with owner-only pu
   expect(() => guest.read()).toThrow('trusted')
   const outsider = { ...owner.event(), sender: { id: 999, getType: () => 'window', mainFrame: owner.webContents.mainFrame } }
   expect(() => owner.call({ operation: 'read' }, outsider)).toThrow('document')
+})
+
+test('local registration in proof mode keeps no token and checks access with the device key', async () => {
+  const f = fixture({ deviceProof: true })
+  const owner = f.window(true)
+  const { document } = owner.read()
+  const pending = owner.call({ operation: 'begin', document, url: 'http://127.0.0.1:5299' })
+  const session = await owner.local(document, pending.revision)
+  expect([session.token, session.deviceId]).toEqual(['', 'identity'])
+  expect(f.counts()).toMatchObject({ registrations: 1, keyChecks: 1 })
 })
 
 test('owner reload during local registration resumes one flight and rejects the old document', async () => {

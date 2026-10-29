@@ -58,6 +58,7 @@ async function settle() {
 async function fixture({ auth, pairing = false, pairingToken = 'jaz_device-token', deviceAccessToken, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature } = {}) {
   const stored = new Map(storedValues)
   const configured = []
+  const proofs = []
   const timers = new Map()
   let nextTimer = 0
   let snapshot = initialSnapshot || { revision: 0, phase: 'initial', url: '', session: null, error: null, localPending: false }
@@ -93,6 +94,10 @@ async function fixture({ auth, pairing = false, pairingToken = 'jaz_device-token
       ...(notifications ? { configureThreadNotifications: (config) => configured.push(config) } : {}),
       getDeviceIdentity: async () => ({ device_id: 'identity', public_key: 'public' }),
       deviceAccessToken,
+      deviceProof: async (method, url, token) => {
+        proofs.push({ method, url, token })
+        return 'proof-jwt'
+      },
       getDeviceMetadata: async () => ({ name: 'Test device' }),
     },
   })
@@ -149,6 +154,7 @@ async function fixture({ auth, pairing = false, pairingToken = 'jaz_device-token
     connection,
     stored,
     configured,
+    proofs,
     timers,
     session,
     async pollPairing() {
@@ -547,27 +553,57 @@ function accessTokens(isApproved = () => true) {
   }
 }
 
+const proofHealth = () => Response.json({ ok: true, auth_required: true, capabilities: { device_proof: true } })
+
+test('a backend without device proofs gets bearer tokens and never a proof', async () => {
+  const tokens = accessTokens()
+  const presented = []
+  const { connection, proofs } = await fixture({
+    deviceAccessToken: tokens.deviceAccessToken,
+    registration: (init) => {
+      presented.push([init.headers.Authorization, init.headers.DPoP])
+      return Response.json({ token: 'jaz_device-token' })
+    },
+    auth: (init) => {
+      presented.push([init.headers.Authorization, init.headers.DPoP])
+      return Response.json(init.headers.Authorization === 'Bearer root' ? { ok: true, auth_kind: 'root' } : { ok: true, auth_kind: 'device', device_id: 'identity' })
+    },
+    feature: (init) => {
+      presented.push([init.headers.get('Authorization'), init.headers.get('DPoP') ?? undefined])
+      return Response.json({ ok: true })
+    },
+  })
+  expect(await connection.connectRemote('https://jaz.example#key=root')).toBeNull()
+  expect((await connection.apiFetch('/fixture/feature')).status).toBe(200)
+  expect(presented).toEqual([['Bearer root', undefined], ['Bearer root', undefined], ['Bearer jaz_device-token', undefined], ['Bearer jaz_device-token', undefined]])
+  expect([tokens.calls, proofs]).toEqual([[], []])
+})
+
 test('proof mode pairs the key, saves nothing, and renews a token the backend forgot', async () => {
   let approved = false
   const tokens = accessTokens(() => approved)
   const presented = []
-  const { connection, session, stored, pollPairing } = await fixture({
+  const { connection, session, stored, proofs, pollPairing } = await fixture({
+    health: proofHealth,
     pairing: true,
     pairingToken: '',
     deviceAccessToken: tokens.deviceAccessToken,
     auth: (init) => {
-      presented.push(init.headers.Authorization)
-      return Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' })
+      presented.push(init.headers.get('Authorization'))
+      return presented.length === 1
+        ? Response.json({ error: 'gone', code: 'invalid_token' }, { status: 401 })
+        : Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' })
     },
     feature: (init) => {
       presented.push(init.headers.get('Authorization'))
-      return presented.length === 2
+      return presented.length === 3
         ? Response.json({ error: 'gone', code: 'invalid_token' }, { status: 401 })
         : Response.json({ ok: true })
     },
   })
   expect(await connection.connectRemote('https://jaz.example')).toBeNull()
   expect(connection.useConnection().status).toBe('pending_approval')
+  expect(proofs[0]).toMatchObject({ method: 'POST', url: 'https://jaz.example/v1/devices/pairing-requests' })
   approved = true
   await pollPairing()
   expect(connection.useConnection().status).toBe('connected')
@@ -577,8 +613,9 @@ test('proof mode pairs the key, saves nothing, and renews a token the backend fo
   expect(connection.rememberConnection()).toBeNull()
   expect([...stored.keys()].some((key) => key.startsWith('jaz.backendAuth.'))).toBe(false)
   expect((await connection.apiFetch('/fixture/feature')).status).toBe(200)
-  expect(presented).toEqual(['Bearer access-2', 'Bearer access-3', 'Bearer access-4'])
-  expect(tokens.calls.slice(-2).map((call) => call.rejected)).toEqual([undefined, 'access-3'])
+  expect(presented).toEqual(['DPoP access-2', 'DPoP access-3', 'DPoP access-4', 'DPoP access-5'])
+  expect(tokens.calls.slice(1).map((call) => call.rejected)).toEqual([undefined, 'access-2', undefined, 'access-4'])
+  expect(proofs.at(-1)).toMatchObject({ method: 'GET', url: 'https://jaz.example/fixture/feature', token: 'access-5' })
 })
 
 test('proof mode restores with the device key and drops a leftover saved token unopened', async () => {
@@ -586,6 +623,7 @@ test('proof mode restores with the device key and drops a leftover saved token u
   let unlocks = 0
   const tokens = accessTokens()
   const { connection, stored } = await fixture({
+    health: proofHealth,
     storedValues: [
       ['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: target })],
       ['jaz.backendAuth.' + target, 'enc:v1:legacy-token'],
@@ -600,4 +638,14 @@ test('proof mode restores with the device key and drops a leftover saved token u
   expect(connection.apiUsesDeviceKey(target)).toBe(true)
   expect(stored.has('jaz.backendAuth.' + target)).toBe(false)
   expect(unlocks).toBe(0)
+})
+
+test('proof mode blocks a restored device the backend no longer approves', async () => {
+  const target = 'https://jaz.example'
+  const { connection } = await fixture({
+    health: proofHealth,
+    storedValues: [['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: target })]],
+    deviceAccessToken: accessTokens(() => false).deviceAccessToken,
+  })
+  expect(connection.useConnection()).toMatchObject({ status: 'disconnected', error: 'Connect again with an authorized link or request approval' })
 })

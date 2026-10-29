@@ -1,12 +1,12 @@
-import { CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER, deviceRequestHeaders, secureBackendConnection } from '@/lib/api/client'
+import { CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER, secureBackendConnection } from '@/lib/api/client'
 import { clientRuntime } from '@/lib/clientRuntime'
 import { deviceAccess, type ResourceTicket } from '@shared/connectionSession'
-import { DeviceTokenError } from '@shared/deviceProof'
-import { deviceAccessToken } from '@/lib/deviceIdentity'
+import { DeviceTokenError, fetchWithDeviceKey } from '@shared/deviceProof'
+import { deviceAccessToken, deviceProof } from '@/lib/deviceIdentity'
 
 export type ProbeFailure = { ok: false; error: string; recoverable: boolean; code?: string }
 export type Access = { ok: true; kind: 'device' | 'root'; deviceId: string; ticket?: ResourceTicket } | ProbeFailure
-export type Health = { ok: true; authRequired: boolean } | ProbeFailure
+export type Health = { ok: true; authRequired: boolean; proofRequired: boolean } | ProbeFailure
 
 export async function readJSON<T>(response: Response): Promise<T | null> {
   try {
@@ -34,9 +34,9 @@ export async function readHealth(url: string, signal?: AbortSignal): Promise<Hea
     if (loginResponse(url, response)) {
       return { ok: false, error: `Sign in through Teleport again to reach the backend at ${url}`, recoverable: false }
     }
-    const body = await readJSON<{ ok?: boolean; auth_required?: boolean }>(response)
+    const body = await readJSON<{ ok?: boolean; auth_required?: boolean; capabilities?: { device_proof?: boolean } }>(response)
     if (response.ok && body?.ok === true && typeof body.auth_required === 'boolean') {
-      return { ok: true, authRequired: body.auth_required }
+      return { ok: true, authRequired: body.auth_required, proofRequired: body.capabilities?.device_proof === true }
     }
   } catch {
     // A health failure never unlocks a credential or issues a replacement.
@@ -48,9 +48,22 @@ export async function readAccess(url: string, token: string, signal?: AbortSigna
   if (!token || !secureBackendConnection(url)) {
     return { ok: false, error: 'A secure device credential is required', recoverable: false }
   }
+  return checkAccess((init) => fetch(url + '/v1/auth/check', { ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` } }), signal, expectedDeviceId)
+}
+
+// Access for a device whose key is the credential: its access tokens come from
+// the backend, which refuses them with invalid_client until it approves the key.
+export async function readKeyAccess(url: string, deviceId: string, signal?: AbortSignal): Promise<Access> {
+  if (!secureBackendConnection(url)) {
+    return { ok: false, error: 'Remote connections require HTTPS', recoverable: false }
+  }
+  return checkAccess((init) => fetchWithDeviceKey(deviceAccessToken, deviceProof, url + '/v1/auth/check', init), signal, deviceId)
+}
+
+async function checkAccess(send: (init: RequestInit & { headers: Record<string, string> }) => Promise<Response>, signal?: AbortSignal, expectedDeviceId?: string): Promise<Access> {
   try {
-    const response = await fetch(url + '/v1/auth/check', {
-      headers: { ...await deviceRequestHeaders('GET', url + '/v1/auth/check', token), [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
+    const response = await send({
+      headers: { [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
       redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000),
     })
     const body = await readJSON<{ ok?: boolean; auth_kind?: string; error?: string; code?: string }>(response)
@@ -68,21 +81,10 @@ export async function readAccess(url: string, token: string, signal?: AbortSigna
     } catch (error) {
       return { ok: false, error: (error as Error).message, recoverable: false }
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof DeviceTokenError) {
+      return { ok: false, error: error.code === 'invalid_client' ? 'This device is not approved on this server' : 'Could not get a device access token', recoverable: error.code === 'token_request_failed', code: error.code }
+    }
     return { ok: false, error: 'Backend auth check failed', recoverable: true }
   }
-}
-
-// Access for a device whose key is the credential: it first needs an access
-// token, which the backend refuses with invalid_client until it approves the key.
-export async function readKeyAccess(url: string, deviceId: string, signal?: AbortSignal): Promise<Access> {
-  let token: string
-  try {
-    token = await deviceAccessToken(url)
-  } catch (error) {
-    const code = error instanceof DeviceTokenError ? error.code : ''
-    const settled = code === 'invalid_client' || code === 'unsupported_grant_type' || code === 'unsupported_device_key'
-    return { ok: false, error: code === 'invalid_client' ? 'This device is not approved on this server' : 'Could not get a device access token', recoverable: !settled, code }
-  }
-  return readAccess(url, token, signal, deviceId)
 }

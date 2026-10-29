@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { base64Url, buildDeviceProof, deviceAccessTokens, DeviceTokenError, requestDeviceAccessToken } from './deviceProof'
+import { base64Url, buildDeviceProof, deviceAccessTokens, DeviceTokenError, fetchWithDeviceKey, requestDeviceAccessToken } from './deviceProof'
 
 const decode = (segment) => JSON.parse(Buffer.from(segment, 'base64url').toString())
 
@@ -51,7 +51,9 @@ test('a device asks for an access token with a client assertion and a proof by i
   expect(form.get('client_assertion_type')).toBe('urn:ietf:params:oauth:client-assertion-type:jwt-bearer')
   const [header, claims] = form.get('client_assertion').split('.')
   expect(decode(header)).toEqual({ typ: 'client-authentication+jwt', alg: 'EdDSA' })
-  expect(decode(claims)).toMatchObject({ iss: 'device', sub: 'device', aud: 'https://jaz.example' })
+  const assertion = decode(claims)
+  expect(assertion).toMatchObject({ iss: 'device', sub: 'device', aud: 'https://jaz.example' })
+  expect([Math.abs(assertion.iat - Date.now() / 1000) < 5, assertion.exp - assertion.iat]).toEqual([true, 60])
   expect(decode(sent.init.headers.DPoP.split('.')[1])).toMatchObject({ htm: 'POST', htu: 'https://jaz.example/v1/devices/token' })
   globalThis.fetch = async () => Response.json({ error: 'invalid_client' }, { status: 401 })
   try {
@@ -78,10 +80,35 @@ test('access tokens are shared per backend and renewed when rejected, expiring o
   expect(await tokens('https://a').catch((error) => error.code)).toBe('token_request_failed')
   expect(await Promise.all([tokens('https://a'), tokens('https://a')])).toEqual(['t1', 't1'])
   expect(await tokens('https://a', 'old')).toBe('t1')
-  expect(await tokens('https://a', 't1')).toBe('t2')
+  expect(await Promise.all([tokens('https://a', 't1'), tokens('https://a', 't1')])).toEqual(['t2', 't2'])
   expect(await tokens('https://b')).toBe('t3')
   lifetime = 10_000
   expect(await tokens('https://a', 't2')).toBe('t4')
   lifetime = 600_000
   expect(await tokens('https://a')).toBe('t5')
+})
+
+test('a request with a device key presents a bound token and replaces one the backend forgot, once', async () => {
+  const issued = []
+  const tokens = async (baseUrl, rejected) => {
+    issued.push([baseUrl, rejected])
+    return `t${issued.length}`
+  }
+  const prove = async (method, url, token) => `${method} ${url} ${token}`
+  const sent = []
+  const respond = (...responses) => async (url, init) => {
+    sent.push([init.headers.get('Authorization'), init.headers.get('DPoP'), init.headers.get('X-Kept')])
+    return responses.shift()
+  }
+  const forgotten = () => Response.json({ code: 'invalid_token' }, { status: 401 })
+  const response = await fetchWithDeviceKey(tokens, prove, 'https://jaz.example/v1/feed', { headers: { 'X-Kept': 'yes' } }, respond(forgotten(), forgotten()))
+  expect(response.status).toBe(401)
+  expect(issued).toEqual([['https://jaz.example', undefined], ['https://jaz.example', 't1']])
+  expect(sent).toEqual([
+    ['DPoP t1', 'GET https://jaz.example/v1/feed t1', 'yes'],
+    ['DPoP t2', 'GET https://jaz.example/v1/feed t2', 'yes'],
+  ])
+  sent.length = 0
+  await fetchWithDeviceKey(tokens, prove, 'https://jaz.example/v1/feed', { method: 'POST' }, respond(Response.json({ code: 'unauthorized' }, { status: 401 })))
+  expect(sent).toHaveLength(1)
 })

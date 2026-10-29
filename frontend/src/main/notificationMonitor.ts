@@ -5,7 +5,6 @@ import {
   type ThreadCompletion,
   type ThreadNotificationConfig,
 } from '../shared/notifications'
-import { deviceAuthHeaders } from '../shared/deviceProof'
 
 const POLL_INTERVAL_MS = 15_000
 const REQUEST_TIMEOUT_MS = 10_000
@@ -14,18 +13,13 @@ type EnabledConfig = Extract<ThreadNotificationConfig, { enabled: true }>
 
 export function createThreadCompletionMonitor(
   onCompletion: (completion: ThreadCompletion) => void,
-  fetcher: typeof fetch,
-  proof: (method: string, url: string, token: string) => Promise<string>,
-  // Resolves the token to present; a session whose device key is the
-  // credential has none in its config and gets access tokens instead.
-  credential: (baseUrl: string, token: string, rejected?: string) => Promise<string> = async (_baseUrl, token) => token,
+  fetcher: typeof fetch = fetch,
 ) {
   let config: EnabledConfig | null = null
   let history: Map<string, number> | null = null
   let polling = false
   let timer: NodeJS.Timeout | null = null
   let request: AbortController | null = null
-  let rejected: string | undefined
 
   async function poll(): Promise<void> {
     if (polling || !config) return
@@ -34,13 +28,12 @@ export function createThreadCompletionMonitor(
     const controller = new AbortController()
     request = controller
     try {
-      const url = `${requestConfig.baseUrl}/v1/feed/completions`
-      const token = await credential(requestConfig.baseUrl, requestConfig.token, rejected)
-      const response = await fetcher(url, {
-        headers: token ? deviceAuthHeaders(token, await proof('GET', url, token)) : undefined,
+      const response = await fetcher(`${requestConfig.baseUrl}/v1/feed/completions`, {
+        headers: requestConfig.token
+          ? { Authorization: `Bearer ${requestConfig.token}` }
+          : undefined,
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
       })
-      rejected = response.status === 401 ? token : undefined
       if (!response.ok) return
       const items = parseThreadCompletions(await response.json())
       if (!items || config !== requestConfig) return
