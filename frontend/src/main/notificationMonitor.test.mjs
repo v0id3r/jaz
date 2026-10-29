@@ -23,6 +23,7 @@ describe('thread completion monitor', () => {
         requests.push({ url, authorization: init?.headers?.Authorization })
         return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) })
       },
+      async () => '',
     )
 
     expect(
@@ -71,6 +72,7 @@ describe('thread completion monitor', () => {
         requests += 1
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) })
       },
+      async () => '',
     )
 
     expect(
@@ -99,6 +101,7 @@ describe('thread completion monitor', () => {
         authorizations.push(init?.headers?.Authorization)
         return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) })
       },
+      async () => '',
     )
 
     await monitor.configure({ enabled: true, baseUrl: 'https://jaz.example', token: 'old' })

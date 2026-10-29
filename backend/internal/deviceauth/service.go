@@ -46,9 +46,13 @@ type Store interface {
 }
 
 type Service struct {
-	store  Store
-	access access
-	now    func() time.Time
+	// RequireProof makes every device request and remote registration prove
+	// possession of the device key with a DPoP proof.
+	RequireProof bool
+	store        Store
+	access       access
+	proofs       spentProofs
+	now          func() time.Time
 }
 
 type SeenInfo struct {
@@ -74,6 +78,7 @@ type Registration struct {
 	Identity DeviceIdentity
 	Profile  DeviceProfile
 	Seen     SeenInfo
+	Proof    Proof
 }
 
 type Principal struct {
@@ -121,7 +126,7 @@ func (s *Service) ApprovedDeviceCount() (int, error) {
 	return s.store.CountApprovedDevices()
 }
 
-func (s *Service) Authenticate(token string, seen SeenInfo) (Principal, error) {
+func (s *Service) Authenticate(token string, proof Proof, seen SeenInfo) (Principal, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return Principal{}, ErrUnauthorized
@@ -132,6 +137,9 @@ func (s *Service) Authenticate(token string, seen SeenInfo) (Principal, error) {
 	}
 	switch device.Status {
 	case storage.DeviceStatusApproved:
+		if err := s.verifyProof(proof, device.PublicKey, TokenHash(token)); err != nil {
+			return Principal{}, err
+		}
 		seen = normalizeSeenInfo(seen)
 		_ = s.store.UpdateDeviceSeen(device.ID, seen.IP, seen.UserAgent, s.now())
 		return Principal{Kind: PrincipalDevice, DeviceID: device.ID, CredentialHash: TokenHash(token)}, nil
@@ -146,7 +154,7 @@ func (s *Service) Register(reg Registration) (RegisterResult, error) {
 	s.access.mu.Lock()
 	defer s.access.mu.Unlock()
 	var err error
-	reg, err = normalizeRegistration(reg)
+	reg, err = s.acceptRegistration(reg)
 	if err != nil {
 		return RegisterResult{}, err
 	}
@@ -177,7 +185,7 @@ func (s *Service) RegisterApproved(reg Registration) (RegisterResult, error) {
 
 func (s *Service) CreatePairing(reg Registration) (storage.DevicePairing, string, error) {
 	var err error
-	reg, err = normalizeRegistration(reg)
+	reg, err = s.acceptRegistration(reg)
 	if err != nil {
 		return storage.DevicePairing{}, "", err
 	}
@@ -323,6 +331,16 @@ func normalizeRegistration(reg Registration) (Registration, error) {
 	reg.Identity.PublicKey = publicKey
 	reg.Identity.DeviceID = deviceID
 	return reg, nil
+}
+
+// acceptRegistration normalizes a registration that arrives without a host
+// credential, so its key must be proven before a device record carries it.
+func (s *Service) acceptRegistration(reg Registration) (Registration, error) {
+	reg, err := normalizeRegistration(reg)
+	if err != nil {
+		return Registration{}, err
+	}
+	return reg, s.verifyProof(reg.Proof, reg.Identity.PublicKey, "")
 }
 
 func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
