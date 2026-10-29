@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -60,4 +61,45 @@ func requestIP(r *http.Request) string {
 func firstHeaderValue(value string) string {
 	part, _, _ := strings.Cut(value, ",")
 	return strings.TrimSpace(part)
+}
+
+// TrustedLocalRequest reports a loopback request addressed to a loopback host
+// that carries no proxy headers, so it did not pass through a proxy.
+func TrustedLocalRequest(r *http.Request) bool {
+	if !LoopbackRequest(r) {
+		return false
+	}
+	host := (&url.URL{Host: r.Host}).Hostname()
+	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+		return false
+	}
+	for _, name := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "CF-Connecting-IP"} {
+		if r.Header.Get(name) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func LoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// WebSocketProtocol returns the value of the handshake subprotocol with
+// prefix, the only place a browser WebSocket can carry credentials.
+func WebSocketProtocol(r *http.Request, prefix string) string {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return ""
+	}
+	for _, protocol := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(protocol), prefix); ok {
+			return value
+		}
+	}
+	return ""
 }

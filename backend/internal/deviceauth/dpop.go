@@ -9,14 +9,20 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 )
 
-// ProofHeader carries a DPoP proof (RFC 9449) signed by the device key.
-const ProofHeader = "DPoP"
+const (
+	// ProofHeader carries a DPoP proof (RFC 9449) signed by the device key.
+	ProofHeader = "DPoP"
+	// ProofAlgs lists the proof algorithms a DPoP challenge advertises.
+	ProofAlgs = "EdDSA ES256"
+)
 
 const (
 	proofMaxAge    = time.Minute
@@ -27,13 +33,15 @@ const (
 // made for another request; the device key itself may still be fine.
 var ErrProofInvalid = errors.New("device proof is missing or invalid")
 
-// Proof is the DPoP proof a request presents with the method and path it was
-// received on; the proof's htu is matched by path because proxies rewrite the
-// origin the client signed.
+// Proof is the DPoP proof a request presents with the method, path and origin
+// it was received on. Origin is only trusted when no origins are configured or
+// the request is Local, i.e. reached loopback without passing a proxy.
 type Proof struct {
 	JWT    string
 	Method string
 	Path   string
+	Origin string
+	Local  bool
 }
 
 // spentProofs remembers each jti for at least the window in which its iat is
@@ -57,12 +65,13 @@ func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
 	}
 	var header struct {
 		Typ, Alg string
-		JWK      proofJWK
+		JWK      struct{ Kty, Crv, X, Y string }
 	}
 	if decodeSegment(parts[0], &header) != nil || header.Typ != "dpop+jwt" {
 		return ErrProofInvalid
 	}
-	raw, verify := header.JWK.verifier(header.Alg)
+	raw := jwkPublicKey(header.JWK.Kty, header.JWK.Crv, header.JWK.X, header.JWK.Y)
+	verify := keyVerifier(header.Alg, raw)
 	if verify == nil {
 		return ErrProofInvalid
 	}
@@ -81,37 +90,75 @@ func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
 		return ErrProofInvalid
 	}
 	target, err := url.Parse(claims.HTU)
-	if err != nil || target.Path != proof.Path || claims.HTM != proof.Method || claims.ATH != tokenHash ||
+	if err != nil || !s.ownOrigin(claims.HTU, proof) || target.Path != proof.Path || claims.HTM != proof.Method || claims.ATH != tokenHash ||
 		claims.JTI == "" || len(claims.JTI) > proofMaxJTILen || s.now().Sub(time.Unix(claims.IAT, 0)).Abs() > proofMaxAge {
 		return ErrProofInvalid
 	}
 	return s.spendProof(claims.JTI)
 }
 
-type proofJWK struct{ Kty, Crv, X, Y string }
+// ownOrigin reports whether a URL a client signed (a proof's htu or a client
+// assertion's aud) names this server.
+func (s *Service) ownOrigin(value string, proof Proof) bool {
+	origin := NormalizeOrigin(value)
+	if origin == "" {
+		return false
+	}
+	if (len(s.Origins) == 0 || proof.Local) && origin == NormalizeOrigin(proof.Origin) {
+		return true
+	}
+	return slices.Contains(s.Origins, origin)
+}
 
-// verifier returns the key in the raw form device identities store (32 bytes
-// for Ed25519, the 65-byte uncompressed point for P-256) and its signature
-// check, or a nil check when alg and key do not form a supported pair.
-func (k proofJWK) verifier(alg string) ([]byte, func(signed, sig []byte) bool) {
-	x, errX := base64.RawURLEncoding.DecodeString(k.X)
+// NormalizeOrigin reduces a URL to its scheme://host[:port] origin, folding
+// WebSocket schemes and default ports into their HTTP form, or returns "".
+func NormalizeOrigin(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	scheme := map[string]string{"http": "http", "ws": "http", "https": "https", "wss": "https"}[strings.ToLower(u.Scheme)]
+	if scheme == "" {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if port := u.Port(); port != "" && port != map[string]string{"http": "80", "https": "443"}[scheme] {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host
+}
+
+// jwkPublicKey returns a JWK's key in the raw form device identities store:
+// 32 bytes for Ed25519, the 65-byte uncompressed point for P-256.
+func jwkPublicKey(kty, crv, x, y string) []byte {
+	rawX, errX := base64.RawURLEncoding.DecodeString(x)
+	rawY, errY := base64.RawURLEncoding.DecodeString(y)
 	switch {
 	case errX != nil:
-	case alg == "EdDSA" && k.Kty == "OKP" && k.Crv == "Ed25519" && len(x) == ed25519.PublicKeySize:
-		return x, func(signed, sig []byte) bool { return ed25519.Verify(x, signed, sig) }
-	case alg == "ES256" && k.Kty == "EC" && k.Crv == "P-256":
-		y, _ := base64.RawURLEncoding.DecodeString(k.Y)
-		raw := append(append([]byte{4}, x...), y...)
-		key, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
-		if err != nil {
-			return nil, nil
-		}
-		return raw, func(signed, sig []byte) bool {
+	case kty == "OKP" && crv == "Ed25519":
+		return rawX
+	case kty == "EC" && crv == "P-256" && errY == nil:
+		return append(append([]byte{4}, rawX...), rawY...)
+	}
+	return nil
+}
+
+// keyVerifier checks JWS signatures of alg by a raw device key, or is nil when
+// alg and key do not form a supported pair.
+func keyVerifier(alg string, raw []byte) func(signed, sig []byte) bool {
+	switch {
+	case alg == "EdDSA" && len(raw) == ed25519.PublicKeySize:
+		return func(signed, sig []byte) bool { return ed25519.Verify(raw, signed, sig) }
+	case alg == "ES256" && validP256(raw):
+		key, _ := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
+		return func(signed, sig []byte) bool {
 			digest := sha256.Sum256(signed)
 			return len(sig) == 64 && ecdsa.Verify(key, digest[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:]))
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 func validP256(raw []byte) bool {
