@@ -101,6 +101,7 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 		{"another key drops the token", map[string]string{"Authorization": "DPoP " + token, "DPoP": proof(otherKey, "GET", target, token)}, "unauthorized", `error="invalid_token"`},
 		{"unknown token asks for a new one", map[string]string{"Authorization": "DPoP jaz_gone", "DPoP": proof(key, "GET", target, "jaz_gone")}, "invalid_token", `error="invalid_token"`},
 		{"no credentials", nil, "unauthorized", `DPoP algs="EdDSA ES256"`},
+		{"root key under the DPoP scheme is just an unknown token", map[string]string{"Authorization": "DPoP root"}, "invalid_token", `error="invalid_token"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/v1/sessions/s1/terminal?cols=80", nil)
@@ -127,5 +128,35 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 	srv.ServeHTTP(res, req)
 	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), "invalid_dpop_proof") {
 		t.Fatalf("two DPoP headers = %d %s, want invalid_dpop_proof (RFC 9449 §4.3)", res.Code, res.Body)
+	}
+}
+
+func TestTokenModeTakesDeviceTokensOnlyAsBearer(t *testing.T) {
+	store, err := sqlite.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	devices := deviceauth.New(store)
+	public, _, _ := ed25519.GenerateKey(rand.Reader)
+	sum := sha256.Sum256(public)
+	registered, err := devices.RegisterApproved(deviceauth.Registration{
+		Identity: deviceauth.DeviceIdentity{DeviceID: hex.EncodeToString(sum[:]), PublicKey: base64.RawURLEncoding.EncodeToString(public)},
+		Profile:  deviceauth.DeviceProfile{Name: "Laptop", Kind: "browser"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := (&Server{Store: store, Devices: devices, AuthKey: "root", Routes: Routes{
+		{Pattern: "GET /v1/sessions", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})},
+	}}).Handler()
+	for scheme, want := range map[string]int{"Bearer": http.StatusOK, "DPoP": http.StatusUnauthorized} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
+		req.Header.Set("Authorization", scheme+" "+registered.Token)
+		res := httptest.NewRecorder()
+		srv.ServeHTTP(res, req)
+		if res.Code != want {
+			t.Errorf("%s device token = %d, want %d", scheme, res.Code, want)
+		}
 	}
 }
