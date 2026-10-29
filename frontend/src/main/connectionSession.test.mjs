@@ -112,6 +112,16 @@ test('handoff accepts actual app windows and exact documents, with owner-only pu
   expect(Object.keys(board.read().snapshot.session).sort()).toEqual(['deviceId', 'remembered', 'token', 'url'])
   expect(() => owner.call({ operation: 'commit', document, revision: pending.revision,
     session: { url: 'https://other.example', token: 'jaz_other', deviceId: 'identity' } })).toThrow('replaced')
+  for (const session of [
+    { url: 'https://remote.example', token: 'jaz_authorized', deviceId: 'identity', deviceKey: true, remembered: false },
+    { url: 'https://remote.example', token: '', deviceId: '', deviceKey: true, remembered: false },
+    { url: 'https://remote.example', token: '', deviceId: 'identity', deviceKey: 'yes', remembered: false },
+  ]) {
+    expect(() => owner.call({ operation: 'commit', document, revision: owner.read().snapshot.revision, session })).toThrow('replaced')
+  }
+  owner.call({ operation: 'commit', document, revision: owner.read().snapshot.revision,
+    session: { url: 'https://remote.example', token: '', deviceId: 'identity', deviceKey: true, remembered: false } })
+  expect(board.read().snapshot.session).toEqual({ url: 'https://remote.example', token: '', deviceId: 'identity', deviceKey: true, remembered: false })
   board.navigate('file:///wrong/renderer/index.html')
   expect(() => board.read()).toThrow('document')
   const count = board.messages.length
@@ -130,7 +140,7 @@ test('local registration in proof mode keeps no token and checks access with the
   const { document } = owner.read()
   const pending = owner.call({ operation: 'begin', document, url: 'http://127.0.0.1:5299' })
   const session = await owner.local(document, pending.revision)
-  expect([session.token, session.deviceId]).toEqual(['', 'identity'])
+  expect([session.token, session.deviceId, session.deviceKey]).toEqual(['', 'identity', true])
   expect(f.counts()).toMatchObject({ registrations: 1, keyChecks: 1 })
 })
 
