@@ -33,15 +33,14 @@ const (
 // made for another request; the device key itself may still be fine.
 var ErrProofInvalid = errors.New("device proof is missing or invalid")
 
-// Proof is the DPoP proof a request presents with the method, path and origin
-// it was received on. Origin is only trusted when no origins are configured or
-// the request is Local, i.e. reached loopback without passing a proxy.
+// Proof is the DPoP proof a request presents with the method and path it was
+// received on. LocalOrigin is the origin of a request that reached loopback
+// without passing a proxy, the only request whose own origin is trusted.
 type Proof struct {
-	JWT    string
-	Method string
-	Path   string
-	Origin string
-	Local  bool
+	JWT         string
+	Method      string
+	Path        string
+	LocalOrigin string
 }
 
 // spentProofs remembers each jti for at least the window in which its iat is
@@ -59,25 +58,9 @@ func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
 	if !s.RequireProof {
 		return nil
 	}
-	parts := strings.Split(proof.JWT, ".")
-	if len(parts) != 3 {
-		return ErrProofInvalid
-	}
 	var header struct {
 		Typ, Alg string
-		JWK      struct{ Kty, Crv, X, Y string }
-	}
-	if decodeSegment(parts[0], &header) != nil || header.Typ != "dpop+jwt" {
-		return ErrProofInvalid
-	}
-	raw := jwkPublicKey(header.JWK.Kty, header.JWK.Crv, header.JWK.X, header.JWK.Y)
-	verify := keyVerifier(header.Alg, raw)
-	if verify == nil {
-		return ErrProofInvalid
-	}
-	sig, errSig := base64.RawURLEncoding.DecodeString(parts[2])
-	if base64.RawURLEncoding.EncodeToString(raw) != publicKey || errSig != nil || !verify([]byte(parts[0]+"."+parts[1]), sig) {
-		return ErrUnauthorized
+		JWK      struct{ Kty, Crv, X, Y, D string }
 	}
 	var claims struct {
 		JTI string `json:"jti"`
@@ -86,8 +69,14 @@ func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
 		IAT int64  `json:"iat"`
 		ATH string `json:"ath"`
 	}
-	if decodeSegment(parts[1], &claims) != nil {
+	jws, ok := parseJWS(proof.JWT, &header, &claims)
+	raw := jwkPublicKey(header.JWK.Kty, header.JWK.Crv, header.JWK.X, header.JWK.Y)
+	verify := keyVerifier(header.Alg, raw)
+	if !ok || header.Typ != "dpop+jwt" || header.JWK.D != "" || verify == nil {
 		return ErrProofInvalid
+	}
+	if base64.RawURLEncoding.EncodeToString(raw) != publicKey || !verify(jws.signed, jws.sig) {
+		return ErrUnauthorized
 	}
 	target, err := url.Parse(claims.HTU)
 	if err != nil || !s.ownOrigin(claims.HTU, proof) || target.Path != proof.Path || claims.HTM != proof.Method || claims.ATH != tokenHash ||
@@ -98,16 +87,23 @@ func (s *Service) verifyProof(proof Proof, publicKey, tokenHash string) error {
 }
 
 // ownOrigin reports whether a URL a client signed (a proof's htu or a client
-// assertion's aud) names this server.
+// assertion's aud) names this server: one of its configured origins, or the
+// origin a local request reached it on.
 func (s *Service) ownOrigin(value string, proof Proof) bool {
 	origin := NormalizeOrigin(value)
-	if origin == "" {
-		return false
+	return origin != "" && (slices.Contains(s.Origins, origin) || origin == NormalizeOrigin(proof.LocalOrigin))
+}
+
+// jws is a compact JWS whose header and claims were decoded.
+type jws struct{ signed, sig []byte }
+
+func parseJWS(token string, header, claims any) (jws, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || decodeSegment(parts[0], header) != nil || decodeSegment(parts[1], claims) != nil {
+		return jws{}, false
 	}
-	if (len(s.Origins) == 0 || proof.Local) && origin == NormalizeOrigin(proof.Origin) {
-		return true
-	}
-	return slices.Contains(s.Origins, origin)
+	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	return jws{signed: []byte(parts[0] + "." + parts[1]), sig: sig}, err == nil
 }
 
 // NormalizeOrigin reduces a URL to its scheme://host[:port] origin, folding
@@ -151,8 +147,11 @@ func keyVerifier(alg string, raw []byte) func(signed, sig []byte) bool {
 	switch {
 	case alg == "EdDSA" && len(raw) == ed25519.PublicKeySize:
 		return func(signed, sig []byte) bool { return ed25519.Verify(raw, signed, sig) }
-	case alg == "ES256" && validP256(raw):
-		key, _ := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
+	case alg == "ES256":
+		key, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
+		if err != nil {
+			return nil
+		}
 		return func(signed, sig []byte) bool {
 			digest := sha256.Sum256(signed)
 			return len(sig) == 64 && ecdsa.Verify(key, digest[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:]))

@@ -3,7 +3,6 @@ package deviceauth
 import (
 	"encoding/base64"
 	"errors"
-	"strings"
 	"sync"
 	"time"
 
@@ -74,23 +73,23 @@ func (s *Service) IssueAccessToken(assertion string, proof Proof) (AccessToken, 
 
 // authenticateClient verifies a private_key_jwt client assertion (RFC 7523,
 // with the sole issuer audience of draft-ietf-oauth-rfc7523bis) whose client
-// is an approved device signing with its own key.
+// is an approved device signing with its own key. Its iat gets the clock skew
+// proofs get and bounds its exp, so its jti outlives it in the spent set.
 func (s *Service) authenticateClient(assertion string, proof Proof) (storage.Device, error) {
-	parts := strings.Split(assertion, ".")
 	var header struct{ Typ, Alg string }
 	var claims struct {
 		Iss string `json:"iss"`
 		Sub string `json:"sub"`
 		Aud string `json:"aud"`
 		JTI string `json:"jti"`
+		IAT int64  `json:"iat"`
 		Exp int64  `json:"exp"`
 	}
-	if len(parts) != 3 || decodeSegment(parts[0], &header) != nil || decodeSegment(parts[1], &claims) != nil ||
-		header.Typ != "" && header.Typ != "client-authentication+jwt" || claims.Sub == "" || claims.Iss != claims.Sub ||
-		claims.JTI == "" || len(claims.JTI) > proofMaxJTILen || claims.Aud != NormalizeOrigin(claims.Aud) || !s.ownOrigin(claims.Aud, proof) {
-		return storage.Device{}, ErrInvalidClient
-	}
-	if left := time.Unix(claims.Exp, 0).Sub(s.now()); left <= 0 || left > proofMaxAge {
+	jws, ok := parseJWS(assertion, &header, &claims)
+	now, iat, exp := s.now(), time.Unix(claims.IAT, 0), time.Unix(claims.Exp, 0)
+	if !ok || header.Typ != "" && header.Typ != "client-authentication+jwt" || claims.Sub == "" || claims.Iss != claims.Sub ||
+		claims.JTI == "" || len(claims.JTI) > proofMaxJTILen || claims.Aud != NormalizeOrigin(claims.Aud) || !s.ownOrigin(claims.Aud, proof) ||
+		now.Sub(iat).Abs() > proofMaxAge || !now.Before(exp) || exp.Sub(iat) > proofMaxAge {
 		return storage.Device{}, ErrInvalidClient
 	}
 	device, err := s.store.LoadDevice(claims.Sub)
@@ -99,11 +98,20 @@ func (s *Service) authenticateClient(assertion string, proof Proof) (storage.Dev
 	}
 	raw, _ := base64.RawURLEncoding.DecodeString(device.PublicKey)
 	verify := keyVerifier(header.Alg, raw)
-	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if verify == nil || err != nil || !verify([]byte(parts[0]+"."+parts[1]), sig) || s.spendProof("client:"+claims.JTI) != nil {
+	if verify == nil || !verify(jws.signed, jws.sig) || s.spendProof("client:"+claims.JTI) != nil {
 		return storage.Device{}, ErrInvalidClient
 	}
 	return device, nil
+}
+
+func (t *accessTokens) revoke(deviceID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for hash, entry := range t.issued {
+		if entry.deviceID == deviceID {
+			delete(t.issued, hash)
+		}
+	}
 }
 
 // loadCredential resolves the device behind a credential hash: an issued

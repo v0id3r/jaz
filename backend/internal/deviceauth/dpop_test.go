@@ -58,6 +58,7 @@ func TestDeviceProofBindsAccessTokensToTheDeviceKey(t *testing.T) {
 				{"signed by another key", token, signProof(stranger, key, claims(nil)), ErrUnauthorized},
 				{"another device key", token, signProof(stranger, stranger, claims(nil)), ErrUnauthorized},
 				{"unknown token", "jaz_unknown", signProof(key, key, claims(func(c map[string]any) { c["ath"] = TokenHash("jaz_unknown") })), ErrTokenInvalid},
+				{"private key in jwk", token, signJWS(key, map[string]any{"typ": "dpop+jwt", "alg": alg, "jwk": withPrivate(key.jwk)}, claims(nil)), ErrProofInvalid},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					_, err := service.Authenticate(test.token, Proof{JWT: test.proof, Method: "GET", Path: "/v1/sessions"}, SeenInfo{})
@@ -70,8 +71,21 @@ func TestDeviceProofBindsAccessTokensToTheDeviceKey(t *testing.T) {
 			if _, err := service.Authenticate(token, Proof{JWT: signProof(key, key, claims(nil)), Method: "GET", Path: "/v1/sessions"}, SeenInfo{}); !errors.Is(err, ErrTokenInvalid) {
 				t.Fatalf("expired access token = %v, want ErrTokenInvalid", err)
 			}
+			service.now = now
+			token = issueToken(t, service, key)
+			if _, err := service.RevokeDevice(key.id); err != nil {
+				t.Fatal(err)
+			}
+			ath = TokenHash(token)
+			if _, err := service.Authenticate(token, Proof{JWT: signProof(key, key, claims(nil)), Method: "GET", Path: "/v1/sessions"}, SeenInfo{}); !errors.Is(err, ErrTokenInvalid) {
+				t.Fatalf("access token of a revoked device = %v, want ErrTokenInvalid", err)
+			}
 		})
 	}
+}
+
+func withPrivate(jwk map[string]string) map[string]string {
+	return map[string]string{"kty": jwk["kty"], "crv": jwk["crv"], "x": jwk["x"], "y": jwk["y"], "d": "AAAA"}
 }
 
 func TestSpentProofsOutliveTheirAcceptanceWindow(t *testing.T) {
@@ -123,7 +137,7 @@ func TestAccessTokensRequireTheDeviceClientAssertion(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims := func(k testKey, change func(map[string]any)) map[string]any {
-		c := map[string]any{"iss": k.id, "sub": k.id, "aud": testOrigin, "jti": rand.Text(), "exp": now().Add(30 * time.Second).Unix()}
+		c := map[string]any{"iss": k.id, "sub": k.id, "aud": testOrigin, "jti": rand.Text(), "iat": now().Unix(), "exp": now().Add(30 * time.Second).Unix()}
 		if change != nil {
 			change(c)
 		}
@@ -150,6 +164,16 @@ func TestAccessTokensRequireTheDeviceClientAssertion(t *testing.T) {
 		{"issuer is not the client", key, assertion(key, claims(key, func(c map[string]any) { c["iss"] = "someone" })), "", ErrInvalidClient},
 		{"expired", key, assertion(key, claims(key, func(c map[string]any) { c["exp"] = now().Unix() })), "", ErrInvalidClient},
 		{"long-lived", key, assertion(key, claims(key, func(c map[string]any) { c["exp"] = now().Add(time.Hour).Unix() })), "", ErrInvalidClient},
+		{"client clock behind", key, assertion(key, claims(key, func(c map[string]any) {
+			c["iat"], c["exp"] = now().Add(-50*time.Second).Unix(), now().Add(-20*time.Second).Unix()
+		})), "", ErrInvalidClient},
+		{"client clock ahead within skew", key, assertion(key, claims(key, func(c map[string]any) {
+			c["iat"], c["exp"] = now().Add(50*time.Second).Unix(), now().Add(80*time.Second).Unix()
+		})), "", nil},
+		{"client clock ahead beyond skew", key, assertion(key, claims(key, func(c map[string]any) {
+			c["iat"], c["exp"] = now().Add(2*time.Minute).Unix(), now().Add(150*time.Second).Unix()
+		})), "", ErrInvalidClient},
+		{"without iat", key, assertion(key, claims(key, func(c map[string]any) { delete(c, "iat") })), "", ErrInvalidClient},
 		{"signed by another key", key, assertion(stranger, claims(key, nil)), "", ErrInvalidClient},
 		{"revoked device", revoked, assertion(revoked, claims(revoked, nil)), "", ErrInvalidClient},
 		{"unpaired device", unpaired, assertion(unpaired, claims(unpaired, nil)), "", ErrInvalidClient},
@@ -173,23 +197,21 @@ func TestAccessTokensRequireTheDeviceClientAssertion(t *testing.T) {
 	}
 }
 
-func TestProofOriginsTrustTheRequestOnlyWithoutConfiguredOrigins(t *testing.T) {
-	service := &Service{}
-	if !service.ownOrigin("https://jaz.example/v1/sessions", Proof{Origin: "https://jaz.example"}) {
-		t.Fatal("without configured origins the request origin is not accepted")
-	}
-	service.Origins = []string{"https://jaz.example"}
-	local := Proof{Origin: "http://127.0.0.1:5299", Local: true}
+func TestProofOriginsAreConfiguredOrTheLocalRequestOrigin(t *testing.T) {
+	service := &Service{Origins: []string{"https://jaz.example"}}
+	local := Proof{LocalOrigin: "http://127.0.0.1:5299"}
 	for _, test := range []struct {
 		value string
 		proof Proof
 		want  bool
 	}{
-		{"https://jaz.example", Proof{Origin: "https://evil.example"}, true},
-		{"https://evil.example", Proof{Origin: "https://evil.example"}, false},
+		{"https://jaz.example", Proof{}, true},
+		{"https://JAZ.example:443/v1/sessions", Proof{}, true},
+		{"https://evil.example", Proof{}, false},
 		{"http://127.0.0.1:5299/v1/sessions", local, true},
 		{"ws://127.0.0.1:5299/v1/sessions", local, true},
-		{"http://127.0.0.1:5299", Proof{Origin: "http://127.0.0.1:5299"}, false},
+		{"http://127.0.0.1:5299", Proof{}, false},
+		{"", Proof{}, false},
 	} {
 		if got := service.ownOrigin(test.value, test.proof); got != test.want {
 			t.Errorf("ownOrigin(%q, %+v) = %v, want %v", test.value, test.proof, got, test.want)
@@ -271,7 +293,7 @@ func tokenProof(k testKey, now time.Time) string {
 func issueToken(t *testing.T, service *Service, k testKey) string {
 	t.Helper()
 	assertion := signJWS(k, map[string]any{"typ": "client-authentication+jwt", "alg": k.alg}, map[string]any{
-		"iss": k.id, "sub": k.id, "aud": testOrigin, "jti": rand.Text(), "exp": service.now().Add(30 * time.Second).Unix(),
+		"iss": k.id, "sub": k.id, "aud": testOrigin, "jti": rand.Text(), "iat": service.now().Unix(), "exp": service.now().Add(30 * time.Second).Unix(),
 	})
 	token, err := service.IssueAccessToken(assertion, Proof{JWT: tokenProof(k, service.now()), Method: "POST", Path: "/v1/devices/token"})
 	if err != nil || token.Token == "" || token.ExpiresIn != int(accessTokenTTL/time.Second) {

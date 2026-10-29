@@ -88,6 +88,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		AuthRequired: s.AuthKey != "",
 		Capabilities: healthCapabilities{
 			SessionFileRead: true,
+			DeviceProof:     s.Devices != nil && s.Devices.RequireProof,
 		},
 	})
 }
@@ -100,4 +101,7 @@ type healthResponse struct {
 
 type healthCapabilities struct {
 	SessionFileRead bool `json:"session_file_read"`
+	// DeviceProof tells clients to authenticate with their device key at the
+	// token endpoint and DPoP proofs instead of a stored device token.
+	DeviceProof bool `json:"device_proof"`
 }

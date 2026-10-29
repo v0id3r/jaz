@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -365,4 +366,28 @@ func requireRoute(t *testing.T, routes server.Routes, pattern string) {
 		}
 	}
 	t.Fatalf("missing route %q in %#v", pattern, routes)
+}
+
+func TestDeviceAuthConfigNeedsOriginsForProofMode(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		devices DevicesConfig
+		want    []string
+		wantErr bool
+	}{
+		{"token mode", DevicesConfig{}, nil, false},
+		{"proof mode", DevicesConfig{RequireProof: true, Origins: []string{" https://Jaz.example:443 ", "http://10.0.0.5:5299"}}, []string{"https://jaz.example", "http://10.0.0.5:5299"}, false},
+		{"proof mode without origins", DevicesConfig{RequireProof: true}, nil, true},
+		{"not an origin", DevicesConfig{Origins: []string{"jaz.example"}}, nil, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			devices, err := NewDeviceAuth(nil, Config{Devices: test.devices})
+			if (err != nil) != test.wantErr {
+				t.Fatalf("NewDeviceAuth() error = %v, want error %v", err, test.wantErr)
+			}
+			if err == nil && !slices.Equal(devices.Origins, test.want) {
+				t.Fatalf("Origins = %q, want %q", devices.Origins, test.want)
+			}
+		})
+	}
 }

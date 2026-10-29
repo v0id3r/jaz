@@ -74,8 +74,8 @@ type DevicesConfig struct {
 	DisablePairing bool
 	RequireProof   bool
 	// Origins are the origins clients reach this server on, e.g. behind a
-	// proxy; proof-mode clients may only sign for these. Empty trusts the
-	// request's (possibly forwarded) own origin.
+	// proxy; proof mode requires them, and clients may only sign for these or
+	// the origin of a direct loopback request.
 	Origins []string
 }
 

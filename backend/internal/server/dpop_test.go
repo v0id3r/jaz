@@ -55,13 +55,13 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 		}
 		return sign(signer, map[string]any{"typ": "dpop+jwt", "alg": "EdDSA", "jwk": map[string]string{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(public)}}, claims)
 	}
-	requestToken := func(grant string) (*httptest.ResponseRecorder, map[string]any) {
+	requestToken := func(grant, contentType string) (*httptest.ResponseRecorder, map[string]any) {
 		form := url.Values{"grant_type": {grant}, "client_assertion_type": {deviceauth.ClientAssertionType}, "client_assertion": {sign(key,
 			map[string]any{"typ": "client-authentication+jwt", "alg": "EdDSA"},
-			map[string]any{"iss": deviceID, "sub": deviceID, "aud": "https://jaz.example", "jti": rand.Text(), "exp": time.Now().Add(30 * time.Second).Unix()},
+			map[string]any{"iss": deviceID, "sub": deviceID, "aud": "https://jaz.example", "jti": rand.Text(), "iat": time.Now().Unix(), "exp": time.Now().Add(30 * time.Second).Unix()},
 		)}}
 		req := httptest.NewRequest(http.MethodPost, "/v1/devices/token", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Content-Type", contentType)
 		req.Header.Set("DPoP", proof(key, "POST", "https://jaz.example/v1/devices/token", ""))
 		res := httptest.NewRecorder()
 		srv.ServeHTTP(res, req)
@@ -69,10 +69,18 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 		_ = json.NewDecoder(res.Body).Decode(&body)
 		return res, body
 	}
-	if res, body := requestToken("authorization_code"); res.Code != http.StatusBadRequest || body["error"] != "unsupported_grant_type" {
+	health := httptest.NewRecorder()
+	srv.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if !strings.Contains(health.Body.String(), `"device_proof":true`) {
+		t.Fatalf("health = %s, want device_proof", health.Body)
+	}
+	if res, body := requestToken("authorization_code", "application/x-www-form-urlencoded"); res.Code != http.StatusBadRequest || body["error"] != "unsupported_grant_type" {
 		t.Fatalf("authorization_code grant = %d %v", res.Code, body)
 	}
-	res, body := requestToken("client_credentials")
+	if res, body := requestToken("client_credentials", "application/json"); res.Code != http.StatusBadRequest || body["error"] != "invalid_request" {
+		t.Fatalf("JSON token request = %d %v", res.Code, body)
+	}
+	res, body := requestToken("client_credentials", "application/x-www-form-urlencoded; charset=utf-8")
 	token, _ := body["access_token"].(string)
 	if res.Code != http.StatusOK || token == "" || body["token_type"] != "DPoP" || res.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("token response = %d %v %v", res.Code, body, res.Header())
@@ -110,5 +118,14 @@ func TestProofModeIssuesAccessTokensAndRequiresTheirProof(t *testing.T) {
 				t.Fatalf("WWW-Authenticate = %q, want %q", challenge, test.challenge)
 			}
 		})
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/sessions/s1/terminal", nil)
+	req.Header.Set("Authorization", "DPoP "+token)
+	req.Header.Add("DPoP", proof(key, "GET", target, token))
+	req.Header.Add("DPoP", proof(key, "GET", target, token))
+	res = httptest.NewRecorder()
+	srv.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), "invalid_dpop_proof") {
+		t.Fatalf("two DPoP headers = %d %s, want invalid_dpop_proof (RFC 9449 §4.3)", res.Code, res.Body)
 	}
 }
