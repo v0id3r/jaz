@@ -404,6 +404,8 @@ export interface Device {
   last_seen_ip?: string
   user_agent?: string
   app_version?: string
+  // The auth proxy identity (sub@iss) the device is bound to.
+  user?: string
 }
 
 export interface DevicePairing {

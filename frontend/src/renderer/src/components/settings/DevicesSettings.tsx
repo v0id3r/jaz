@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, Copy, LoaderCircle, MonitorSmartphone, Plus, QrCode, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Check, Copy, LoaderCircle, MonitorSmartphone, Plus, QrCode, Trash2, UserRound, X } from 'lucide-react'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
@@ -425,6 +425,15 @@ function DeviceSummary({
           {current ? (
             <span className="rounded-full bg-primary-soft px-1.5 py-0.5 text-[10px] font-medium text-primary-strong">
               This device
+            </span>
+          ) : null}
+          {device.user ? (
+            <span
+              title={`Bound to ${device.user}`}
+              className="flex min-w-0 items-center gap-1 rounded-full bg-bg px-1.5 py-0.5 text-[10px] font-medium text-ink-2 ring-1 ring-border/70"
+            >
+              <UserRound size={10} className="shrink-0" />
+              <span className="truncate">{device.user}</span>
             </span>
           ) : null}
         </div>
