@@ -75,12 +75,19 @@ func dayBoundary(date time.Time, loc *time.Location) time.Time {
 		_, offset := probe.Zone()
 		start, end := probe.ZoneBounds()
 		candidate := date.Add(-time.Duration(offset) * time.Second)
-		if !start.IsZero() && candidate.Before(start) {
+		if _, previous := start.Add(-time.Second).Zone(); !start.IsZero() && candidate.Before(start) && previous != offset {
 			candidate = start
 		}
 		if end.IsZero() || candidate.Before(end) {
 			return candidate
 		}
-		probe = end
+		// Past a zone's last listed transition Go derives bounds from its rule:
+		// they split each UTC year without a change of offset, and leap years end
+		// a day early, so a bound may not even lie after probe.
+		if end.After(probe) {
+			probe = end
+		} else {
+			probe = probe.Add(time.Hour)
+		}
 	}
 }
