@@ -60,5 +60,8 @@ func NewDeviceAuth(store *sqlitestore.Store, cfg Config) (*deviceauth.Service, e
 		}
 		devices.Origins = append(devices.Origins, origin)
 	}
+	if devices.RequireProof && len(devices.Origins) == 0 {
+		return nil, fmt.Errorf("jaz.devices.requireproof needs jaz.devices.origins: the origins clients reach this server on")
+	}
 	return devices, nil
 }

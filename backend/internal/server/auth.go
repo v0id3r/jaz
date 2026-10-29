@@ -48,7 +48,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			// Distinct from unauthorized so clients keep a token whose proof was
 			// merely stale or replayed instead of discarding it and re-pairing.
 			if errors.Is(err, deviceauth.ErrProofInvalid) {
-				s.writeUnauthorized(w, "invalid_dpop_proof", true, err)
+				s.writeUnauthorized(w, "invalid_dpop_proof", "invalid_dpop_proof", err)
 				return
 			}
 			if errors.Is(err, deviceauth.ErrApprovalRequired) {
@@ -68,10 +68,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		}
 		// An expired access token only needs a new one from the token endpoint.
 		if errors.Is(deviceErr, deviceauth.ErrTokenInvalid) {
-			s.writeUnauthorized(w, "invalid_token", true, deviceErr)
+			s.writeUnauthorized(w, "invalid_token", "invalid_token", deviceErr)
 			return
 		}
-		s.writeUnauthorized(w, "unauthorized", token != "", fmt.Errorf("missing or invalid backend API key"))
+		s.writeUnauthorized(w, "unauthorized", map[bool]string{true: "invalid_token"}[token != ""], fmt.Errorf("missing or invalid backend API key"))
 	})
 }
 
@@ -85,15 +85,14 @@ func (s *Server) deviceToken(r *http.Request) string {
 	return requestAuthKey(r)
 }
 
-// writeUnauthorized adds the DPoP challenge of RFC 9449 §7.1 in proof mode;
-// the code in the body stays what Jaz clients branch on.
-func (s *Server) writeUnauthorized(w http.ResponseWriter, code string, presented bool, err error) {
+// writeUnauthorized adds the DPoP challenge of RFC 9449 §7.1 in proof mode,
+// with challengeError unless the request presented no credential; the code in
+// the body stays what Jaz clients branch on.
+func (s *Server) writeUnauthorized(w http.ResponseWriter, code, challengeError string, err error) {
 	if s.Devices != nil && s.Devices.RequireProof {
 		challenge := `DPoP algs="` + deviceauth.ProofAlgs + `"`
-		if code == "invalid_dpop_proof" {
-			challenge += `, error="invalid_dpop_proof"`
-		} else if presented {
-			challenge += `, error="invalid_token"`
+		if challengeError != "" {
+			challenge += `, error="` + challengeError + `"`
 		}
 		w.Header().Set("WWW-Authenticate", challenge)
 	}
