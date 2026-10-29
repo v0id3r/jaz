@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"slices"
@@ -32,21 +33,26 @@ type ProxyConfig struct {
 // proxy identity, or with one the device does not belong to.
 var ErrUserInvalid = errors.New("auth proxy identity is missing, invalid or not the device's user")
 
-const jwksRefreshInterval = time.Minute
+// The issuer's keys are refetched when older than jwksMaxAge, so removed keys
+// stop working, and once older than jwksMinAge when none verifies a token, so
+// rotated keys start working; a failed fetch also waits jwksMinAge.
+const jwksMinAge, jwksMaxAge = time.Minute, 10 * time.Minute
 
 // jwtIssuer verifies JWTs an external issuer signs for audience with the keys
-// it publishes at jwks, refetched at most once a minute for an unknown kid.
+// it publishes at jwks.
 type jwtIssuer struct {
 	jwks, issuer, audience string
 	client                 *http.Client
 	mu                     sync.Mutex
-	keys                   map[string]jwk
+	keys                   []jwk
+	fetchErr               error
 	fetched                time.Time
 }
 
 type jwk struct{ Kid, Kty, Crv, X, Y, N, E string }
 
-// verify returns the subject of a valid token and when it expires.
+// verify returns the user (sub@iss) of a valid token and when it expires. The
+// issuer's clock may run up to proofMaxAge ahead of ours.
 func (i *jwtIssuer) verify(token string, now time.Time) (string, time.Time, error) {
 	var header struct{ Alg, Kid string }
 	var claims struct {
@@ -60,16 +66,25 @@ func (i *jwtIssuer) verify(token string, now time.Time) (string, time.Time, erro
 	if !ok {
 		return "", time.Time{}, ErrUserInvalid
 	}
-	key, err := i.key(header.Kid, now)
+	signed := func(keys []jwk) bool {
+		return slices.ContainsFunc(keys, func(key jwk) bool {
+			verify := key.verifier(header.Alg)
+			return key.Kid == header.Kid && verify != nil && verify(jws.signed, jws.sig)
+		})
+	}
+	keys, err := i.keySet(now, false)
+	if err == nil && !signed(keys) {
+		keys, err = i.keySet(now, true)
+	}
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	verify, exp := key.verifier(header.Alg), time.Unix(claims.Exp, 0)
-	if verify == nil || !verify(jws.signed, jws.sig) || claims.Iss != i.issuer || !slices.Contains(claims.Aud, i.audience) ||
-		claims.Sub == "" || !now.Before(exp) || now.Before(time.Unix(claims.Nbf, 0)) {
+	exp := time.Unix(claims.Exp, 0)
+	if !signed(keys) || claims.Iss != i.issuer || !slices.Contains(claims.Aud, i.audience) || claims.Sub == "" ||
+		!now.Before(exp) || now.Add(proofMaxAge).Before(time.Unix(claims.Nbf, 0)) {
 		return "", time.Time{}, ErrUserInvalid
 	}
-	return claims.Sub, exp, nil
+	return claims.Sub + "@" + claims.Iss, exp, nil
 }
 
 // audience is an aud claim, a single string or a list (RFC 7519 §4.1.3).
@@ -84,29 +99,33 @@ func (a *audience) UnmarshalJSON(raw []byte) error {
 	return json.Unmarshal(raw, (*[]string)(a))
 }
 
-func (i *jwtIssuer) key(kid string, now time.Time) (jwk, error) {
+// keySet returns the issuer's keys, refetching them as the jwks ages allow;
+// unverified asks for a refetch since none of them verified a token.
+func (i *jwtIssuer) keySet(now time.Time, unverified bool) ([]jwk, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if key, ok := i.keys[kid]; ok || now.Sub(i.fetched) < jwksRefreshInterval {
-		return key, nil
+	if age := now.Sub(i.fetched); age < jwksMinAge || age < jwksMaxAge && !unverified && i.fetchErr == nil {
+		return i.keys, i.fetchErr
 	}
+	i.fetched = now
+	i.keys, i.fetchErr = i.fetchKeys()
+	return i.keys, i.fetchErr
+}
+
+func (i *jwtIssuer) fetchKeys() ([]jwk, error) {
 	res, err := i.client.Get(i.jwks)
 	if err != nil {
-		return jwk{}, fmt.Errorf("auth proxy JWKS: %w", err)
+		return nil, fmt.Errorf("auth proxy JWKS: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		return jwk{}, fmt.Errorf("auth proxy JWKS returned %s", res.Status)
+		return nil, fmt.Errorf("auth proxy JWKS returned %s", res.Status)
 	}
 	var set struct{ Keys []jwk }
-	if err := json.NewDecoder(res.Body).Decode(&set); err != nil {
-		return jwk{}, fmt.Errorf("auth proxy JWKS: %w", err)
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&set); err != nil {
+		return nil, fmt.Errorf("auth proxy JWKS: %w", err)
 	}
-	i.keys, i.fetched = make(map[string]jwk, len(set.Keys)), now
-	for _, key := range set.Keys {
-		i.keys[key.Kid] = key
-	}
-	return i.keys[kid], nil
+	return set.Keys, nil
 }
 
 // verifier checks JWS signatures of alg by the key, or is nil when alg and key
@@ -130,11 +149,11 @@ func (k jwk) verifier(alg string) func(signed, sig []byte) bool {
 // authenticateUser binds a device to the user the auth proxy vouches for, if
 // it belongs to nobody yet, and returns when that user's identity expires.
 func (s *Service) authenticateUser(device storage.Device, token string) (time.Time, error) {
-	subject, expiresAt, err := s.users.verify(token, s.now())
+	user, expiresAt, err := s.users.verify(token, s.now())
 	if err != nil {
 		return time.Time{}, err
 	}
-	if user := subject + "@" + s.users.issuer; device.User != user {
+	if device.User != user {
 		bound, err := s.store.BindDeviceUser(device.ID, user)
 		if err != nil {
 			return time.Time{}, err

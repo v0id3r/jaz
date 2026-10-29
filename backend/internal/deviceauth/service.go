@@ -134,6 +134,7 @@ func NewProofMode(store Store, origins []string, proxy ProxyConfig) (*Service, e
 		}
 		s.origins = append(s.origins, origin)
 	}
+	proxy = ProxyConfig{Header: strings.TrimSpace(proxy.Header), JWKS: strings.TrimSpace(proxy.JWKS), Issuer: strings.TrimSpace(proxy.Issuer), Audience: strings.TrimSpace(proxy.Audience)}
 	if proxy == (ProxyConfig{}) {
 		return s, nil
 	}
