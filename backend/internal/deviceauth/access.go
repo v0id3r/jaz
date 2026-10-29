@@ -16,7 +16,7 @@ type access struct {
 func (s *Service) Track(ctx context.Context, principal Principal) (context.Context, func(), error) {
 	s.access.mu.Lock()
 	defer s.access.mu.Unlock()
-	device, err := s.store.LoadDeviceByTokenHash(principal.CredentialHash)
+	device, err := s.loadCredential(principal.CredentialHash)
 	if err != nil || device.Status != "approved" {
 		return nil, nil, ErrUnauthorized
 	}
@@ -66,7 +66,7 @@ func (s *Service) IssueResourceTicket(credential string) (ResourceTicket, error)
 			delete(s.access.tickets, key)
 		}
 	}
-	device, err := s.store.LoadDeviceByTokenHash(TokenHash(credential))
+	device, err := s.loadCredential(TokenHash(credential))
 	if err != nil || device.Status != "approved" {
 		return ResourceTicket{}, ErrUnauthorized
 	}
@@ -81,7 +81,7 @@ func (s *Service) AuthenticateResourceTicket(token string) (Principal, error) {
 	if !ok || !s.now().Before(entry.expiresAt) {
 		return Principal{}, ErrUnauthorized
 	}
-	device, err := s.store.LoadDeviceByTokenHash(entry.tokenHash)
+	device, err := s.loadCredential(entry.tokenHash)
 	if err != nil || device.Status != "approved" {
 		return Principal{}, ErrUnauthorized
 	}

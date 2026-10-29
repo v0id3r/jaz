@@ -209,6 +209,7 @@ func appendDeviceRoutes(routes server.Routes, devices *deviceauth.Service, setti
 		server.Route{Pattern: "PUT /v1/devices/connection-link", Handler: httpHandlerFunc(handler.UpdateConnectionLink)},
 		server.Route{Pattern: "GET /v1/devices", Handler: httpHandlerFunc(handler.List)},
 		server.Route{Pattern: "POST /v1/devices/register", Handler: httpHandlerFunc(handler.Register)},
+		server.Route{Pattern: "POST /v1/devices/token", Handler: httpHandlerFunc(handler.Token)},
 		server.Route{Pattern: "DELETE /v1/devices/{id}", Handler: httpHandlerFunc(handler.Revoke)},
 	)
 	// Pairing is the unauthenticated keyless-onboarding surface.

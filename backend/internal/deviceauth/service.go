@@ -33,6 +33,7 @@ const pairingTTL = 10 * time.Minute
 type Store interface {
 	ListDevices() ([]storage.Device, error)
 	CountApprovedDevices() (int, error)
+	LoadDevice(id string) (storage.Device, error)
 	LoadDeviceByTokenHash(string) (storage.Device, error)
 	SaveApprovedDevice(storage.SaveApprovedDevice) (storage.Device, error)
 	UpdateDeviceSeen(id, ip, userAgent string, at time.Time) error
@@ -47,12 +48,17 @@ type Store interface {
 
 type Service struct {
 	// RequireProof makes every device request and remote registration prove
-	// possession of the device key with a DPoP proof.
+	// possession of the device key with a DPoP proof, and replaces long-lived
+	// device tokens with access tokens from IssueAccessToken.
 	RequireProof bool
-	store        Store
-	access       access
-	proofs       spentProofs
-	now          func() time.Time
+	// Origins are the normalized origins clients reach this server on; proofs
+	// and client assertions must name one of them.
+	Origins []string
+	store   Store
+	access  access
+	proofs  spentProofs
+	tokens  accessTokens
+	now     func() time.Time
 }
 
 type SeenInfo struct {
@@ -124,7 +130,10 @@ func (s *Service) Authenticate(token string, proof Proof, seen SeenInfo) (Princi
 	if token == "" {
 		return Principal{}, ErrUnauthorized
 	}
-	device, err := s.store.LoadDeviceByTokenHash(TokenHash(token))
+	device, err := s.loadCredential(TokenHash(token))
+	if errors.Is(err, ErrTokenInvalid) {
+		return Principal{}, err
+	}
 	if err != nil {
 		return Principal{}, ErrUnauthorized
 	}
@@ -235,11 +244,11 @@ func (s *Service) PollPairing(id, secret string) (PairingPoll, error) {
 	if pairing.Status == storage.PairingStatusApproved {
 		s.access.mu.Lock()
 		defer s.access.mu.Unlock()
-		token, err := newToken()
+		token, tokenHash, err := s.deviceCredential(pairing.DeviceID)
 		if err != nil {
 			return PairingPoll{}, err
 		}
-		if err := s.store.ClaimDevicePairing(pairing.ID, secretHash, TokenHash(token), s.now()); err != nil {
+		if err := s.store.ClaimDevicePairing(pairing.ID, secretHash, tokenHash, s.now()); err != nil {
 			return PairingPoll{}, ErrUnauthorized
 		}
 		pairing.Device.Status = storage.DeviceStatusApproved
@@ -337,7 +346,7 @@ func (s *Service) acceptRegistration(reg Registration) (Registration, error) {
 }
 
 func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
-	token, err := newToken()
+	token, tokenHash, err := s.deviceCredential(reg.Identity.DeviceID)
 	if err != nil {
 		return RegisterResult{}, err
 	}
@@ -350,7 +359,7 @@ func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
 		Platform:   reg.Profile.Platform,
 		Family:     reg.Profile.Family,
 		Model:      reg.Profile.Model,
-		TokenHash:  TokenHash(token),
+		TokenHash:  tokenHash,
 		CreatedAt:  now,
 		ApprovedAt: now,
 		LastSeenAt: now,
