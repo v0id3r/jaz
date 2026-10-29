@@ -12,7 +12,6 @@ import {
   type SessionSnapshot,
 } from '@shared/connectionSession'
 import type { DeviceIdentity, DeviceMetadata } from '@main/deviceIdentity'
-import { deviceAuthHeaders } from '@shared/deviceProof'
 
 const LOCAL_URL = 'http://127.0.0.1:5299'
 type WindowDocument = { window: BrowserWindow; document: number; frame?: WebFrameMain; active: boolean }
@@ -20,8 +19,7 @@ type Dependencies = {
   rendererPath: string
   startLocal: () => Promise<{ ok: boolean; url?: string; key?: string; error?: string }>
   profile: () => DeviceIdentity & DeviceMetadata
-  proof: (method: string, url: string, token: string) => Promise<string>
-  accessToken: (baseUrl: string) => Promise<string>
+  fetchWithKey: (url: string, init: RequestInit) => Promise<Response>
   stopConsumers: () => void
 }
 
@@ -173,7 +171,7 @@ export function createConnectionSession(deps: Dependencies) {
       throw new Error('Local bootstrap returned the wrong backend')
     }
     const health = await fetch(LOCAL_URL + '/health', { redirect: 'error', signal: AbortSignal.timeout(3000) })
-    const healthBody = await health.json() as { ok?: boolean; auth_required?: boolean }
+    const healthBody = await health.json() as { ok?: boolean; auth_required?: boolean; capabilities?: { device_proof?: boolean } }
     if (generation !== localGeneration) {
       throw new Error('Local startup was cancelled')
     }
@@ -192,17 +190,16 @@ export function createConnectionSession(deps: Dependencies) {
       headers: { Authorization: `Bearer ${local.key}`, 'Content-Type': 'application/json', 'X-Jaz-Client-Platform': 'desktop' },
       body: JSON.stringify({ ...profile, kind: 'desktop' }), signal: AbortSignal.timeout(5000),
     })
-    const body = await response.json() as { token?: string; device?: unknown; error?: string }
+    const body = await response.json() as { token?: string; error?: string }
     // In proof mode registration only approves the device key, the credential.
-    const keyed = response.ok && !body.token && Boolean(body.device)
+    const keyed = healthBody.capabilities?.device_proof === true
     if (!response.ok || !(keyed || body.token?.startsWith('jaz_'))) {
       throw new Error(body.error || 'Local device registration failed')
     }
-    const token = body.token || await deps.accessToken(LOCAL_URL)
-    const check = await fetch(LOCAL_URL + '/v1/auth/check', {
-      redirect: 'error', signal: AbortSignal.timeout(3000),
-      headers: { ...deviceAuthHeaders(token, await deps.proof('GET', LOCAL_URL + '/v1/auth/check', token)), 'X-Jaz-Client-Platform': 'desktop' },
-    })
+    const checkInit = { redirect: 'error', signal: AbortSignal.timeout(3000), headers: { 'X-Jaz-Client-Platform': 'desktop' } } satisfies RequestInit
+    const check = keyed
+      ? await deps.fetchWithKey(LOCAL_URL + '/v1/auth/check', checkInit)
+      : await fetch(LOCAL_URL + '/v1/auth/check', { ...checkInit, headers: { ...checkInit.headers, Authorization: `Bearer ${body.token}` } })
     if (!check.ok) {
       throw new Error('Local device verification failed')
     }

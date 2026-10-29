@@ -19,7 +19,7 @@ import { attachBrowserNavigationCommands, attachBrowserNavigationShortcuts } fro
 import { attachWindowOpenHandler } from '@main/browserPopups'
 import { attachWindowLifecycle, installMainDiagnostics } from './diagnostics'
 import { installCredentialEncryption } from './credentialEncryption'
-import { deviceAccessToken, deviceProof, getDeviceIdentity, getDeviceMetadata } from './deviceIdentity'
+import { deviceAccessToken, deviceKeyFetch, deviceProof, getDeviceIdentity, getDeviceMetadata } from './deviceIdentity'
 import { DeviceTokenError } from '@shared/deviceProof'
 import { registerDictation } from './dictation'
 import { configureAppPermissions } from './permissions'
@@ -59,14 +59,19 @@ installBrowserPasswords()
 let mainWindow: BrowserWindow | null = null
 const updates = createUpdateController(() => mainWindow)
 const previewURLTargets = new Set<number>()
-const threadNotifications = createThreadNotificationMonitor(openInMain, deviceProof, async (baseUrl, token, rejected) =>
-  token || !connectionSession.current().session?.deviceId ? token : deviceAccessToken(baseUrl, rejected))
+// A session whose device key is the credential has no token for the monitor
+// to present; it gets DPoP access tokens instead.
+const threadNotifications = createThreadNotificationMonitor(openInMain, (input, init) => {
+  const session = connectionSession.current().session
+  return session && !session.token && session.deviceId
+    ? deviceKeyFetch(String(input), init)
+    : fetch(input, init)
+})
 const connectionSession = createConnectionSession({
   rendererPath: join(__dirname, '../renderer/index.html'),
   startLocal: startLocalBackend,
   profile: () => ({ ...getDeviceIdentity(), ...getDeviceMetadata() }),
-  proof: deviceProof,
-  accessToken: (baseUrl) => deviceAccessToken(baseUrl),
+  fetchWithKey: deviceKeyFetch,
   stopConsumers: () => threadNotifications.stop(),
 })
 

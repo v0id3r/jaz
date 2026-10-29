@@ -2,7 +2,7 @@ import { readAPIResponse } from '@/lib/api/response'
 import { DEFAULT_API_BASE_URL, clientRuntime } from '@/lib/clientRuntime'
 import { isPreviewProxyTargetHostname } from '@shared/preview'
 import type { ResourceTicket } from '@shared/connectionSession'
-import { deviceAuthHeaders } from '@shared/deviceProof'
+import { DeviceTokenError, fetchWithDeviceKey } from '@shared/deviceProof'
 import { deviceAccessToken, deviceProof } from '@/lib/deviceIdentity'
 
 export { ApiError } from '@/lib/api/response'
@@ -147,8 +147,9 @@ export async function apiWebSocket(path: string): Promise<WebSocket> {
   }
   const revision = credentialRevision
   const url = apiWebSocketUrl(path)
-  const token = await apiAuthToken()
-  const proof = token ? await deviceProof('GET', url, token) : ''
+  const keyed = apiUsesDeviceKey()
+  const token = keyed ? await deviceAccessToken(apiBaseUrl()) : cachedApiAuthToken()
+  const proof = keyed ? await deviceProof('GET', url, token) : ''
   if (revision !== credentialRevision) {
     throw new Error('The connection changed before the socket opened')
   }
@@ -181,11 +182,6 @@ export function cachedApiAuthToken(url = apiBaseUrl()): string {
 
 export function apiUsesDeviceKey(url = apiBaseUrl()): boolean {
   return keyCredentials.has(authStorageKey(url))
-}
-
-// The token a request presents; rejected names one the backend refused.
-async function apiAuthToken(url = apiBaseUrl(), rejected?: string): Promise<string> {
-  return apiUsesDeviceKey(url) ? deviceAccessToken(normalizeBaseUrl(url), rejected) : cachedApiAuthToken(url)
 }
 
 export function restoreApiAuthToken(url: string): string {
@@ -265,23 +261,17 @@ function notifySessionChange(): void {
   }
 }
 
-export async function deviceRequestHeaders(method: string, url: string, token: string): Promise<Record<string, string>> {
-  return deviceAuthHeaders(token, await deviceProof(method, url, token))
-}
-
-async function withAPIHeaders(target: string, init: RequestInit, url: string, rejected?: string): Promise<RequestInit> {
+function withAPIHeaders(init: RequestInit = {}, url = apiBaseUrl()): RequestInit {
   if (!secureBackendConnection(url)) {
     throw new Error('Remote connections require HTTPS')
   }
-  const token = await apiAuthToken(url, rejected)
+  const token = cachedApiAuthToken(url)
   const headers = new Headers(init.headers)
   if (!headers.has(CLIENT_PLATFORM_HEADER)) {
     headers.set(CLIENT_PLATFORM_HEADER, CLIENT_PLATFORM)
   }
   if (token && !headers.has('Authorization')) {
-    for (const [name, value] of Object.entries(await deviceRequestHeaders(init.method ?? 'GET', target, token))) {
-      headers.set(name, value)
-    }
+    headers.set('Authorization', `Bearer ${token}`)
   }
   return { ...init, headers }
 }
@@ -303,27 +293,35 @@ export async function apiFetch(path: string, init?: RequestInit, url = apiBaseUr
   assertBackendRelativePath(path, 'apiFetch')
   const signal = init?.signal ? AbortSignal.any([init.signal, sessionRequests.signal]) : sessionRequests.signal
   const revision = credentialRevision
-  const send = async (rejected?: string) => {
-    const options = await withAPIHeaders(`${url}${path}`, { ...init, signal }, url, rejected)
-    const sent = new Headers(options.headers).get('Authorization')?.split(' ')[1]
-    const response = await fetch(`${url}${path}`, options)
-    const body = response.status === 401 || response.status === 403
-      ? await response.clone().json().catch(() => null) as { code?: string } | null
-      : null
-    return { sent, response, body }
+  const options = withAPIHeaders({ ...init, signal }, url)
+  const bearer = new Headers(options.headers).get('Authorization')
+  // The device key authenticates requests that bring no credential of their own.
+  const keyed = apiUsesDeviceKey(url) && !bearer
+  let response: Response
+  try {
+    response = keyed ? await fetchWithDeviceKey(deviceAccessToken, deviceProof, `${url}${path}`, options) : await fetch(`${url}${path}`, options)
+  } catch (error) {
+    if (keyed && error instanceof DeviceTokenError && error.code === 'invalid_client') {
+      notifyAuthRejected(revision, url)
+    }
+    throw error
   }
-  let { sent, response, body } = await send()
-  // The backend forgot or expired the access token; the device key gets another.
-  if (body?.code === 'invalid_token' && apiUsesDeviceKey(url)) {
-    ({ sent, response, body } = await send(sent))
-  }
-  if (body && sent && (sent === cachedApiAuthToken(url) || apiUsesDeviceKey(url)) &&
-    revision === credentialRevision && url === apiBaseUrl() && (body.code === 'unauthorized' || body.code === 'device_approval_required')) {
-    for (const handler of rejectionListeners) {
-      handler()
+  if ((response.status === 401 || response.status === 403) && (keyed || bearer === `Bearer ${cachedApiAuthToken(url)}`)) {
+    const body = await response.clone().json().catch(() => null) as { code?: string } | null
+    if (body?.code === 'unauthorized' || body?.code === 'device_approval_required') {
+      notifyAuthRejected(revision, url)
     }
   }
   return response
+}
+
+function notifyAuthRejected(revision: number, url: string): void {
+  if (revision !== credentialRevision || url !== apiBaseUrl()) {
+    return
+  }
+  for (const handler of rejectionListeners) {
+    handler()
+  }
 }
 
 export function apiEventSourceUrl(path: string): string {
