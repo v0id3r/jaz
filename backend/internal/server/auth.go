@@ -5,13 +5,12 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/wins/jaz/backend/internal/deviceauth"
 	"github.com/wins/jaz/backend/internal/httpapi"
+	devicesapi "github.com/wins/jaz/backend/internal/httpapi/devices"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 	"github.com/wins/jaz/backend/internal/sessioncontext"
 )
@@ -38,9 +37,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 			return
 		}
+		var deviceErr error
 		if s.Devices != nil {
 			info := httpapi.RequestInfoFrom(r)
-			principal, err := s.Devices.Authenticate(token, requestProof(r), deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
+			principal, err := s.Devices.Authenticate(s.deviceToken(r), devicesapi.RequestProof(r), deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
 			if err == nil {
 				s.serveDevice(w, r, principal, next)
 				return
@@ -48,16 +48,17 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			// Distinct from unauthorized so clients keep a token whose proof was
 			// merely stale or replayed instead of discarding it and re-pairing.
 			if errors.Is(err, deviceauth.ErrProofInvalid) {
-				writeAuthError(w, http.StatusUnauthorized, "invalid_dpop_proof", err)
+				s.writeUnauthorized(w, "invalid_dpop_proof", true, err)
 				return
 			}
 			if errors.Is(err, deviceauth.ErrApprovalRequired) {
 				writeAuthError(w, http.StatusForbidden, "device_approval_required", err)
 				return
 			}
+			deviceErr = err
 		}
 		if subtle.ConstantTimeCompare([]byte(token), []byte(key)) == 1 {
-			if s.Devices == nil || (trustedLocalRequest(r) && (rootKeyAllowed(r) || s.rootKeyHasFullAccess())) {
+			if s.Devices == nil || (httpapi.TrustedLocalRequest(r) && (rootKeyAllowed(r) || s.rootKeyHasFullAccess())) {
 				principal := deviceauth.Principal{Kind: deviceauth.PrincipalRoot}
 				next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 				return
@@ -65,8 +66,38 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeAuthError(w, http.StatusForbidden, "device_approval_required", deviceauth.ErrApprovalRequired)
 			return
 		}
-		writeAuthError(w, http.StatusUnauthorized, "unauthorized", fmt.Errorf("missing or invalid backend API key"))
+		// An expired access token only needs a new one from the token endpoint.
+		if errors.Is(deviceErr, deviceauth.ErrTokenInvalid) {
+			s.writeUnauthorized(w, "invalid_token", true, deviceErr)
+			return
+		}
+		s.writeUnauthorized(w, "unauthorized", token != "", fmt.Errorf("missing or invalid backend API key"))
 	})
+}
+
+// deviceToken is the credential offered for device auth. In proof mode it is
+// a DPoP-bound access token, which must not be accepted as a bearer token
+// (RFC 9449 §7.2).
+func (s *Server) deviceToken(r *http.Request) string {
+	if scheme, _, _ := strings.Cut(r.Header.Get("Authorization"), " "); s.Devices.RequireProof && strings.EqualFold(scheme, "Bearer") {
+		return ""
+	}
+	return requestAuthKey(r)
+}
+
+// writeUnauthorized adds the DPoP challenge of RFC 9449 §7.1 in proof mode;
+// the code in the body stays what Jaz clients branch on.
+func (s *Server) writeUnauthorized(w http.ResponseWriter, code string, presented bool, err error) {
+	if s.Devices != nil && s.Devices.RequireProof {
+		challenge := `DPoP algs="` + deviceauth.ProofAlgs + `"`
+		if code == "invalid_dpop_proof" {
+			challenge += `, error="invalid_dpop_proof"`
+		} else if presented {
+			challenge += `, error="invalid_token"`
+		}
+		w.Header().Set("WWW-Authenticate", challenge)
+	}
+	writeAuthError(w, http.StatusUnauthorized, code, err)
 }
 
 const clientPlatformHeader = "X-Jaz-Client-Platform"
@@ -101,22 +132,6 @@ func rootKeyAllowed(r *http.Request) bool {
 	return r.URL.Path == "/v1/devices" || strings.HasPrefix(r.URL.Path, "/v1/devices/") || internalMCPRequest(r)
 }
 
-func trustedLocalRequest(r *http.Request) bool {
-	if !loopbackRequest(r) {
-		return false
-	}
-	host := (&url.URL{Host: r.Host}).Hostname()
-	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
-		return false
-	}
-	for _, name := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "CF-Connecting-IP"} {
-		if r.Header.Get(name) != "" {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *Server) serveDevice(w http.ResponseWriter, r *http.Request, principal deviceauth.Principal, next http.Handler) {
 	ctx, release, err := s.Devices.Track(contextWithClientInfo(r, principal), principal)
 	if err != nil {
@@ -128,7 +143,7 @@ func (s *Server) serveDevice(w http.ResponseWriter, r *http.Request, principal d
 }
 
 func publicDeviceRequest(r *http.Request) bool {
-	if r.Method == http.MethodPost && r.URL.Path == "/v1/devices/pairing-requests" {
+	if r.Method == http.MethodPost && (r.URL.Path == "/v1/devices/pairing-requests" || r.URL.Path == "/v1/devices/token") {
 		return true
 	}
 	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/devices/pairing-requests/") {
@@ -168,29 +183,7 @@ func requestAuthKey(r *http.Request) string {
 	if token := bearerToken(r.Header.Get("Authorization")); token != "" {
 		return token
 	}
-	return webSocketProtocol(r, "jaz-auth.")
-}
-
-// requestProof reads the DPoP proof from its header or, since browsers cannot
-// set headers on a WebSocket handshake, from a subprotocol.
-func requestProof(r *http.Request) deviceauth.Proof {
-	jwt := r.Header.Get(deviceauth.ProofHeader)
-	if jwt == "" {
-		jwt = webSocketProtocol(r, "jaz-dpop.")
-	}
-	return deviceauth.Proof{JWT: jwt, Method: r.Method, Path: r.URL.Path}
-}
-
-func webSocketProtocol(r *http.Request, prefix string) string {
-	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		return ""
-	}
-	for _, protocol := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
-		if value, ok := strings.CutPrefix(strings.TrimSpace(protocol), prefix); ok {
-			return value
-		}
-	}
-	return ""
+	return httpapi.WebSocketProtocol(r, "jaz-auth.")
 }
 
 func queryAuthAllowed(r *http.Request) bool {
@@ -224,17 +217,8 @@ func bearerToken(header string) string {
 func internalMCPRequest(r *http.Request) bool {
 	switch r.URL.Path {
 	case serverconfig.JazToolsMCPPath, serverconfig.JazToolsMCPCompatPath, serverconfig.JazmemMCPPath, serverconfig.MCPProxyPath:
-		return loopbackRequest(r)
+		return httpapi.LoopbackRequest(r)
 	default:
 		return false
 	}
-}
-
-func loopbackRequest(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }

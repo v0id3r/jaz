@@ -169,7 +169,7 @@ func (h Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := http.StatusOK
-	if result.Token == "" {
+	if result.Pairing != nil {
 		status = http.StatusAccepted
 	}
 	httpapi.WriteJSON(w, status, registerDTO(result))
@@ -289,7 +289,7 @@ func inputFromRequest(r *http.Request) (deviceauth.Registration, error) {
 			AppVersion: strings.TrimSpace(r.Header.Get("X-Jaz-App-Version")),
 		},
 		Seen:  deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent},
-		Proof: deviceauth.Proof{JWT: r.Header.Get(deviceauth.ProofHeader), Method: r.Method, Path: r.URL.Path},
+		Proof: RequestProof(r),
 	}
 	if r.Body == nil {
 		return reg, nil
