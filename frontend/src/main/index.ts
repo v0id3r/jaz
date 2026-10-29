@@ -61,12 +61,8 @@ const updates = createUpdateController(() => mainWindow)
 const previewURLTargets = new Set<number>()
 // A session whose device key is the credential has no token for the monitor
 // to present; it gets DPoP access tokens instead.
-const threadNotifications = createThreadNotificationMonitor(openInMain, (input, init) => {
-  const session = connectionSession.current().session
-  return session && !session.token && session.deviceId
-    ? deviceKeyFetch(String(input), init)
-    : fetch(input, init)
-})
+const threadNotifications = createThreadNotificationMonitor(openInMain, (input, init) =>
+  connectionSession.current().session?.deviceKey ? deviceKeyFetch(String(input), init) : fetch(input, init))
 const connectionSession = createConnectionSession({
   rendererPath: join(__dirname, '../renderer/index.html'),
   startLocal: startLocalBackend,
