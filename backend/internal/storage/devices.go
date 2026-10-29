@@ -5,7 +5,10 @@ import (
 	"time"
 )
 
-var ErrPairingLimit = errors.New("too many pairing requests; try again later or use an invitation")
+var (
+	ErrPairingLimit   = errors.New("too many pairing requests; try again later or use an invitation")
+	ErrDeviceNotFound = errors.New("device not found")
+)
 
 const (
 	DeviceStatusPending  = "pending"

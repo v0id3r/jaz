@@ -222,7 +222,7 @@ func deviceFromRecord(row deviceRecord) storage.Device {
 
 func deviceError(err error) error {
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("device not found")
+		return storage.ErrDeviceNotFound
 	}
 	return err
 }
