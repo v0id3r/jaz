@@ -83,7 +83,7 @@ func dayBoundary(date time.Time, loc *time.Location) time.Time {
 		}
 		// Past a zone's last listed transition Go derives bounds from its rule:
 		// they split each UTC year without a change of offset, and leap years end
-		// a day early, so a bound may not even lie after probe.
+		// a day early, so a bound may not even lie after probe (golang/go#81583).
 		if end.After(probe) {
 			probe = end
 		} else {
