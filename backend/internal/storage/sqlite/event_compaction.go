@@ -155,6 +155,7 @@ func (s *Store) prepareSessionEventCompactionPage(ctx context.Context, plan *ses
 			return sizeErr
 		}
 		event, err := eventFromDBFields(row.ThreadID, row.Seq, row.ProjectionKey, row.ProjectionOp, row.Type, row.Content, row.Acp, row.Plan, row.Permission, row.CreatedAtMs)
+		event.StreamSeq = row.StreamSeq
 		if err != nil {
 			decodeErr := fmt.Errorf("decode session events for compaction: %w", err)
 			if skipErr := s.skipSessionEventCompaction(ctx, plan.id, plan.revision); skipErr != nil {

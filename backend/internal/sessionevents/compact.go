@@ -208,6 +208,7 @@ func mergeACPTextEvent(previous Event, previousSeq int64, next Event) (Event, bo
 	merged := previous
 	if next.Seq != 0 {
 		merged.Seq = next.Seq
+		merged.StreamSeq = next.StreamSeq
 	}
 	if !next.At.IsZero() {
 		merged.At = next.At

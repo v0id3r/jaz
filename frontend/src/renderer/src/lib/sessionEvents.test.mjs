@@ -71,6 +71,23 @@ describe('session event text projection', () => {
     expect(events[0].acp.tool_calls[0].status).toBe('completed')
   })
 
+  test('takes an in-place update at the same seq by its stream position', () => {
+    const tool = (streamSeq, toolStatus) => ({
+      ...status(1, 'running', { tool_calls: [{ id: 'tool-1', title: 'Read', status: toolStatus }] }),
+      type: 'acp_tool',
+      stream_seq: streamSeq,
+      projection_key: 'acp_tool:agent:tool-1',
+      projection_op: 'replace',
+    })
+    const live = [tool(1, 'pending'), text(2, 'Hi'), tool(3, 'completed'), tool(1, 'pending')].reduce(mergeSessionEvent, [])
+    const history = coalesceSessionEvents([tool(1, 'pending'), text(2, 'Hi'), ...live])
+
+    for (const events of [live, history]) {
+      expect(events.map((event) => event.seq)).toEqual([1, 2])
+      expect(events[0].acp.tool_calls[0].status).toBe('completed')
+    }
+  })
+
   test('folds a live projection over the persisted rows it already holds', () => {
     const live = [text(1, 'Hel', 'append'), text(2, 'lo', 'append'), text(3, ' world', 'append')].reduce(mergeSessionEvent, [])
     const events = coalesceSessionEvents([text(1, 'Hel', 'append'), text(2, 'lo', 'append'), ...live])

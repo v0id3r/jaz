@@ -214,9 +214,9 @@ func TestSessionEventCompactionPreservesConcurrentAppend(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(`
-		INSERT INTO session_events (thread_id, seq, type, content, acp, created_at_ms, coalesce_key)
-		VALUES (?, 1, 'acp_message', 'Hel', ?, 1, ''),
-		       (?, 2, 'acp_message', 'lo', ?, 2, '')`,
+		INSERT INTO session_events (thread_id, seq, stream_seq, type, content, acp, created_at_ms, coalesce_key)
+		VALUES (?, 1, 1, 'acp_message', 'Hel', ?, 1, ''),
+		       (?, 2, 2, 'acp_message', 'lo', ?, 2, '')`,
 		session.ID, `{"id":"agent-1","state":"running"}`,
 		session.ID, `{"id":"agent-1","state":"running"}`,
 	); err != nil {

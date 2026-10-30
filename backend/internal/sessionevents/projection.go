@@ -319,6 +319,13 @@ func ProviderSubagentProjectionKey(ownerID string, subagent ProviderSubagentEven
 	return key + subagent.Provider + ":" + subagent.ID
 }
 
+// CoalescesAtEnd reports whether a coalesced event is the thread's current
+// status, which moves to the end of history when it changes. Other coalesced
+// events stay where they first appeared.
+func CoalescesAtEnd(event Event) bool {
+	return event.Type == "acp"
+}
+
 func StorageCoalesceKey(event Event) string {
 	if event.ACP != nil && event.ACP.Origin != "" {
 		return ""

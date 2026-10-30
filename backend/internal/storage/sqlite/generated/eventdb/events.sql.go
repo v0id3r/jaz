@@ -255,17 +255,17 @@ func (q *Queries) LatestSessionEventOfType(ctx context.Context, arg LatestSessio
 	return i, err
 }
 
-const latestSessionEventSeq = `-- name: LatestSessionEventSeq :one
-SELECT CAST(COALESCE(MAX(seq), 0) AS INTEGER) AS seq
+const latestSessionEventStreamSeq = `-- name: LatestSessionEventStreamSeq :one
+SELECT CAST(COALESCE(MAX(stream_seq), 0) AS INTEGER) AS stream_seq
 FROM session_events
 WHERE thread_id = ?1
 `
 
-func (q *Queries) LatestSessionEventSeq(ctx context.Context, threadID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, latestSessionEventSeq, threadID)
-	var seq int64
-	err := row.Scan(&seq)
-	return seq, err
+func (q *Queries) LatestSessionEventStreamSeq(ctx context.Context, threadID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, latestSessionEventStreamSeq, threadID)
+	var stream_seq int64
+	err := row.Scan(&stream_seq)
+	return stream_seq, err
 }
 
 const listBotActivityEvents = `-- name: ListBotActivityEvents :many
@@ -483,6 +483,7 @@ const listSessionEventCompactionPage = `-- name: ListSessionEventCompactionPage 
 SELECT
   thread_id,
   seq,
+  stream_seq,
   coalesce_key,
   projection_key,
   projection_op,
@@ -508,6 +509,7 @@ type ListSessionEventCompactionPageParams struct {
 type ListSessionEventCompactionPageRow struct {
 	ThreadID      string         `json:"thread_id"`
 	Seq           int64          `json:"seq"`
+	StreamSeq     int64          `json:"stream_seq"`
 	CoalesceKey   string         `json:"coalesce_key"`
 	ProjectionKey string         `json:"projection_key"`
 	ProjectionOp  string         `json:"projection_op"`
@@ -531,6 +533,7 @@ func (q *Queries) ListSessionEventCompactionPage(ctx context.Context, arg ListSe
 		if err := rows.Scan(
 			&i.ThreadID,
 			&i.Seq,
+			&i.StreamSeq,
 			&i.CoalesceKey,
 			&i.ProjectionKey,
 			&i.ProjectionOp,
@@ -558,6 +561,7 @@ const listSessionEventPage = `-- name: ListSessionEventPage :many
 SELECT
   thread_id,
   seq,
+  stream_seq,
   projection_key,
   projection_op,
   type,
@@ -574,6 +578,7 @@ UNION ALL
 SELECT
   thread_id,
   seq,
+  stream_seq,
   projection_key,
   projection_op,
   type,
@@ -601,6 +606,7 @@ type ListSessionEventPageParams struct {
 type ListSessionEventPageRow struct {
 	ThreadID      string         `json:"thread_id"`
 	Seq           int64          `json:"seq"`
+	StreamSeq     int64          `json:"stream_seq"`
 	ProjectionKey string         `json:"projection_key"`
 	ProjectionOp  string         `json:"projection_op"`
 	Type          string         `json:"type"`
@@ -628,6 +634,7 @@ func (q *Queries) ListSessionEventPage(ctx context.Context, arg ListSessionEvent
 		if err := rows.Scan(
 			&i.ThreadID,
 			&i.Seq,
+			&i.StreamSeq,
 			&i.ProjectionKey,
 			&i.ProjectionOp,
 			&i.Type,
@@ -721,6 +728,7 @@ const listSessionEvents = `-- name: ListSessionEvents :many
 SELECT
   thread_id,
   seq,
+  stream_seq,
   coalesce_key,
   projection_key,
   projection_op,
@@ -738,6 +746,7 @@ ORDER BY seq
 type ListSessionEventsRow struct {
 	ThreadID      string         `json:"thread_id"`
 	Seq           int64          `json:"seq"`
+	StreamSeq     int64          `json:"stream_seq"`
 	CoalesceKey   string         `json:"coalesce_key"`
 	ProjectionKey string         `json:"projection_key"`
 	ProjectionOp  string         `json:"projection_op"`
@@ -761,6 +770,7 @@ func (q *Queries) ListSessionEvents(ctx context.Context, threadID string) ([]Lis
 		if err := rows.Scan(
 			&i.ThreadID,
 			&i.Seq,
+			&i.StreamSeq,
 			&i.CoalesceKey,
 			&i.ProjectionKey,
 			&i.ProjectionOp,
@@ -788,6 +798,7 @@ const listSessionEventsAfter = `-- name: ListSessionEventsAfter :many
 SELECT
   thread_id,
   seq,
+  stream_seq,
   projection_key,
   projection_op,
   type,
@@ -798,18 +809,19 @@ SELECT
   created_at_ms
 FROM session_events
 WHERE thread_id = ?1
-  AND seq > ?2
-ORDER BY seq
+  AND stream_seq > ?2
+ORDER BY stream_seq
 `
 
 type ListSessionEventsAfterParams struct {
-	ThreadID string `json:"thread_id"`
-	AfterSeq int64  `json:"after_seq"`
+	ThreadID       string `json:"thread_id"`
+	AfterStreamSeq int64  `json:"after_stream_seq"`
 }
 
 type ListSessionEventsAfterRow struct {
 	ThreadID      string         `json:"thread_id"`
 	Seq           int64          `json:"seq"`
+	StreamSeq     int64          `json:"stream_seq"`
 	ProjectionKey string         `json:"projection_key"`
 	ProjectionOp  string         `json:"projection_op"`
 	Type          string         `json:"type"`
@@ -821,7 +833,7 @@ type ListSessionEventsAfterRow struct {
 }
 
 func (q *Queries) ListSessionEventsAfter(ctx context.Context, arg ListSessionEventsAfterParams) ([]ListSessionEventsAfterRow, error) {
-	rows, err := q.db.QueryContext(ctx, listSessionEventsAfter, arg.ThreadID, arg.AfterSeq)
+	rows, err := q.db.QueryContext(ctx, listSessionEventsAfter, arg.ThreadID, arg.AfterStreamSeq)
 	if err != nil {
 		return nil, err
 	}
@@ -832,6 +844,7 @@ func (q *Queries) ListSessionEventsAfter(ctx context.Context, arg ListSessionEve
 		if err := rows.Scan(
 			&i.ThreadID,
 			&i.Seq,
+			&i.StreamSeq,
 			&i.ProjectionKey,
 			&i.ProjectionOp,
 			&i.Type,
@@ -941,7 +954,7 @@ func (q *Queries) NextSessionEventCompaction(ctx context.Context, runningStatus 
 }
 
 const nextSessionEventSeq = `-- name: NextSessionEventSeq :one
-SELECT COALESCE(MAX(seq), 0) + 1 AS seq
+SELECT COALESCE(MAX(stream_seq), 0) + 1 AS seq
 FROM session_events
 WHERE thread_id = ?1
 `
@@ -1024,6 +1037,7 @@ const upsertSessionEvent = `-- name: UpsertSessionEvent :exec
 INSERT INTO session_events (
   thread_id,
   seq,
+  stream_seq,
   coalesce_key,
   projection_key,
   projection_op,
@@ -1044,9 +1058,11 @@ INSERT INTO session_events (
   ?8,
   ?9,
   ?10,
-  ?11
+  ?11,
+  ?12
 )
 ON CONFLICT(thread_id, seq) DO UPDATE SET
+  stream_seq = excluded.stream_seq,
   coalesce_key = excluded.coalesce_key,
   projection_key = excluded.projection_key,
   projection_op = excluded.projection_op,
@@ -1061,6 +1077,7 @@ ON CONFLICT(thread_id, seq) DO UPDATE SET
 type UpsertSessionEventParams struct {
 	ThreadID      string         `json:"thread_id"`
 	Seq           int64          `json:"seq"`
+	StreamSeq     int64          `json:"stream_seq"`
 	CoalesceKey   string         `json:"coalesce_key"`
 	ProjectionKey string         `json:"projection_key"`
 	ProjectionOp  string         `json:"projection_op"`
@@ -1076,6 +1093,7 @@ func (q *Queries) UpsertSessionEvent(ctx context.Context, arg UpsertSessionEvent
 	_, err := q.db.ExecContext(ctx, upsertSessionEvent,
 		arg.ThreadID,
 		arg.Seq,
+		arg.StreamSeq,
 		arg.CoalesceKey,
 		arg.ProjectionKey,
 		arg.ProjectionOp,
