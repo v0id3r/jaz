@@ -173,6 +173,7 @@ func (s *Store) prepareSessionEventCompactionPage(ctx context.Context, plan *ses
 		events[i] = annotator.Annotate(events[i])
 	}
 	byKey := make(map[string]int)
+	unchanged := make(map[int]bool)
 	for _, event := range events {
 		if sessionevents.NeedsStorageCompaction(event) {
 			continue
@@ -194,6 +195,7 @@ func (s *Store) prepareSessionEventCompactionPage(ctx context.Context, plan *ses
 			continue
 		}
 		if index, ok := byKey[key]; ok {
+			delete(unchanged, index)
 			mutation := &plan.mutations[index]
 			mutation.deletes = append(mutation.deletes, sessionEventDelete{seq: mutation.seq, bytes: mutation.latestSize})
 			mutation.seq = event.Seq
@@ -207,6 +209,8 @@ func (s *Store) prepareSessionEventCompactionPage(ctx context.Context, plan *ses
 			continue
 		}
 		byKey[key] = len(plan.mutations)
+		unchanged[len(plan.mutations)] = !event.NeedsStorageSlimming() && coalesceKeyBySeq[event.Seq] == key &&
+			event.ProjectionKey == projectionKeyBySeq[event.Seq] && event.ProjectionOp == projectionOpBySeq[event.Seq]
 		snapshot := slim
 		bytes, sizeErr := sessionEventStorageSize(snapshot)
 		if sizeErr != nil {
@@ -220,6 +224,14 @@ func (s *Store) prepareSessionEventCompactionPage(ctx context.Context, plan *ses
 			latestSize:    sizeBySeq[event.Seq],
 		})
 	}
+	// A coalesced event seen once and already stored in final form needs no rewrite.
+	kept := plan.mutations[:0]
+	for i, mutation := range plan.mutations {
+		if !unchanged[i] {
+			kept = append(kept, mutation)
+		}
+	}
+	plan.mutations = kept
 	for _, segment := range sessionevents.CompactTextSegments(events, eventCompactionTextBytes) {
 		if segment.Event.ProjectionKey == "" {
 			continue
