@@ -28,12 +28,19 @@ function loginResponse(response: Response): boolean {
     ((response.status === 401 || response.status === 403) && !contentType.includes('json'))
 }
 
+// A first request through an access proxy can wait for the proxy to issue
+// the client its credentials, which takes a few seconds.
+function probeSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(10_000)
+  return signal ? AbortSignal.any([signal, timeout]) : timeout
+}
+
 export async function readHealth(url: string, signal?: AbortSignal): Promise<Health> {
   if (!secureBackendConnection(url)) {
     return { ok: false, error: 'Remote connections require HTTPS', recoverable: false }
   }
   try {
-    const response = await fetch(url + '/health', { redirect: 'manual', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
+    const response = await fetch(url + '/health', { redirect: 'manual', signal: probeSignal(signal) })
     if (loginResponse(response)) {
       return { ok: false, error: `Sign in through Teleport again to reach the backend at ${url}`, recoverable: false, code: 'browser_session_required' }
     }
@@ -72,7 +79,7 @@ async function checkAccess(send: (init: RequestInit & { headers: Record<string, 
   try {
     const response = await send({
       headers: { [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
-      redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000),
+      redirect: 'error', signal: probeSignal(signal),
     })
     const body = await readJSON<{ ok?: boolean; auth_kind?: string; error?: string; code?: string }>(response)
     if (body?.code === 'invalid_dpop_proof') {
