@@ -17,6 +17,13 @@ export function useSessionEvents(
   const queryClient = useQueryClient()
   const [connected, setConnected] = useState(true)
   const afterSeq = latestEventSeq
+  // The stream opens once per loaded history from its cursor; later history
+  // refetches only trim the live cache, the open stream already covers them.
+  // History disappears when the connection resets, and the stream restarts with it.
+  const [stream, setStream] = useState<{ sessionId: string, afterSeq: number }>()
+  const loadedSessionId = afterSeq === undefined ? undefined : sessionId
+  if (stream?.sessionId !== loadedSessionId) setStream(afterSeq === undefined ? undefined : { sessionId, afterSeq })
+  const streamAfterSeq = stream?.sessionId === sessionId ? stream.afterSeq : undefined
 
   useEffect(() => {
     if (!afterSeq) return
@@ -27,7 +34,7 @@ export function useSessionEvents(
   }, [sessionId, afterSeq, queryClient])
 
   useEffect(() => {
-    if (afterSeq === undefined) return
+    if (streamAfterSeq === undefined) return
     const refetchMessages = () => {
       queryClient.invalidateQueries({ queryKey: keys.usage })
       queryClient.invalidateQueries({ queryKey: keys.sessionMessages(sessionId) })
@@ -57,7 +64,7 @@ export function useSessionEvents(
         queryClient.invalidateQueries({ queryKey: keys.sessionOverview(sessionId) })
       }
     }
-    const stop = openSessionEvents(sessionId, afterSeq, (event: SessionEvent) => {
+    const stop = openSessionEvents(sessionId, streamAfterSeq, (event: SessionEvent) => {
       onEvent?.(event)
       overviewChanged ||= ['agent_session', 'agent_task', 'provider_subagent'].includes(event.type)
       // 'assistant' events are refresh signals, not transcript items.
@@ -83,7 +90,7 @@ export function useSessionEvents(
       if (pending.length) flush()
       if (listsTimer !== null) clearTimeout(listsTimer)
     }
-  }, [sessionId, afterSeq, queryClient, onEvent])
+  }, [sessionId, streamAfterSeq, queryClient, onEvent])
 
   return connected
 }
