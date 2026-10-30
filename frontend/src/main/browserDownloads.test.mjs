@@ -14,7 +14,7 @@ if (process.env.JAZ_DOWNLOAD_TEST_CHILD === '1') {
   const sent = []
   const opened = []
   const revealed = []
-  const sender = { getType: () => 'window', getURL: () => 'file:///app/out/renderer/index.html', send: (...args) => sent.push(args) }
+  const sender = { getType: () => 'window', getURL: () => 'app://jaz/index.html', send: (...args) => sent.push(args) }
   sender.mainFrame = { url: sender.getURL() }
   const event = { sender, senderFrame: sender.mainFrame }
   const history = join(directory, 'browser-downloads.json')
@@ -139,7 +139,7 @@ if (process.env.JAZ_DOWNLOAD_TEST_CHILD === '1') {
     const untrustedFrame = { url: 'https://example.com' }
     for (const request of [
       { sender: { ...sender, getType: () => 'webview' }, senderFrame: sender.mainFrame },
-      { sender, senderFrame: { url: 'file:///app/out/renderer/index.html' } },
+      { sender, senderFrame: { url: 'app://jaz/index.html' } },
       { sender: { ...sender, mainFrame: untrustedFrame }, senderFrame: untrustedFrame },
     ]) {
       await expect(invoke(undefined, request)).rejects.toThrow('managed from Jaz')

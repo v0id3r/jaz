@@ -84,7 +84,7 @@ function fixture() {
     },
   }
   const handlers = new Map()
-  const host = { id: 1, getType: () => 'window', getURL: () => 'file:///fixture/renderer/index.html', isDestroyed: () => false, send: () => {} }
+  const host = { id: 1, getType: () => 'window', getURL: () => 'app://jaz/index.html', isDestroyed: () => false, send: () => {} }
   host.mainFrame = { url: host.getURL() }
   const partition = {}
   const sent = []
@@ -205,7 +205,7 @@ test('untrusted frames and expired site actions cannot unlock or modify password
   f.seed()
   for (const request of [
     { sender: f.target, senderFrame: f.target.mainFrame },
-    { sender: f.target.hostWebContents, senderFrame: { url: 'file:///fixture/renderer/index.html' } },
+    { sender: f.target.hostWebContents, senderFrame: { url: 'app://jaz/index.html' } },
   ]) {
     expect(() => f.state({ kind: 'unlock' }, request)).toThrow('owning Jaz')
   }

@@ -41,9 +41,9 @@ if (clientRuntime.windowKind === 'launcher' || clientRuntime.windowKind === 'voi
 const router = createRouter({
   routeTree,
   defaultPreload: 'intent',
-  // Packaged builds load the renderer from file://, where pathname-based
-  // history can never match a route; hash history works in both.
-  history: window.location.protocol === 'file:' ? createHashHistory() : undefined,
+  // Packaged builds serve one document, app://jaz/index.html, which the main
+  // process trusts by exact path; routes live in the hash.
+  history: window.location.protocol === 'app:' ? createHashHistory() : undefined,
 })
 
 declare module '@tanstack/react-router' {

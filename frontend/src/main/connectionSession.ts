@@ -1,6 +1,5 @@
-import { fileURLToPath } from 'node:url'
 import { ipcMain, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent, type WebFrameMain } from 'electron'
-import { trustedWindow } from '@main/permissions'
+import { isTrustedRendererURL, trustedWindow } from '@main/permissions'
 import {
   CONNECTION_SESSION_CHANNEL,
   LOCAL_SESSION_CHANNEL,
@@ -16,7 +15,6 @@ import type { DeviceIdentity, DeviceMetadata } from '@main/deviceIdentity'
 const LOCAL_URL = 'http://127.0.0.1:5299'
 type WindowDocument = { window: BrowserWindow; document: number; frame?: WebFrameMain; active: boolean }
 type Dependencies = {
-  rendererPath: string
   startLocal: () => Promise<{ ok: boolean; url?: string; key?: string; error?: string }>
   profile: () => DeviceIdentity & DeviceMetadata
   fetchWithKey: (url: string, init: RequestInit) => Promise<Response>
@@ -31,20 +29,10 @@ export function createConnectionSession(deps: Dependencies) {
   let localGeneration = 0
   let localFlight: { generation: number; promise: Promise<LocalSession>; settled: boolean } | null = null
 
-  function expectedDocument(value: string): boolean {
-    try {
-      const url = new URL(value)
-      const dev = process.env.ELECTRON_RENDERER_URL
-      return dev ? url.origin === new URL(dev).origin : url.protocol === 'file:' && fileURLToPath(url) === deps.rendererPath
-    } catch {
-      return false
-    }
-  }
-
   function authorize(event: IpcMainEvent | IpcMainInvokeEvent, document?: number): WindowDocument {
     trustedWindow(event)
     const record = windows.get(event.sender.id)
-    if (!record || !record.active || event.senderFrame !== event.sender.mainFrame || !expectedDocument(event.senderFrame.url) ||
+    if (!record || !record.active || event.senderFrame !== event.sender.mainFrame || !isTrustedRendererURL(event.senderFrame.url) ||
       (document !== undefined && record.document !== document)) {
       throw new Error('Connection session requires the current app document')
     }
@@ -61,7 +49,7 @@ export function createConnectionSession(deps: Dependencies) {
 
   function deliver(record: WindowDocument): void {
     const contents = record.window.webContents
-    if (!record.window.isDestroyed() && !contents.isDestroyed() && record.active && record.frame === contents.mainFrame && expectedDocument(record.frame.url)) {
+    if (!record.window.isDestroyed() && !contents.isDestroyed() && record.active && record.frame === contents.mainFrame && isTrustedRendererURL(record.frame.url)) {
       record.frame.send(CONNECTION_SESSION_CHANNEL, { document: record.document, snapshot })
     }
   }

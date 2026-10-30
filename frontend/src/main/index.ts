@@ -37,6 +37,7 @@ import { setupLauncher, teardownLauncher } from './spotlight'
 import { attachVoiceOverlay } from './voiceOverlay'
 import { createUpdateController } from './updater'
 import { createConnectionSession } from '@main/connectionSession'
+import { migrateFileOriginStorage, rendererURL, serveRenderer } from '@main/rendererScheme'
 
 // Matches --color-bg under :root.dark; used as the window paint color before
 // the renderer mounts so a dark launch doesn't flash white behind the content.
@@ -64,7 +65,6 @@ const previewURLTargets = new Set<number>()
 const threadNotifications = createThreadNotificationMonitor(openInMain, (input, init) =>
   connectionSession.current().session?.deviceKey ? deviceKeyFetch(String(input), init) : fetch(input, init))
 const connectionSession = createConnectionSession({
-  rendererPath: join(__dirname, '../renderer/index.html'),
   startLocal: startLocalBackend,
   profile: () => ({ ...getDeviceIdentity(), ...getDeviceMetadata() }),
   fetchWithKey: deviceKeyFetch,
@@ -277,11 +277,7 @@ function createWindow(): void {
 
   attachPreviewWebviews(win.webContents, join(__dirname, '../preload/index.js'))
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  win.loadURL(rendererURL())
 }
 
 // Deep link from a board window into the main app (e.g. "Open loop").
@@ -351,14 +347,13 @@ function openBoardWindow(boardId: string): void {
   attachBrowserNavigationCommands(win)
   win.on('close', () => saveBoardBounds(boardId, win.getBounds()))
   win.on('closed', () => boardWindows.delete(boardId))
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/boards/${boardId}`)
-  } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'), { hash: `/boards/${boardId}` })
-  }
+  win.loadURL(rendererURL(`/boards/${boardId}`))
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  serveRenderer()
+  await migrateFileOriginStorage()
+
   configurePreviewSession(join(__dirname, '../preload/chrome.js'))
   installBrowserDownloads()
   installApplicationMenu()
