@@ -62,7 +62,12 @@ export function AttachmentTile({
   const [failedSrc, setFailedSrc] = useState('')
   const isImage = isImageAttachment(attachment)
   const objectUrl = useObjectUrl(isImage ? attachment.file : undefined)
-  const src = objectUrl || attachmentContentUrl(attachment, attachmentSessionId)
+  const remoteUrl = attachment.uri && !attachment.uri.startsWith('file:') ? attachment.uri : ''
+  const apiUrl = !remoteUrl && attachmentSessionId && attachment.id ? sessionAttachmentUrl(attachmentSessionId, attachment.id) : ''
+  const src = objectUrl || remoteUrl || apiUrl
+  // The desktop renderer (app://jaz) is another origin than the API, and an auth
+  // proxy in between may only admit cross-origin media that announces its Origin.
+  const crossOrigin = apiUrl && src === apiUrl ? 'anonymous' : undefined
   const available = isImage && Boolean(src) && src !== failedSrc
   const status = attachmentStatus(attachment)
   if (!available && variant === 'message') {
@@ -81,6 +86,7 @@ export function AttachmentTile({
         {available ? (
           <img
             src={src}
+            crossOrigin={crossOrigin}
             alt={attachment.name}
             loading="lazy"
             onError={() => setFailedSrc(src)}
@@ -108,6 +114,7 @@ export function AttachmentTile({
         <ImageAttachmentModal
           attachment={attachment}
           src={src}
+          crossOrigin={crossOrigin}
           open={open}
           onClose={() => setOpen(false)}
           onError={() => setFailedSrc(src)}
@@ -134,12 +141,14 @@ function useObjectUrl(file?: File): string {
 function ImageAttachmentModal({
   attachment,
   src,
+  crossOrigin,
   open,
   onClose,
   onError,
 }: {
   attachment: MessageAttachment
   src: string
+  crossOrigin?: 'anonymous'
   open: boolean
   onClose: () => void
   onError: () => void
@@ -150,6 +159,7 @@ function ImageAttachmentModal({
         <div className="grid min-h-0 flex-1 place-items-center p-3 sm:p-4">
           <img
             src={src}
+            crossOrigin={crossOrigin}
             alt={attachment.name}
             onError={onError}
             className="max-h-[calc(100dvh-7rem)] max-w-full rounded-[8px] object-contain outline outline-1 -outline-offset-1 outline-white/10"
@@ -186,12 +196,6 @@ function attachmentStatus(attachment: MessageAttachment): string {
     return 'Failed'
   }
   return attachment.uploading ? 'Uploading' : ''
-}
-
-function attachmentContentUrl(attachment: MessageAttachment, attachmentSessionId?: string): string {
-  if (attachment.uri && !attachment.uri.startsWith('file:')) return attachment.uri
-  if (attachmentSessionId && attachment.id) return sessionAttachmentUrl(attachmentSessionId, attachment.id)
-  return ''
 }
 
 function isImageAttachment(attachment: MessageAttachment): boolean {
