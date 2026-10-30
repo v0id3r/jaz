@@ -42,12 +42,14 @@ export function mergeSessionEvent(prev: SessionEvent[], event: SessionEvent): Se
   let keyIndex = -1
   for (let index = 0; index < prev.length; index += 1) {
     const candidate = prev[index]
-    if (event.seq && candidate.session_id === event.session_id && candidate.seq === event.seq)
-      return prev
+    if (event.seq && candidate.session_id === event.session_id && candidate.seq === event.seq) {
+      keyIndex = index
+      break
+    }
     if (key && sessionEventCoalesceKey(candidate) === key) keyIndex = index
   }
   if (keyIndex === -1) return [...prev, event]
-  if (event.seq && (prev[keyIndex].seq ?? 0) >= event.seq) return prev
+  if (event.seq && streamSeq(prev[keyIndex]) >= streamSeq(event)) return prev
   const next = [...prev]
   next[keyIndex] = foldProjection(next[keyIndex], event)
   return next
@@ -106,10 +108,15 @@ function appendProjection(prev: SessionEvent, event: SessionEvent): SessionEvent
   }
 }
 
+function streamSeq(event: SessionEvent): number {
+  return event.stream_seq ?? event.seq ?? 0
+}
+
+// Copies of one event order newest first, so deduplication keeps the latest update.
 function compareEvents(a: SessionEvent, b: SessionEvent): number {
   const seqA = a.seq ?? 0
   const seqB = b.seq ?? 0
-  if (seqA && seqB && a.session_id === b.session_id) return seqA - seqB
+  if (seqA && seqB && a.session_id === b.session_id) return seqA - seqB || streamSeq(b) - streamSeq(a)
   const timeA = Date.parse(a.at)
   const timeB = Date.parse(b.at)
   return (Number.isNaN(timeA) ? 0 : timeA) - (Number.isNaN(timeB) ? 0 : timeB) || seqA - seqB

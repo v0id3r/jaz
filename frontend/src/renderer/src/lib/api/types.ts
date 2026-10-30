@@ -1058,6 +1058,8 @@ export interface VoiceMessage extends VoiceLine {
 export interface SessionEvent {
   voice?: VoiceMessage
   seq?: number
+  // Live stream position; it advances when the event is updated in place.
+  stream_seq?: number
   projection_key?: string
   projection_op?: 'append' | 'replace'
   // Client-only: the earliest seq folded into a text projection.

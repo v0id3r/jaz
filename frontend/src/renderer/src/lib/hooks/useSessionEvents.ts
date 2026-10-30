@@ -21,7 +21,7 @@ export function useSessionEvents(
   useEffect(() => {
     if (!afterSeq) return
     queryClient.setQueryData<SessionEvent[]>(keys.sessionEvents(sessionId), (prev = []) => {
-      const next = prev.filter((event) => !event.seq || (event.first_seq ?? event.seq) > afterSeq)
+      const next = prev.filter((event) => !event.seq || (event.first_seq ?? event.stream_seq ?? event.seq) > afterSeq)
       return next.length === prev.length ? prev : next
     })
   }, [sessionId, afterSeq, queryClient])

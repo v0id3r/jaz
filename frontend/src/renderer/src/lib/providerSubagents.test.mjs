@@ -51,6 +51,20 @@ describe('provider subagent projections', () => {
     expect(subagents[0]).toMatchObject({ name: 'Newton', task: 'Audit the proof', status: 'completed' })
   })
 
+  test('takes a live update of the stored row at the same seq', () => {
+    const subagents = providerSubagentsFromSources(
+      [{ ...subagent('parent', 'Newton').provider_subagent, key: 'provider_subagent:parent:codex:worker', seq: 10, updated_at: '2026-07-19T12:00:00Z' }],
+      [{
+        ...subagent('parent', 'Newton'),
+        seq: 10,
+        provider_subagent: { provider: 'codex', id: 'worker', status: 'completed' },
+        at: '2026-07-19T13:00:00Z',
+      }],
+    )
+
+    expect(subagents[0]).toMatchObject({ name: 'Newton', status: 'completed' })
+  })
+
   test('does not let an older transcript event regress the complete projection', () => {
     const subagents = providerSubagentsFromSources(
       [{

@@ -133,13 +133,14 @@ func (s *Store) LoadTranscriptPage(ctx context.Context, id string, request stora
 		if decodeErr != nil {
 			return storage.TranscriptPage{}, decodeErr
 		}
+		event.StreamSeq = row.StreamSeq
 		page.Events = append(page.Events, event)
 	}
 	if eventsMore && len(page.Events) > 0 {
 		page.BeforeEventSeq = page.Events[0].Seq
 	}
 	page.HasEarlier = eventsMore || messageHasEarlier
-	page.LatestEventSeq, err = events.LatestSessionEventSeq(ctx, id)
+	page.LatestEventSeq, err = events.LatestSessionEventStreamSeq(ctx, id)
 	if err != nil {
 		return storage.TranscriptPage{}, err
 	}
