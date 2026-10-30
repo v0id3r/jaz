@@ -281,7 +281,7 @@ func TestTranscriptCursorRejectsMessageRewrite(t *testing.T) {
 	}
 }
 
-func TestTranscriptCursorRejectsCoalescedEventReplacement(t *testing.T) {
+func TestTranscriptCursorSurvivesCoalescedEventUpdate(t *testing.T) {
 	store, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -315,11 +315,22 @@ func TestTranscriptCursorRejectsCoalescedEventReplacement(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.LoadTranscriptPage(t.Context(), session.ID, storage.TranscriptPageRequest{
-		BeforeEventSeq: page.BeforeEventSeq, HistoryRevision: page.HistoryRevision, Turns: 14,
-	})
-	if !errors.Is(err, storage.ErrTranscriptChanged) {
-		t.Fatalf("continuation error = %v", err)
+	var updated *sessionevents.Event
+	for page.HasEarlier {
+		page, err = store.LoadTranscriptPage(t.Context(), session.ID, storage.TranscriptPageRequest{
+			BeforeEventSeq: page.BeforeEventSeq, HistoryRevision: page.HistoryRevision, Turns: 14,
+		})
+		if err != nil {
+			t.Fatalf("continuation error = %v", err)
+		}
+		for i := range page.Events {
+			if page.Events[i].Seq == 1 {
+				updated = &page.Events[i]
+			}
+		}
+	}
+	if updated == nil || updated.ProviderSubagent == nil || updated.ProviderSubagent.Status != "completed" {
+		t.Fatalf("updated subagent = %#v", updated)
 	}
 }
 

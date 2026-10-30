@@ -133,6 +133,7 @@ func (s *Store) LoadTranscriptPage(ctx context.Context, id string, request stora
 		if decodeErr != nil {
 			return storage.TranscriptPage{}, decodeErr
 		}
+		event.StreamSeq = row.StreamSeq
 		if request.ChatOnly && event.Artifact != nil && !event.Artifact.Presented {
 			visible, err := events.ArtifactChatVisibility(ctx, eventdb.ArtifactChatVisibilityParams{ThreadID: id, Seq: event.Seq})
 			if err != nil {
@@ -146,7 +147,7 @@ func (s *Store) LoadTranscriptPage(ctx context.Context, id string, request stora
 		page.BeforeEventSeq = page.Events[0].Seq
 	}
 	page.HasEarlier = eventsMore || messageHasEarlier
-	page.LatestEventSeq, err = events.LatestSessionEventSeq(ctx, id)
+	page.LatestEventSeq, err = events.LatestSessionEventStreamSeq(ctx, id)
 	if err != nil {
 		return storage.TranscriptPage{}, err
 	}

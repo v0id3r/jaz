@@ -125,7 +125,7 @@ function mergeProviderSubagentView(
 }
 
 function subagentUpdateIsNewer(previous: ProviderSubagentView, current: ProviderSubagentView): boolean {
-  if (previous.seq && current.seq) return current.seq > previous.seq
+  if (previous.seq && current.seq && previous.seq !== current.seq) return current.seq > previous.seq
   return eventTime(current.updated_at) >= eventTime(previous.updated_at)
 }
 

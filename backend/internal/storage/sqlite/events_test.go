@@ -272,7 +272,7 @@ func TestSessionEventsCoalesceSnapshotsAndPreserveTextDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stored) != 8 || stored[0].Seq != 1 || stored[0].Content != "Hel" || stored[1].Seq != 2 || stored[1].Content != "lo" || stored[2].Seq != 4 || stored[2].ACP.ToolCalls[0].Status != "completed" {
+	if len(stored) != 8 || stored[0].Seq != 1 || stored[0].Content != "Hel" || stored[1].Seq != 2 || stored[1].Content != "lo" || stored[2].Seq != 3 || stored[2].StreamSeq != 4 || stored[2].ACP.ToolCalls[0].Status != "completed" {
 		t.Fatalf("stored events = %#v", stored)
 	}
 
@@ -283,7 +283,7 @@ func TestSessionEventsCoalesceSnapshotsAndPreserveTextDeltas(t *testing.T) {
 	if loaded[0].Seq != 2 || loaded[0].Content != "Hello" {
 		t.Fatalf("merged message = %#v", loaded[0])
 	}
-	if loaded[1].Seq != 4 || loaded[1].ACP == nil || loaded[1].ACP.ToolCalls[0].Status != "completed" {
+	if loaded[1].Seq != 3 || loaded[1].ACP == nil || loaded[1].ACP.ToolCalls[0].Status != "completed" {
 		t.Fatalf("tool snapshot = %#v", loaded[1])
 	}
 	if loaded[2].Seq != 6 || loaded[2].ACP == nil || loaded[2].ACP.Thought != "Reason" {
@@ -307,6 +307,46 @@ func TestSessionEventsCoalesceSnapshotsAndPreserveTextDeltas(t *testing.T) {
 	}
 	if loaded[len(loaded)-1].Seq != 10 {
 		t.Fatalf("next seq = %d, want 10", loaded[len(loaded)-1].Seq)
+	}
+}
+
+func TestCoalescedUpdatesKeepHistoryAndReachStreamCursor(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(storage.CreateSession{Slug: "stream-cursor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := func(status string) sessionevents.Event {
+		return sessionevents.Event{Type: "acp_tool", ACP: &sessionevents.ACPEvent{
+			ID: session.ID, ToolCalls: []sessionevents.ACPToolCall{{ID: "tool-1", Status: status}},
+		}}
+	}
+	status := sessionevents.Event{Type: "acp", ACP: &sessionevents.ACPEvent{ID: session.ID, State: "running"}}
+	if err := store.AppendSessionEvents(session.ID, tool("pending"), status, sessionevents.Event{Type: "note"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendSessionEvents(session.ID, tool("completed"), status); err != nil {
+		t.Fatal(err)
+	}
+	after, err := store.LoadSessionEventsAfter(session.ID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 2 ||
+		after[0].Seq != 1 || after[0].StreamSeq != 4 || after[0].ACP.ToolCalls[0].Status != "completed" ||
+		after[1].Seq != 5 || after[1].StreamSeq != 5 || after[1].Type != "acp" {
+		t.Fatalf("events after cursor = %#v", after)
+	}
+	all, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 || all[0].Seq != 1 || all[1].Type != "note" || all[2].Seq != 5 {
+		t.Fatalf("history = %#v", all)
 	}
 }
 
@@ -344,7 +384,7 @@ func TestSessionEventsDurablyCompleteSparseProviderSubagentUpdates(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stored) != 1 || stored[0].Seq != 2 || stored[0].ProviderSubagent == nil || stored[0].ProviderSubagent.Name != "Newton" || stored[0].ProviderSubagent.Status != "completed" {
+	if len(stored) != 1 || stored[0].Seq != 1 || stored[0].StreamSeq != 2 || stored[0].ProviderSubagent == nil || stored[0].ProviderSubagent.Name != "Newton" || stored[0].ProviderSubagent.Status != "completed" {
 		t.Fatalf("stored provider projection = %#v", stored)
 	}
 }
@@ -540,8 +580,8 @@ func TestTextAppendDoesNotDecodePreviousPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(`
-		INSERT INTO session_events (thread_id, seq, type, content, acp, created_at_ms, coalesce_key)
-		VALUES (?, 1, 'acp_message', 'old', '{', 1, '')`, session.ID); err != nil {
+		INSERT INTO session_events (thread_id, seq, stream_seq, type, content, acp, created_at_ms, coalesce_key)
+		VALUES (?, 1, 1, 'acp_message', 'old', '{', 1, '')`, session.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.AppendSessionEvents(session.ID, sessionevents.Event{
