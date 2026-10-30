@@ -57,6 +57,40 @@ func TestSessionEventCompactionRunsOnce(t *testing.T) {
 	}
 }
 
+func TestSessionEventCompactionLeavesCompactHistoryUntouched(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(storage.CreateSession{Slug: "compact-history"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendSessionEvents(session.ID, sessionevents.Event{Type: "acp_tool", ACP: &sessionevents.ACPEvent{
+		ID: session.ID, ToolCalls: []sessionevents.ACPToolCall{{ID: "tool-1", Status: "completed"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	revision := func() (value int64) {
+		if err := store.db.QueryRow(`SELECT transcript_revision FROM threads WHERE id = ?`, session.ID).Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	before := revision()
+	if _, err := store.db.Exec(`UPDATE threads SET event_compaction_version = 0 WHERE id = ?`, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.CompactNextSessionEvents(t.Context())
+	if err != nil || result.ThreadID != session.ID || !result.Complete {
+		t.Fatalf("compaction = %#v, %v", result, err)
+	}
+	if after := revision(); after != before {
+		t.Fatalf("transcript revision %d -> %d with nothing to compact", before, after)
+	}
+}
+
 func TestCompletedTextRunIsCompactedOffTheWritePath(t *testing.T) {
 	store, err := New(t.TempDir())
 	if err != nil {
