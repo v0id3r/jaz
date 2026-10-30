@@ -2,7 +2,6 @@ import { afterEach, expect, test } from 'bun:test'
 import { build } from 'bun'
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
-import { pathToFileURL } from 'node:url'
 
 const bundle = await build({ entrypoints: [new URL('./connectionSession.ts', import.meta.url).pathname], target: 'node', format: 'cjs', external: ['electron'] })
 if (!bundle.success) {
@@ -24,8 +23,7 @@ afterEach(() => {
 
 function fixture({ start, registration, principal = 'device', deviceId = 'identity', deviceProof = false } = {}) {
   delete process.env.ELECTRON_RENDERER_URL
-  const rendererPath = '/fixture/app/out/renderer/index.html'
-  const url = pathToFileURL(rendererPath).toString()
+  const url = 'app://jaz/index.html'
   const listeners = new Map()
   const invocations = new Map()
   const electron = { ipcMain: { on: (name, handler) => listeners.set(name, handler), handle: (name, handler) => invocations.set(name, handler) } }
@@ -36,7 +34,6 @@ function fixture({ start, registration, principal = 'device', deviceId = 'identi
   let stopped = 0
   let keyChecks = 0
   const service = module.exports.createConnectionSession({
-    rendererPath,
     startLocal: async () => {
       starts += 1
       return start ? start() : { ok: true, url: 'http://127.0.0.1:5299', key: 'root-grant' }
@@ -123,7 +120,7 @@ test('handoff accepts actual app windows and exact documents, with owner-only pu
     session: { url: 'https://remote.example', token: '', deviceId: 'identity', deviceKey: true, remembered: false } })
   expect(board.read().snapshot.session).toEqual({ url: 'https://remote.example', token: '', deviceId: 'identity', deviceKey: true, remembered: false })
   board.navigate('file:///wrong/renderer/index.html')
-  expect(() => board.read()).toThrow('document')
+  expect(() => board.read()).toThrow('trusted')
   const count = board.messages.length
   owner.call({ operation: 'clear', document, error: null })
   expect(board.messages).toHaveLength(count)

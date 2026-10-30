@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { rendererURL } from '@main/rendererScheme'
 import {
   BrowserWindow,
   desktopCapturer,
@@ -66,11 +67,7 @@ function buildLauncher(): BrowserWindow {
     if (launcher === win) launcher = null
   })
   attachSession(win)
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}${LAUNCHER_HASH}`)
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'), { hash: LAUNCHER_HASH })
-  }
+  void win.loadURL(rendererURL(LAUNCHER_HASH))
   return win
 }
 

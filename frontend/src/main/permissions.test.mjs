@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { canGrantAppPermission } from './permissions'
+import { canGrantAppPermission, isTrustedRendererURL } from './permissions'
 
-const url = 'file:///Applications/Jaz.app/Contents/Resources/app.asar/out/renderer/index.html'
+const url = 'app://jaz/index.html'
 const contents = (value = url, type = 'window', destroyed = false) => ({
   getURL: () => value,
   getType: () => type,
@@ -26,5 +26,13 @@ test('clipboard reads stay denied and media and fonts stay in the trusted main f
       expect(canGrantAppPermission(contents(), permission, { isMainFrame, requestingUrl: url })).toBe(isMainFrame)
       expect(canGrantAppPermission(contents(), permission, { isMainFrame, requestingUrl: 'https://untrusted.example/' })).toBe(false)
     }
+  }
+})
+
+test('only the packaged app:// document is the trusted renderer', () => {
+  expect(isTrustedRendererURL('app://jaz/index.html#/boards/1')).toBe(true)
+  for (const other of ['file:///Applications/Jaz.app/Contents/Resources/app.asar/out/renderer/index.html', 'app://jaz/storage-migration',
+    'app://evil/index.html', 'https://jaz/index.html']) {
+    expect(isTrustedRendererURL(other)).toBe(false)
   }
 })

@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { rendererURL } from '@main/rendererScheme'
 import { BrowserWindow, ipcMain, screen, type IpcMainEvent } from 'electron'
 import type { VoiceCommand, VoiceOverlayState } from '@shared/voice'
 
@@ -52,11 +53,7 @@ export function attachVoiceOverlay(owner: BrowserWindow): void {
         loaded = false
         dragOrigin = null
       })
-      if (process.env.ELECTRON_RENDERER_URL) {
-        void overlay.loadURL(process.env.ELECTRON_RENDERER_URL)
-      } else {
-        void overlay.loadFile(join(__dirname, '../renderer/index.html'))
-      }
+      void overlay.loadURL(rendererURL())
     }
     if (loaded && !overlay.isVisible()) {
       overlay.showInactive()
