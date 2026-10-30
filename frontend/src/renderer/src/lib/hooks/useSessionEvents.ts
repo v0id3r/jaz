@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { getSession } from '@/lib/api/sessions'
 import { openSessionEvents } from '@/lib/api/sse'
-import type { SessionEvent } from '@/lib/api/types'
+import type { SessionEvent, SessionMessages } from '@/lib/api/types'
 import { keys } from '@/lib/query/keys'
 import { mergeSessionEvent } from '@/lib/sessionEvents'
 
@@ -48,6 +49,7 @@ export function useSessionEvents(
     let flushTimer: ReturnType<typeof setTimeout> | null = null
     let listsTimer: ReturnType<typeof setTimeout> | null = null
     let overviewChanged = false
+    let sessionChanged = false
     const flush = () => {
       flushTimer = null
       const batch = pending
@@ -63,6 +65,13 @@ export function useSessionEvents(
         overviewChanged = false
         queryClient.invalidateQueries({ queryKey: keys.sessionOverview(sessionId) })
       }
+      if (sessionChanged) {
+        sessionChanged = false
+        void getSession(sessionId).then((session) => queryClient.setQueryData<SessionMessages>(
+          keys.sessionMessages(sessionId),
+          (prev) => prev && { ...prev, session },
+        ), () => {})
+      }
     }
     const stop = openSessionEvents(sessionId, streamAfterSeq, (event: SessionEvent) => {
       onEvent?.(event)
@@ -71,7 +80,8 @@ export function useSessionEvents(
       if (event.type === 'assistant') {
         refetchMessages()
       } else if (event.type === 'session') {
-        queryClient.invalidateQueries({ queryKey: keys.sessionMessages(sessionId) })
+        // The session record changed (usage, status, queue); messages arrive as events.
+        sessionChanged = true
       } else {
         pending.push(event)
         flushTimer ??= setTimeout(flush, 50)
