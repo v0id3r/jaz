@@ -213,6 +213,7 @@ func (m *Manager) recordAndPublishEventsDirect(sessionID string, events []sessio
 	}
 	for i := range events {
 		events[i].Seq = storedEvents[i].Seq
+		events[i].StreamSeq = storedEvents[i].StreamSeq
 		if events[i].Type == sessionevents.TypeProviderSubagent {
 			events[i].ProviderSubagent = storedEvents[i].ProviderSubagent
 			events[i].Content = storedEvents[i].Content
