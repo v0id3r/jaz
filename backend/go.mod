@@ -133,3 +133,5 @@ tool (
 	golang.org/x/tools/cmd/deadcode
 	honnef.co/go/tools/cmd/staticcheck
 )
+
+replace github.com/gluonfield/jazmem => github.com/v0id3r/jazmem v0.0.0-20261031115203-ba3fedfde880

@@ -190,14 +190,12 @@ func TestUnifiedServerMemoryAndLoopTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := structured[struct {
-		Found bool   `json:"found"`
-		Path  string `json:"path"`
+		Found    bool   `json:"found"`
+		Path     string `json:"path"`
+		Markdown string `json:"markdown"`
 	}](t, pageCall)
-	if !page.Found || page.Path != "people/alice" {
+	if !page.Found || page.Path != "people/alice" || page.Markdown != "# Alice\n\nAlice works on Jaz tools.\n" {
 		t.Fatalf("page = %#v", page)
-	}
-	if got := textContent(t, pageCall); got != "# Alice\n\nAlice works on Jaz tools.\n" {
-		t.Fatalf("page text = %q", got)
 	}
 
 	createCall, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -935,21 +933,6 @@ func structured[T any](t *testing.T, res *mcp.CallToolResult) T {
 	var out T
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatal(err)
-	}
-	return out
-}
-
-func textContent(t *testing.T, res *mcp.CallToolResult) string {
-	t.Helper()
-	if res.IsError {
-		t.Fatalf("tool error: %#v", res.Content)
-	}
-	var out string
-	for _, content := range res.Content {
-		text, ok := content.(*mcp.TextContent)
-		if ok {
-			out += text.Text
-		}
 	}
 	return out
 }
