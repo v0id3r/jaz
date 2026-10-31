@@ -433,6 +433,21 @@ test('a late same-origin candidate cannot replace the verified token or ticket',
   expect(stored.has('jaz.backendAuth.https://jaz.example')).toBe(false)
 })
 
+test('the connection poll keeps the resource ticket fresh', async () => {
+  let ticket = 'first-ticket'
+  const { connection, timers } = await fixture({
+    auth: () => Response.json({ ok: true, auth_kind: 'device', device_id: 'identity', resource_ticket: { token: ticket, expires_at: '2099-01-01T00:00:00Z' } }),
+  })
+  await connection.connectRemote('https://jaz.example#key=jaz_token')
+  expect(connection.apiEmbeddedGetUrl('/fixture/file')).toContain('first-ticket')
+  ticket = 'next-ticket'
+  const [id, poll] = [...timers.entries()].find(([, timer]) => timer.delay === 5_000)
+  timers.delete(id)
+  await poll.callback()
+  await settle()
+  expect(connection.apiEmbeddedGetUrl('/fixture/file')).toContain('next-ticket')
+})
+
 test('explicit remember failure preserves the verified session and prior ciphertext', async () => {
   const target = 'https://jaz.example'
   const { connection, stored } = await fixture({
