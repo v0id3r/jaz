@@ -14,6 +14,7 @@ import (
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/storage"
 	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
+	sqlitestore "github.com/wins/jaz/backend/internal/storage/sqlite"
 )
 
 func TestPermissionIDsRemainUniqueAcrossManagerLifetimes(t *testing.T) {
@@ -155,6 +156,42 @@ func TestRecordAndPublishSlimsStoredCopy(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no live event published")
+	}
+}
+
+// A tool call update keeps its seq; only its stream_seq tells live clients
+// it is newer than the copy they hold.
+func TestRecordAndPublishCarriesStreamSeqOfToolUpdates(t *testing.T) {
+	store, err := sqlitestore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(storage.CreateSession{Slug: "tool-updates", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{store: store, Events: sessionevents.New()}
+	live := manager.Events.Subscribe(t.Context(), session.ID)
+	publish := func(status string) sessionevents.Event {
+		manager.recordAndPublishDirect(sessionevents.Event{
+			SessionID: session.ID,
+			Type:      "acp_tool",
+			ACP:       &sessionevents.ACPEvent{ID: session.ID, ToolCalls: []sessionevents.ACPToolCall{{ID: "tool-1", Status: status}}},
+		})
+		select {
+		case event := <-live:
+			return event
+		case <-time.After(time.Second):
+			t.Fatal("no live event published")
+			return sessionevents.Event{}
+		}
+	}
+
+	started := publish("pending")
+	completed := publish("completed")
+	if completed.Seq != started.Seq || completed.StreamSeq <= started.StreamSeq {
+		t.Fatalf("update published as seq %d stream_seq %d after seq %d stream_seq %d", completed.Seq, completed.StreamSeq, started.Seq, started.StreamSeq)
 	}
 }
 
