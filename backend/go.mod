@@ -134,4 +134,4 @@ tool (
 	honnef.co/go/tools/cmd/staticcheck
 )
 
-replace github.com/gluonfield/jazmem => github.com/v0id3r/jazmem v0.0.0-20261031152910-0ddd040569b9
+replace github.com/gluonfield/jazmem => github.com/v0id3r/jazmem v0.0.0-20261031200856-be1e114dc4b5
