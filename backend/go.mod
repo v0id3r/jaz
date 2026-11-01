@@ -42,6 +42,7 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beeper/argo-go v1.1.2 // indirect
+	github.com/blevesearch/snowballstem v0.9.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -134,4 +135,4 @@ tool (
 	honnef.co/go/tools/cmd/staticcheck
 )
 
-replace github.com/gluonfield/jazmem => github.com/v0id3r/jazmem v0.0.0-20261101081518-30c9657a9282
+replace github.com/gluonfield/jazmem => github.com/v0id3r/jazmem v0.0.0-20261101085916-e96f820c07a2

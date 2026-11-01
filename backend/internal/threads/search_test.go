@@ -221,3 +221,34 @@ func TestSearchHonorsCanceledContext(t *testing.T) {
 		t.Fatalf("error = %v, want context canceled", err)
 	}
 }
+
+func TestSearchMatchesRussianWordFormsAndYo(t *testing.T) {
+	store, err := sqlitestore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	floor, err := store.CreateSession(storage.CreateSession{Slug: "floor", Title: "Тёплый пол в ванной"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cable, err := store.CreateSession(storage.CreateSession{Slug: "cable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendMessageRecords(cable.ID, storage.Message{Role: "user", Content: "Сколько метров кабеля брать?"}); err != nil {
+		t.Fatal(err)
+	}
+
+	search := NewService(sqlitestore.NewSearchQueries(store), store)
+	for query, want := range map[string]string{"теплый пол": floor.ID, "ванная": floor.ID, "кабель": cable.ID} {
+		results, err := search.Search(context.Background(), SearchQuery{Query: query, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 1 || results[0].ThreadID != want {
+			t.Fatalf("Search(%q) = %#v, want thread %s", query, results, want)
+		}
+	}
+}

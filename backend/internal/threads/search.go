@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/gluonfield/jazmem/pkg/terms"
 	"github.com/wins/jaz/backend/internal/codexcompat"
 	"github.com/wins/jaz/backend/internal/storage/sqlite/generated/search"
 )
@@ -174,14 +175,14 @@ func addSearchHit(byThread map[string]*searchAccumulator, result SearchResult, s
 
 func ftsMatchQuery(query string) string {
 	tokens := searchTokens(query)
-	terms := make([]string, 0, len(tokens))
+	clauses := make([]string, 0, len(tokens))
 	for _, token := range tokens {
 		if len([]rune(token)) < 2 {
 			continue
 		}
-		terms = append(terms, token+"*")
+		clauses = append(clauses, "("+token+"* OR terms:"+terms.Term(token)+")")
 	}
-	return strings.Join(terms, " AND ")
+	return strings.Join(clauses, " AND ")
 }
 
 func searchTokens(query string) []string {
