@@ -16,7 +16,7 @@ import {
   progressSurfaceFromEvent,
   taskSurfaceBelongsToSession,
 } from '@/lib/taskSurface'
-import { coalesceSessionEvents, sessionEventPlacement } from '@/lib/sessionEvents'
+import { coalesceSessionEvents, liveAfterCursor, sessionEventPlacement } from '@/lib/sessionEvents'
 import type { TurnActivity } from '@/components/session/SessionLivenessIndicator'
 import {
   activePermissionIDs,
@@ -191,9 +191,10 @@ export type SessionView = ReturnType<typeof deriveSessionView>
 
 export function deriveSessionView(
   data: SessionMessages,
-  liveEvents: SessionEvent[],
+  streamedEvents: SessionEvent[],
   overview?: SessionOverview,
 ) {
+  const liveEvents = liveAfterCursor(streamedEvents, data.latest_event_seq ?? 0)
   const {
     session,
     messages,

@@ -724,6 +724,94 @@ func (q *Queries) ListSessionEventPageSizes(ctx context.Context, arg ListSession
 	return items, nil
 }
 
+const listSessionEventProjectionHeads = `-- name: ListSessionEventProjectionHeads :many
+SELECT
+  thread_id,
+  seq,
+  stream_seq,
+  projection_key,
+  projection_op,
+  type,
+  content,
+  acp,
+  plan,
+  permission,
+  created_at_ms
+FROM session_events INDEXED BY idx_session_events_text_runs
+WHERE thread_id = ?1
+  AND seq < ?2
+  AND projection_op = 'append'
+  AND projection_key IN (/*SLICE:projection_keys*/?)
+ORDER BY seq
+`
+
+type ListSessionEventProjectionHeadsParams struct {
+	ThreadID       string   `json:"thread_id"`
+	BeforeSeq      int64    `json:"before_seq"`
+	ProjectionKeys []string `json:"projection_keys"`
+}
+
+type ListSessionEventProjectionHeadsRow struct {
+	ThreadID      string         `json:"thread_id"`
+	Seq           int64          `json:"seq"`
+	StreamSeq     int64          `json:"stream_seq"`
+	ProjectionKey string         `json:"projection_key"`
+	ProjectionOp  string         `json:"projection_op"`
+	Type          string         `json:"type"`
+	Content       string         `json:"content"`
+	Acp           sql.NullString `json:"acp"`
+	Plan          sql.NullString `json:"plan"`
+	Permission    sql.NullString `json:"permission"`
+	CreatedAtMs   int64          `json:"created_at_ms"`
+}
+
+func (q *Queries) ListSessionEventProjectionHeads(ctx context.Context, arg ListSessionEventProjectionHeadsParams) ([]ListSessionEventProjectionHeadsRow, error) {
+	query := listSessionEventProjectionHeads
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.ThreadID)
+	queryParams = append(queryParams, arg.BeforeSeq)
+	if len(arg.ProjectionKeys) > 0 {
+		for _, v := range arg.ProjectionKeys {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:projection_keys*/?", strings.Repeat(",?", len(arg.ProjectionKeys))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:projection_keys*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSessionEventProjectionHeadsRow{}
+	for rows.Next() {
+		var i ListSessionEventProjectionHeadsRow
+		if err := rows.Scan(
+			&i.ThreadID,
+			&i.Seq,
+			&i.StreamSeq,
+			&i.ProjectionKey,
+			&i.ProjectionOp,
+			&i.Type,
+			&i.Content,
+			&i.Acp,
+			&i.Plan,
+			&i.Permission,
+			&i.CreatedAtMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionEvents = `-- name: ListSessionEvents :many
 SELECT
   thread_id,

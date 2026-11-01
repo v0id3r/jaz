@@ -27,6 +27,7 @@ type Querier interface {
 	ListSessionEventCompactionPage(ctx context.Context, arg ListSessionEventCompactionPageParams) ([]ListSessionEventCompactionPageRow, error)
 	ListSessionEventPage(ctx context.Context, arg ListSessionEventPageParams) ([]ListSessionEventPageRow, error)
 	ListSessionEventPageSizes(ctx context.Context, arg ListSessionEventPageSizesParams) ([]ListSessionEventPageSizesRow, error)
+	ListSessionEventProjectionHeads(ctx context.Context, arg ListSessionEventProjectionHeadsParams) ([]ListSessionEventProjectionHeadsRow, error)
 	ListSessionEvents(ctx context.Context, threadID string) ([]ListSessionEventsRow, error)
 	ListSessionEventsAfter(ctx context.Context, arg ListSessionEventsAfterParams) ([]ListSessionEventsAfterRow, error)
 	ListSessionEventsAfterTime(ctx context.Context, arg ListSessionEventsAfterTimeParams) ([]ListSessionEventsAfterTimeRow, error)

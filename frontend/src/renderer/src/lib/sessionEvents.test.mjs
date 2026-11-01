@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { coalesceSessionEvents, mergeSessionEvent } from './sessionEvents'
+import { coalesceSessionEvents, liveAfterCursor, mergeSessionEvent } from './sessionEvents'
 
 function text(seq, content, projectionOp) {
   return {
@@ -30,19 +30,38 @@ function status(seq, state, extra = {}) {
 }
 
 describe('session event text projection', () => {
-  test('appends live text deltas in one run', () => {
-    const events = mergeSessionEvent([text(1, 'Hel')], text(2, 'lo', 'append'))
+  test('folds live deltas once and ignores their replay', () => {
+    const live = [text(1, 'Hel', 'append'), text(2, 'lo', 'append'), text(2, 'lo', 'append')].reduce(mergeSessionEvent, [])
 
-    expect(events).toHaveLength(1)
-    expect(events[0].content).toBe('Hello')
-    expect(events[0].seq).toBe(2)
+    expect(live).toHaveLength(1)
+    expect(live[0].content).toBe('Hello')
+    expect(live[0].seq).toBe(2)
   })
 
-  test('rejects stale deltas even when their projection key matches', () => {
-    const events = mergeSessionEvent([text(2, 'current')], text(1, 'stale', 'append'))
+  test('cuts a live run exactly at the snapshot cursor', () => {
+    const live = ['A', 'B', 'C', 'D', 'E'].map((chunk, i) => text(i + 1, chunk, 'append')).reduce(mergeSessionEvent, [])
+    const tail = liveAfterCursor(live, 3)
+    const events = coalesceSessionEvents([text(3, 'ABC', 'replace'), ...mergeSessionEvent(tail, text(6, 'F', 'append'))])
+
+    expect(tail[0].content).toBe('DE')
+    expect(liveAfterCursor(live, 5)).toEqual([])
+    expect(liveAfterCursor(live, 0)).toBe(live)
+    expect(events).toHaveLength(1)
+    expect(events[0].content).toBe('ABCDEF')
+  })
+
+  test('a server projection holds its whole run, whatever arrived around it', () => {
+    const events = coalesceSessionEvents([
+      text(2, 'He', 'replace'),
+      text(3, 'Hel', 'replace'),
+      text(5, 'Hello', 'replace'),
+      text(3, 'l', 'append'),
+      text(4, 'l', 'append'),
+      text(6, ' world', 'append'),
+    ])
 
     expect(events).toHaveLength(1)
-    expect(events[0].content).toBe('current')
+    expect(events[0].content).toBe('Hello world')
   })
 
   test('retains an older distinct event during reconnect replay', () => {
@@ -86,14 +105,6 @@ describe('session event text projection', () => {
       expect(events.map((event) => event.seq)).toEqual([1, 2])
       expect(events[0].acp.tool_calls[0].status).toBe('completed')
     }
-  })
-
-  test('folds a live projection over the persisted rows it already holds', () => {
-    const live = [text(1, 'Hel', 'append'), text(2, 'lo', 'append'), text(3, ' world', 'append')].reduce(mergeSessionEvent, [])
-    const events = coalesceSessionEvents([text(1, 'Hel', 'append'), text(2, 'lo', 'append'), ...live])
-
-    expect(events).toHaveLength(1)
-    expect(events[0].content).toBe('Hello world')
   })
 
   test('combines a compact snapshot with later append operations', () => {

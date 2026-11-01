@@ -349,3 +349,23 @@ WHERE thread_id = sqlc.arg(thread_id) AND seq = sqlc.arg(seq);
 -- name: DeleteSessionEvents :exec
 DELETE FROM session_events
 WHERE thread_id = sqlc.arg(thread_id) AND seq IN (sqlc.slice('seqs'));
+
+-- name: ListSessionEventProjectionHeads :many
+SELECT
+  thread_id,
+  seq,
+  stream_seq,
+  projection_key,
+  projection_op,
+  type,
+  content,
+  acp,
+  plan,
+  permission,
+  created_at_ms
+FROM session_events INDEXED BY idx_session_events_text_runs
+WHERE thread_id = sqlc.arg(thread_id)
+  AND seq < sqlc.arg(before_seq)
+  AND projection_op = 'append'
+  AND projection_key IN (sqlc.slice('projection_keys'))
+ORDER BY seq;

@@ -37,22 +37,70 @@ export function sessionEventCoalesceKey(event: SessionEvent): string {
   return event.projection_key ?? ''
 }
 
-export function mergeSessionEvent(prev: SessionEvent[], event: SessionEvent): SessionEvent[] {
+// A live text run remembers where each folded delta starts, so a snapshot
+// cursor can cut it exactly.
+export type LiveSessionEvent = SessionEvent & { live_chunks?: { stream_seq: number; start: number }[] }
+
+// The live tail holds one entry per projection: a replace supersedes the held
+// copy, a text delta folds into its run.
+export function mergeSessionEvent(prev: LiveSessionEvent[], event: LiveSessionEvent): LiveSessionEvent[] {
   const key = sessionEventCoalesceKey(event)
-  let keyIndex = -1
-  for (let index = 0; index < prev.length; index += 1) {
-    const candidate = prev[index]
-    if (event.seq && candidate.session_id === event.session_id && candidate.seq === event.seq) {
-      keyIndex = index
-      break
-    }
-    if (key && sessionEventCoalesceKey(candidate) === key) keyIndex = index
-  }
-  if (keyIndex === -1) return [...prev, event]
-  if (event.seq && streamSeq(prev[keyIndex]) >= streamSeq(event)) return prev
+  const index = prev.findLastIndex((candidate) =>
+    (event.seq && candidate.session_id === event.session_id && candidate.seq === event.seq) ||
+    (key && sessionEventCoalesceKey(candidate) === key),
+  )
+  if (index === -1) return [...prev, event.projection_op === 'append' ? appendLiveText(undefined, event) : event]
+  if (event.seq && streamSeq(prev[index]) >= streamSeq(event)) return prev
   const next = [...prev]
-  next[keyIndex] = foldProjection(next[keyIndex], event)
+  next[index] = event.projection_op === 'append' ? appendLiveText(prev[index], event) : event
   return next
+}
+
+// The part of the live tail a snapshot taken at the cursor does not hold.
+export function liveAfterCursor(events: LiveSessionEvent[], cursor: number): LiveSessionEvent[] {
+  let changed = false
+  const next = events.flatMap((event) => {
+    const kept = eventAfterCursor(event, cursor)
+    changed ||= kept !== event
+    return kept ? [kept] : []
+  })
+  return changed ? next : events
+}
+
+// Whether a snapshot taken at the stream cursor misses this event.
+export function isAfterCursor(event: SessionEvent, cursor: number): boolean {
+  return !event.seq || streamSeq(event) > cursor
+}
+
+function eventAfterCursor(event: LiveSessionEvent, cursor: number): LiveSessionEvent | undefined {
+  if (!isAfterCursor(event, cursor)) return undefined
+  const chunks = event.live_chunks
+  if (!chunks) return event
+  const keep = chunks.findIndex((chunk) => chunk.stream_seq > cursor)
+  const start = chunks[keep].start
+  if (start === 0) return event
+  const text = liveText(event).slice(start)
+  return {
+    ...event,
+    ...(event.type === 'acp_thought' ? { acp: { ...event.acp!, thought: text } } : { content: text }),
+    live_chunks: chunks.slice(keep).map((chunk) => ({ stream_seq: chunk.stream_seq, start: chunk.start - start })),
+  }
+}
+
+function appendLiveText(held: LiveSessionEvent | undefined, event: LiveSessionEvent): LiveSessionEvent {
+  const start = held ? liveText(held).length : 0
+  const chunks = event.live_chunks ?? [{ stream_seq: streamSeq(event), start: 0 }]
+  return {
+    ...(held ? appendProjection(held, event) : event),
+    live_chunks: [
+      ...(held?.live_chunks ?? []),
+      ...chunks.map((chunk) => ({ stream_seq: chunk.stream_seq, start: chunk.start + start })),
+    ],
+  }
+}
+
+function liveText(event: SessionEvent): string {
+  return (event.type === 'acp_thought' ? event.acp?.thought : event.content) ?? ''
 }
 
 export function coalesceSessionEvents(events: SessionEvent[]): SessionEvent[] {
@@ -72,25 +120,16 @@ export function coalesceSessionEvents(events: SessionEvent[]): SessionEvent[] {
       if (key) byKey.set(key, projected.length)
       projected.push(event)
     } else {
-      projected[index] = foldProjection(projected[index], event)
+      projected[index] = event.projection_op === 'append' ? appendProjection(projected[index], event) : event
     }
   }
   return projected.sort(compareEvents)
-}
-
-// A folded text projection spans first_seq..seq. An event reaching back to the
-// projection's start already carries its text, so it replaces instead of appending.
-function foldProjection(prev: SessionEvent, event: SessionEvent): SessionEvent {
-  if (event.projection_op !== 'append') return event
-  if (event.seq && prev.seq && (event.first_seq ?? event.seq) <= (prev.first_seq ?? prev.seq)) return event
-  return appendProjection(prev, event)
 }
 
 function appendProjection(prev: SessionEvent, event: SessionEvent): SessionEvent {
   return {
     ...prev,
     ...event,
-    first_seq: prev.first_seq ?? prev.seq,
     content:
       event.type === 'acp_message'
         ? `${prev.content ?? ''}${event.content ?? ''}`
@@ -108,7 +147,7 @@ function appendProjection(prev: SessionEvent, event: SessionEvent): SessionEvent
   }
 }
 
-function streamSeq(event: SessionEvent): number {
+export function streamSeq(event: SessionEvent): number {
   return event.stream_seq ?? event.seq ?? 0
 }
 

@@ -6,7 +6,7 @@ const message = (seq, content) => ({ seq, role: seq % 2 ? 'user' : 'assistant', 
 const text = (seq, content) => ({
   seq,
   projection_key: 'acp_text:thread:agent:acp_message:message:one',
-  projection_op: 'append',
+  projection_op: 'replace',
   session_id: 'thread',
   type: 'acp_message',
   content,
@@ -27,7 +27,7 @@ describe('session history ownership', () => {
       session,
       history_revision: 4,
       messages: [message(2, 'middle'), message(3, 'latest')],
-      events: [text(2, 'lo')],
+      events: [text(2, 'Hello')],
       has_earlier: true,
       before_message_seq: 2,
     }
@@ -43,8 +43,8 @@ describe('session history ownership', () => {
   test('keeps one copy of a text run refetched while it streams', () => {
     const page = (...events) => ({ session, history_revision: 4, messages: [message(2, 'middle')], events })
     let history = mergeLatestHistory(undefined, page(text(1, 'Hel')))
-    history = mergeLatestHistory(history, page(text(1, 'Hel'), text(2, 'lo')))
-    history = mergeLatestHistory(history, page(text(1, 'Hel'), text(2, 'lo'), text(3, ' world')))
+    history = mergeLatestHistory(history, page(text(1, 'Hel'), text(2, 'Hello')))
+    history = mergeLatestHistory(history, page(text(2, 'Hello'), text(3, 'Hello world')))
 
     expect(history.events).toHaveLength(1)
     expect(history.events[0].content).toBe('Hello world')
@@ -57,8 +57,8 @@ describe('session history ownership', () => {
     expect(mergeLatestHistory(current, latest)).toBe(latest)
   })
 
-  test('composes a text run split across physical pages', () => {
-    const current = { session, history_revision: 7, messages: [], events: [text(2, 'lo')] }
+  test('takes the newest projection of a run split across physical pages', () => {
+    const current = { session, history_revision: 7, messages: [], events: [text(2, 'Hello')] }
     const earlier = { session, history_revision: 7, messages: [], events: [text(1, 'Hel')] }
 
     const merged = mergeEarlierHistory(current, earlier)
@@ -72,7 +72,7 @@ describe('session history ownership', () => {
       session,
       history_revision: 7,
       messages: [message(15, 'latest prompt')],
-      events: [text(600, 'end')],
+      events: [text(600, 'startmiddleend')],
       has_earlier: true,
       before_message_seq: 15,
       before_event_seq: 500,
@@ -81,7 +81,7 @@ describe('session history ownership', () => {
       {
         ...current,
         messages: [],
-        events: [text(499, 'middle')],
+        events: [text(499, 'startmiddle')],
         before_event_seq: 250,
       },
       {

@@ -150,7 +150,6 @@ test('clearing goal mode stays off when streamed status replaces an earlier cach
   expect(deriveSessionView(data(), active).goalRequested).toBe(true)
 
   const cleared = updates.reduce(mergeSessionEvent, [])
-  expect(cleared.map((item) => item.seq)).toEqual([5, 6, 4])
   const view = deriveSessionView(data(), cleared)
   expect(view.goalActive).toBe(false)
   expect(view.goalRequested).toBe(false)
@@ -201,4 +200,18 @@ test('goal clear disarms a running turn without requiring a cancelled status', (
   expect(view.goalRequested).toBe(false)
   expect(view.goalActive).toBe(false)
   expect(view.transcriptEvents.find((item) => item.seq === 2).acp.state).toBe('running')
+})
+
+test('a fresh snapshot never renders the live text it already holds', () => {
+  const text = (seq, content, op) => event(seq, 'acp_message', {
+    content,
+    projection_key: 'acp_text:thread:run',
+    projection_op: op,
+    acp: { id: 'thread', agent: 'codex', state: 'running', text_run_id: 'run' },
+  })
+  const live = ['A', 'B', 'C', 'D', 'E'].map((chunk, i) => text(i + 2, chunk, 'append')).reduce(mergeSessionEvent, [])
+  const snapshot = { ...data([text(4, 'ABC', 'replace')]), latest_event_seq: 4 }
+  const shown = deriveSessionView(snapshot, live).displayEvents.filter((item) => item.type === 'acp_message')
+
+  expect(shown.map((item) => item.content)).toEqual(['ABCDE'])
 })

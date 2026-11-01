@@ -4,7 +4,7 @@ import { getSession } from '@/lib/api/sessions'
 import { openSessionEvents } from '@/lib/api/sse'
 import type { SessionEvent, SessionMessages } from '@/lib/api/types'
 import { keys } from '@/lib/query/keys'
-import { mergeSessionEvent } from '@/lib/sessionEvents'
+import { liveAfterCursor, mergeSessionEvent } from '@/lib/sessionEvents'
 
 // Subscribes to a session's SSE stream while mounted; events accumulate in
 // the query cache. Cache writes are batched and sidebar invalidations
@@ -28,10 +28,7 @@ export function useSessionEvents(
 
   useEffect(() => {
     if (!afterSeq) return
-    queryClient.setQueryData<SessionEvent[]>(keys.sessionEvents(sessionId), (prev = []) => {
-      const next = prev.filter((event) => !event.seq || (event.first_seq ?? event.stream_seq ?? event.seq) > afterSeq)
-      return next.length === prev.length ? prev : next
-    })
+    queryClient.setQueryData<SessionEvent[]>(keys.sessionEvents(sessionId), (prev = []) => liveAfterCursor(prev, afterSeq))
   }, [sessionId, afterSeq, queryClient])
 
   useEffect(() => {

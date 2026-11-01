@@ -334,7 +334,7 @@ func TestTranscriptCursorSurvivesCoalescedEventUpdate(t *testing.T) {
 	}
 }
 
-func TestLoadTranscriptPagesComposeOneTextRun(t *testing.T) {
+func TestLoadTranscriptPagesFoldTextRunsFromTheirStart(t *testing.T) {
 	store, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -356,36 +356,36 @@ func TestLoadTranscriptPagesComposeOneTextRun(t *testing.T) {
 	if err := store.AppendSessionEvents(session.ID, events...); err != nil {
 		t.Fatal(err)
 	}
-
-	request := storage.TranscriptPageRequest{Turns: 14}
-	var pages [][]sessionevents.Event
-	for {
-		page, err := store.LoadTranscriptPage(t.Context(), session.ID, request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pages = append([][]sessionevents.Event{sessionevents.CompactTranscript(page.Events)}, pages...)
-		if page.BeforeEventSeq == 0 {
-			break
-		}
-		request.BeforeEventSeq = page.BeforeEventSeq
-		request.BeforeMessageSeq = page.BeforeMessageSeq
-		request.HistoryRevision = page.HistoryRevision
-	}
-	var projectedInput []sessionevents.Event
-	for _, page := range pages {
-		projectedInput = append(projectedInput, page...)
-	}
-	projected := sessionevents.CompactTranscript(projectedInput)
-	if len(projected) != 1 {
-		t.Fatalf("projected events = %d", len(projected))
-	}
 	var want strings.Builder
 	for i := range chunks {
 		fmt.Fprintf(&want, "%03d", i)
 	}
-	if projected[0].Content != want.String() {
-		t.Fatalf("projected text has %d bytes, want %d", len(projected[0].Content), want.Len())
+
+	request := storage.TranscriptPageRequest{Turns: 14}
+	for pages := 1; ; pages++ {
+		page, err := store.LoadTranscriptPage(t.Context(), session.ID, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projected := sessionevents.CompactTranscript(page.Events)
+		if len(projected) != 1 || projected[0].ProjectionOp != sessionevents.ProjectionReplace {
+			t.Fatalf("page %d projected %#v", pages, projected)
+		}
+		if pages == 1 && projected[0].Content != want.String() {
+			t.Fatalf("latest page text has %d bytes, want %d", len(projected[0].Content), want.Len())
+		}
+		if !strings.HasPrefix(want.String(), projected[0].Content) {
+			t.Fatalf("page %d text does not start the run", pages)
+		}
+		if page.BeforeEventSeq == 0 {
+			if pages < 3 {
+				t.Fatalf("pages = %d, want the run cut by page boundaries", pages)
+			}
+			return
+		}
+		request.BeforeEventSeq = page.BeforeEventSeq
+		request.BeforeMessageSeq = page.BeforeMessageSeq
+		request.HistoryRevision = page.HistoryRevision
 	}
 }
 

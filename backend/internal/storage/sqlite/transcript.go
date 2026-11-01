@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/wins/jaz/backend/internal/sessionevents"
@@ -145,6 +146,11 @@ func (s *Store) LoadTranscriptPage(ctx context.Context, id string, request stora
 	}
 	if eventsMore && len(page.Events) > 0 {
 		page.BeforeEventSeq = page.Events[0].Seq
+		heads, headsErr := loadTextRunHeads(ctx, events, id, page.Events)
+		if headsErr != nil {
+			return storage.TranscriptPage{}, headsErr
+		}
+		page.Events = append(heads, page.Events...)
 	}
 	page.HasEarlier = eventsMore || messageHasEarlier
 	page.LatestEventSeq, err = events.LatestSessionEventStreamSeq(ctx, id)
@@ -155,6 +161,36 @@ func (s *Store) LoadTranscriptPage(ctx context.Context, id string, request stora
 		return storage.TranscriptPage{}, err
 	}
 	return page, nil
+}
+
+// A page boundary can cut a streamed text run. Its earlier rows travel with
+// the page, so every page folds each run from its start.
+func loadTextRunHeads(ctx context.Context, events *eventdb.Queries, id string, page []sessionevents.Event) ([]sessionevents.Event, error) {
+	var keys []string
+	for _, event := range page {
+		if event.ProjectionOp == sessionevents.ProjectionAppend && event.ProjectionKey != "" && !slices.Contains(keys, event.ProjectionKey) {
+			keys = append(keys, event.ProjectionKey)
+		}
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	rows, err := events.ListSessionEventProjectionHeads(ctx, eventdb.ListSessionEventProjectionHeadsParams{
+		ThreadID: id, BeforeSeq: page[0].Seq, ProjectionKeys: keys,
+	})
+	if err != nil {
+		return nil, err
+	}
+	heads := make([]sessionevents.Event, 0, len(rows))
+	for _, row := range rows {
+		event, err := eventFromDBFields(row.ThreadID, row.Seq, row.ProjectionKey, row.ProjectionOp, row.Type, row.Content, row.Acp, row.Plan, row.Permission, row.CreatedAtMs)
+		if err != nil {
+			return nil, err
+		}
+		event.StreamSeq = row.StreamSeq
+		heads = append(heads, event)
+	}
+	return heads, nil
 }
 
 func loadTranscriptEventRows(

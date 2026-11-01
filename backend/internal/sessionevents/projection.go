@@ -144,6 +144,9 @@ func (p *Projector) Events() []Event {
 	items := make([]transcriptItem, 0, len(p.items))
 	for _, item := range p.items {
 		event := item.event
+		if item.chunks != nil {
+			event.ProjectionOp = ProjectionReplace
+		}
 		if len(item.chunks) > 1 {
 			text := strings.Join(item.chunks, "")
 			if event.Type == TypeACPMessage {
