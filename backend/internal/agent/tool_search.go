@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/kljensen/snowball/english"
+	"github.com/gluonfield/jazmem/pkg/terms"
 	unidecode "github.com/mozillazg/go-unidecode"
 	"github.com/rivo/uniseg"
 	"github.com/wins/jaz/backend/internal/provider"
@@ -306,9 +306,7 @@ func tokenizeToolSearch(text string) []string {
 		if !toolSearchWordToken(word) || toolSearchStopwords[word] {
 			continue
 		}
-		if stem := english.Stem(word, false); stem != "" {
-			tokens = append(tokens, stem)
-		}
+		tokens = append(tokens, terms.Term(word))
 	}
 	return tokens
 }

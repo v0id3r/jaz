@@ -14,7 +14,6 @@ require (
 	github.com/gotd/td v0.159.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/joho/godotenv v1.5.1
-	github.com/kljensen/snowball v0.10.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/mozillazg/go-unidecode v0.2.0
 	github.com/openai/openai-go/v3 v3.37.0
@@ -135,4 +134,4 @@ tool (
 	honnef.co/go/tools/cmd/staticcheck
 )
 
-replace github.com/gluonfield/jazmem => github.com/v0id3r/jazmem v0.0.0-20261101085916-e96f820c07a2
+replace github.com/gluonfield/jazmem => github.com/v0id3r/jazmem v0.0.0-20261101091633-d61d494b97e2
