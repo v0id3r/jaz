@@ -237,18 +237,23 @@ func TestSearchMatchesRussianWordFormsAndYo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AppendMessageRecords(cable.ID, storage.Message{Role: "user", Content: "Сколько метров кабеля брать?"}); err != nil {
+	long := strings.Repeat("Раскладка идёт от двери к окну. ", 20) + "Сколько метров кабеля брать?"
+	if err := store.AppendMessageRecords(cable.ID, storage.Message{Role: "user", Content: long}); err != nil {
 		t.Fatal(err)
 	}
 
 	search := NewService(sqlitestore.NewSearchQueries(store), store)
-	for query, want := range map[string]string{"теплый пол": floor.ID, "ванная": floor.ID, "кабель": cable.ID} {
+	for query, want := range map[string]struct{ thread, snippet string }{
+		"теплый пол": {floor.ID, "\x1fТёплый\x1e \x1fпол\x1e"},
+		"ванная":     {floor.ID, "в \x1fванной\x1e"},
+		"кабель":     {cable.ID, "метров \x1fкабеля\x1e брать"},
+	} {
 		results, err := search.Search(context.Background(), SearchQuery{Query: query, Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(results) != 1 || results[0].ThreadID != want {
-			t.Fatalf("Search(%q) = %#v, want thread %s", query, results, want)
+		if len(results) != 1 || results[0].ThreadID != want.thread || !strings.Contains(results[0].Snippet, want.snippet) {
+			t.Fatalf("Search(%q) = %#v, want thread %s with snippet %q", query, results, want.thread, want.snippet)
 		}
 	}
 }
