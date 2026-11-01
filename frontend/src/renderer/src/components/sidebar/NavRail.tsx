@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link, linkOptions, useRouterState } from '@tanstack/react-router'
+import { Link, linkOptions } from '@tanstack/react-router'
 import { LayoutDashboard, MessageSquare, Plus, Settings } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { createContext, useContext, useRef, useState } from 'react'
 import { AppIcon } from '@/components/apps/AppIcon'
 import { BotsGlyph } from '@/components/bots/BotAvatar'
 import type { SettingsSection } from '@/components/settings/sections'
@@ -30,6 +30,22 @@ export function railTab(pathname: string, settingsOpen: boolean): RailTab {
   const section = pathname.startsWith('/loops') ? '/bots' : pathname
   return SECTIONS.find(({ to }) => section.startsWith(to))?.to ?? 'chat'
 }
+
+// The Chat tab returns to the thread the user left, the way switching apps
+// does; a fresh /new clears it so the tab lands back on the composer.
+export function useChatLink(pathname: string) {
+  const [lastSession, setLastSession] = useState<string>()
+  const session = /^\/sessions\/([^/]+)/.exec(pathname)?.[1]
+  const current = session ?? (pathname === '/new' ? undefined : lastSession)
+  if (current !== lastSession) setLastSession(current)
+  return current
+    ? linkOptions({ to: '/sessions/$sessionId', params: { sessionId: current } })
+    : linkOptions({ to: '/new' })
+}
+
+// The root tracks that thread once, so the rail and the phone drawer, which
+// has no rail, open the same one.
+export const ChatLink = createContext<ReturnType<typeof useChatLink>>(linkOptions({ to: '/new' }))
 
 // Everything beside Chat takes the whole content card: the built-in sections,
 // then each sidebar app a connected MCP server declares.
@@ -75,19 +91,12 @@ export function NavRail({
   onOpenSettings: (section?: SettingsSection) => void
 }) {
   const rail = useRef<HTMLElement>(null)
-  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const chatLink = useContext(ChatLink)
   const sections = useRailSections()
   const botsUnread = useQuery({
     ...botsQuery,
     select: (bots) => bots.some((bot) => bot.unread),
   }).data
-
-  // The Chat tab returns to the thread the user left, the way switching apps
-  // does; a fresh /new clears it so the tab lands back on the composer.
-  const [lastSession, setLastSession] = useState<string>()
-  const session = /^\/sessions\/([^/]+)/.exec(pathname)?.[1]
-  const current = session ?? (pathname === '/new' ? undefined : lastSession)
-  if (current !== lastSession) setLastSession(current)
 
   useWindowEvent('keydown', (event) => {
     if (!event.metaKey || event.defaultPrevented || event.altKey || event.ctrlKey || event.shiftKey || event.repeat) return
@@ -118,8 +127,7 @@ export function NavRail({
   return (
     <nav ref={rail} aria-label="Sections" style={{ width: RAIL_WIDTH }} className="flex shrink-0 flex-col items-center gap-2 pb-2 pt-[5px] max-sm:hidden">
       <Link
-        to={lastSession ? '/sessions/$sessionId' : '/new'}
-        params={lastSession ? { sessionId: lastSession } : {}}
+        {...chatLink}
         data-rail-tab=""
         aria-label="Chat"
         onClick={onOpenChat}

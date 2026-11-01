@@ -20,7 +20,7 @@ import { isSettingsSection, type SettingsSection } from '@/components/settings/s
 import { MCPApps } from '@/components/apps/MCPAppFrame'
 import { SettingsNav } from '@/components/settings/SettingsNav'
 import { SettingsOverlay } from '@/components/settings/SettingsOverlay'
-import { NavRail, railTab } from '@/components/sidebar/NavRail'
+import { ChatLink, NavRail, railTab, useChatLink } from '@/components/sidebar/NavRail'
 import { BotsPanel } from '@/components/bots/BotsPanel'
 import { ChatPanel } from '@/components/sidebar/ChatPanel'
 import { Sidebar } from '@/components/sidebar/Sidebar'
@@ -170,6 +170,7 @@ function RootLayout() {
   const isMobile = useIsMobile()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const tab = railTab(pathname, settingsOpen)
+  const chatLink = useChatLink(pathname)
   const hasPanel = isMobile || tab === 'chat' || tab === '/bots'
   const panelOpen = hasPanel && sidebarOpen
   // Desktop Settings keeps its menu in the column whatever the list toggle says.
@@ -320,49 +321,51 @@ function RootLayout() {
           <div className="relative flex min-h-0 flex-1">
             {/* The rail and the thread list sit on the window itself; the
                 content floats beside them as cards. */}
-            <div className="flex shrink-0 flex-col">
-              {isMacDesktop && !isMobile && <div className="titlebar-drag h-10 shrink-0" />}
-              <div className="flex min-h-0 flex-1">
-                <NavRail tab={tab} onOpenChat={() => setSidebarOpen(true)} onOpenSettings={openSettings} />
-                <motion.div
-                  className={`shrink-0 overflow-hidden max-sm:absolute max-sm:inset-y-0 max-sm:left-0 max-sm:z-drawer max-sm:w-full! ${hasPanel || settingsMenu ? '' : 'hidden'}`}
-                  initial={false}
-                  animate={drawerSlide({ isMobile, open: columnOpen, side: 'left', width: sidebarWidth })}
-                  transition={slide}
-                >
+            <ChatLink.Provider value={chatLink}>
+              <div className="flex shrink-0 flex-col">
+                {isMacDesktop && !isMobile && <div className="titlebar-drag h-10 shrink-0" />}
+                <div className="flex min-h-0 flex-1">
+                  <NavRail tab={tab} onOpenChat={() => setSidebarOpen(true)} onOpenSettings={openSettings} />
                   <motion.div
-                    className="h-full"
+                    className={`shrink-0 overflow-hidden max-sm:absolute max-sm:inset-y-0 max-sm:left-0 max-sm:z-drawer max-sm:w-full! ${hasPanel || settingsMenu ? '' : 'hidden'}`}
                     initial={false}
-                    animate={isMobile || columnOpen ? { opacity: 1, x: 0 } : { opacity: 0, x: -12 }}
+                    animate={drawerSlide({ isMobile, open: columnOpen, side: 'left', width: sidebarWidth })}
                     transition={slide}
                   >
-                    <Sidebar
-                      width={sidebarWidth}
-                      mobile={isMobile}
-                      onDismiss={() => setSidebarOpen(false)}
-                      resizing={resizing}
-                      onResizeStart={startResize}
-                      onResizeReset={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
-                      onOpenSettings={() => openSettings()}
-                      onOpenConnect={() => setConnectOpen(true)}
+                    <motion.div
+                      className="h-full"
+                      initial={false}
+                      animate={isMobile || columnOpen ? { opacity: 1, x: 0 } : { opacity: 0, x: -12 }}
+                      transition={slide}
                     >
-                      {settingsMenu ? (
-                        <SettingsNav
-                          section={settingsSection}
-                          onSectionChange={goToSettingsSection}
-                          onClose={closeSettings}
-                          onOpenConnect={() => setConnectOpen(true)}
-                        />
-                      ) : tab === '/bots' ? (
-                        <BotsPanel mobile={isMobile} />
-                      ) : (
-                        <ChatPanel open={panelOpen && tab === 'chat'} mobile={isMobile} onOpenCommandPalette={() => setCommandOpen(true)} />
-                      )}
-                    </Sidebar>
+                      <Sidebar
+                        width={sidebarWidth}
+                        mobile={isMobile}
+                        onDismiss={() => setSidebarOpen(false)}
+                        resizing={resizing}
+                        onResizeStart={startResize}
+                        onResizeReset={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
+                        onOpenSettings={() => openSettings()}
+                        onOpenConnect={() => setConnectOpen(true)}
+                      >
+                        {settingsMenu ? (
+                          <SettingsNav
+                            section={settingsSection}
+                            onSectionChange={goToSettingsSection}
+                            onClose={closeSettings}
+                            onOpenConnect={() => setConnectOpen(true)}
+                          />
+                        ) : tab === '/bots' ? (
+                          <BotsPanel mobile={isMobile} />
+                        ) : (
+                          <ChatPanel open={panelOpen && tab === 'chat'} mobile={isMobile} onOpenCommandPalette={() => setCommandOpen(true)} />
+                        )}
+                      </Sidebar>
+                    </motion.div>
                   </motion.div>
-                </motion.div>
+                </div>
               </div>
-            </div>
+            </ChatLink.Provider>
 
             <div ref={setPanelRow} className="flex min-w-0 flex-1 sm:pt-2">
               {/* --titlebar-height is the floating title row's height; content
