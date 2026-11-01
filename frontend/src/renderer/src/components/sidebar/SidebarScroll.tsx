@@ -1,6 +1,7 @@
-import { Link } from '@tanstack/react-router'
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
-import { useRailSections } from './NavRail'
+import { Link, useRouterState } from '@tanstack/react-router'
+import { MessageSquare } from 'lucide-react'
+import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { ChatLink, railTab, useRailSections } from './NavRail'
 
 export const NAV_LINK_CLASS =
   'group flex h-[30px] items-center gap-2 rounded-lg px-2.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-list-hover max-sm:h-11 max-sm:px-3 max-sm:text-[15px]'
@@ -23,7 +24,11 @@ export function SidebarHeader({ children }: { children: ReactNode }) {
 // set it apart.
 export function SidebarScroll({ mobile, tight = false, children }: { mobile: boolean; tight?: boolean; children: ReactNode }) {
   const navRef = useRef<HTMLElement | null>(null)
-  const sections = useRailSections()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const chatLink = useContext(ChatLink)
+  const railSections = useRailSections()
+  const tab = railTab(pathname, false)
+  const sections = [{ path: 'chat', label: 'Chat', icon: <MessageSquare aria-hidden />, link: chatLink }, ...railSections]
   const [navEdge, setNavEdge] = useState({ scrollable: false, scrolled: false })
   const updateNavEdge = useCallback(() => {
     const nav = navRef.current
@@ -76,15 +81,15 @@ export function SidebarScroll({ mobile, tight = false, children }: { mobile: boo
         onScroll={updateNavEdge}
         className={`scrollbar-quiet flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pl-1.5 pr-3 max-sm:gap-6 max-sm:px-4 ${tight ? 'pt-1' : 'pt-4'}`}
       >
-        {/* Phones have no rail, so its tabs ride at the top of the drawer. */}
+        {/* Phones have no rail, so its tabs ride at the top of the drawer and
+            light up the way the rail's do. */}
         {mobile && (
           <div className="flex flex-col gap-px">
             {sections.map((section) => (
               <Link
                 key={section.path}
                 {...section.link}
-                className={NAV_LINK_CLASS}
-                activeProps={{ className: 'bg-list-active!' }}
+                className={`${NAV_LINK_CLASS} ${tab === section.path ? 'bg-list-active!' : ''}`}
               >
                 <span className="grid size-[18px] shrink-0 place-items-center text-ink-2 [&_svg]:size-[18px]">
                   {section.icon}
