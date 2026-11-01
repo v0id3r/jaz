@@ -43,6 +43,11 @@ func (a Annotator) Clone() Annotator {
 	return clone
 }
 
+// OpenTextKey is the projection key of the text run the next event may continue.
+func (a Annotator) OpenTextKey() string {
+	return a.openKey
+}
+
 func NewProjector() *Projector {
 	return &Projector{byKey: map[string]int{}}
 }

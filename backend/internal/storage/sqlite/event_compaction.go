@@ -18,6 +18,7 @@ const (
 	eventCompactionBatchOperations = 8
 	eventCompactionBatchBytes      = 4 << 20
 	eventCompactionPageRows        = 8
+	eventCompactionPageBytes       = eventCompactionBatchBytes / 2
 	eventCompactionTextBytes       = storage.MaxTextEventBytes
 )
 
@@ -132,46 +133,56 @@ func (s *Store) loadSessionEventCompactionPlan(ctx context.Context) (*sessionEve
 }
 
 func (s *Store) prepareSessionEventCompactionPage(ctx context.Context, plan *sessionEventCompactionPlan) error {
-	rows, err := eventdb.New(s.db).ListSessionEventCompactionPage(ctx, eventdb.ListSessionEventCompactionPageParams{
-		ThreadID:   plan.id,
-		AfterSeq:   plan.afterSeq,
-		LimitCount: eventCompactionPageRows,
-	})
-	if err != nil {
-		return err
-	}
-	events := make([]sessionevents.Event, 0, len(rows))
-	sizeBySeq := make(map[int64]int, len(rows))
-	coalesceKeyBySeq := make(map[int64]string, len(rows))
-	projectionKeyBySeq := make(map[int64]string, len(rows))
-	projectionOpBySeq := make(map[int64]string, len(rows))
-	for _, row := range rows {
-		rowBytes := sessionEventFieldSize(row.Content, row.Acp, row.Plan, row.Permission)
-		if rowBytes > storage.MaxSessionEventBytes {
-			sizeErr := fmt.Errorf("session event %d is %d bytes; limit is %d", row.Seq, rowBytes, storage.MaxSessionEventBytes)
-			if skipErr := s.skipSessionEventCompaction(ctx, plan.id, plan.revision); skipErr != nil {
-				return errors.Join(sizeErr, fmt.Errorf("mark session event compaction skipped: %w", skipErr))
-			}
-			return sizeErr
-		}
-		event, err := eventFromDBFields(row.ThreadID, row.Seq, row.ProjectionKey, row.ProjectionOp, row.Type, row.Content, row.Acp, row.Plan, row.Permission, row.CreatedAtMs)
-		event.StreamSeq = row.StreamSeq
-		if err != nil {
-			decodeErr := fmt.Errorf("decode session events for compaction: %w", err)
-			if skipErr := s.skipSessionEventCompaction(ctx, plan.id, plan.revision); skipErr != nil {
-				return errors.Join(decodeErr, fmt.Errorf("mark session event compaction skipped: %w", skipErr))
-			}
-			return decodeErr
-		}
-		events = append(events, event)
-		sizeBySeq[event.Seq] = rowBytes
-		coalesceKeyBySeq[event.Seq] = row.CoalesceKey
-		projectionKeyBySeq[event.Seq] = row.ProjectionKey
-		projectionOpBySeq[event.Seq] = row.ProjectionOp
-	}
 	annotator := plan.annotator.Clone()
-	for i := range events {
-		events[i] = annotator.Annotate(events[i])
+	carried := annotator.OpenTextKey()
+	var events []sessionevents.Event
+	var err error
+	sizeBySeq := make(map[int64]int)
+	coalesceKeyBySeq := make(map[int64]string)
+	projectionKeyBySeq := make(map[int64]string)
+	projectionOpBySeq := make(map[int64]string)
+	pageBytes := 0
+	plan.pageAfterSeq = plan.afterSeq
+	for {
+		rows, err := eventdb.New(s.db).ListSessionEventCompactionPage(ctx, eventdb.ListSessionEventCompactionPageParams{
+			ThreadID:   plan.id,
+			AfterSeq:   plan.pageAfterSeq,
+			LimitCount: eventCompactionPageRows,
+		})
+		if err != nil {
+			return err
+		}
+		plan.pageEOF = len(rows) < eventCompactionPageRows
+		for _, row := range rows {
+			rowBytes := sessionEventFieldSize(row.Content, row.Acp, row.Plan, row.Permission)
+			if rowBytes > storage.MaxSessionEventBytes {
+				sizeErr := fmt.Errorf("session event %d is %d bytes; limit is %d", row.Seq, rowBytes, storage.MaxSessionEventBytes)
+				if skipErr := s.skipSessionEventCompaction(ctx, plan.id, plan.revision); skipErr != nil {
+					return errors.Join(sizeErr, fmt.Errorf("mark session event compaction skipped: %w", skipErr))
+				}
+				return sizeErr
+			}
+			event, err := eventFromDBFields(row.ThreadID, row.Seq, row.ProjectionKey, row.ProjectionOp, row.Type, row.Content, row.Acp, row.Plan, row.Permission, row.CreatedAtMs)
+			event.StreamSeq = row.StreamSeq
+			if err != nil {
+				decodeErr := fmt.Errorf("decode session events for compaction: %w", err)
+				if skipErr := s.skipSessionEventCompaction(ctx, plan.id, plan.revision); skipErr != nil {
+					return errors.Join(decodeErr, fmt.Errorf("mark session event compaction skipped: %w", skipErr))
+				}
+				return decodeErr
+			}
+			events = append(events, annotator.Annotate(event))
+			sizeBySeq[event.Seq] = rowBytes
+			coalesceKeyBySeq[event.Seq] = row.CoalesceKey
+			projectionKeyBySeq[event.Seq] = row.ProjectionKey
+			projectionOpBySeq[event.Seq] = row.ProjectionOp
+			pageBytes += rowBytes
+			plan.pageAfterSeq = row.Seq
+		}
+		// A page reads on to the end of an open text run, so the run folds into one row.
+		if plan.pageEOF || annotator.OpenTextKey() == "" || pageBytes >= eventCompactionPageBytes {
+			break
+		}
 	}
 	byKey := make(map[string]int)
 	unchanged := make(map[int]bool)
@@ -233,9 +244,20 @@ func (s *Store) prepareSessionEventCompactionPage(ctx context.Context, plan *ses
 		}
 	}
 	plan.mutations = kept
-	for _, segment := range sessionevents.CompactTextSegments(events, eventCompactionTextBytes) {
+	segments := sessionevents.CompactTextSegments(events, eventCompactionTextBytes)
+	runSegments := make(map[string]int)
+	for _, segment := range segments {
+		runSegments[segment.Event.ProjectionKey]++
+	}
+	open := annotator.OpenTextKey()
+	for _, segment := range segments {
 		if segment.Event.ProjectionKey == "" {
 			continue
+		}
+		// A row folding its whole run replaces whatever a reader holds for it.
+		whole := runSegments[segment.Event.ProjectionKey] == 1 && segment.Event.ProjectionKey != carried && (plan.pageEOF || segment.Event.ProjectionKey != open)
+		if whole && (len(segment.DeleteSeqs) > 0 || projectionOpBySeq[segment.Event.Seq] == sessionevents.ProjectionReplace) {
+			segment.Event.ProjectionOp = sessionevents.ProjectionReplace
 		}
 		key := segment.Event.ProjectionKey + ":segment:" + strconv.FormatInt(segment.Event.Seq, 10)
 		deletes := make([]sessionEventDelete, 0, len(segment.DeleteSeqs))
@@ -260,12 +282,7 @@ func (s *Store) prepareSessionEventCompactionPage(ctx context.Context, plan *ses
 		}
 		plan.mutations = append(plan.mutations, mutation)
 	}
-	plan.pageAfterSeq = plan.afterSeq
-	if len(rows) > 0 {
-		plan.pageAfterSeq = rows[len(rows)-1].Seq
-	}
 	plan.pageAnnotator = annotator
-	plan.pageEOF = len(rows) < eventCompactionPageRows
 	return nil
 }
 
