@@ -51,16 +51,14 @@ jobs:
           keychain="$RUNNER_TEMP/signing.keychain-db"
           password="$(uuidgen)"
           echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
-          curl -fsSL -o "$RUNNER_TEMP/AppleWWDRCAG3.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
           security create-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
           security import "$RUNNER_TEMP/signing.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security import "$RUNNER_TEMP/AppleWWDRCAG3.cer" -k "$keychain"
           security list-keychains -d user -s "$keychain"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
           identity="$(security find-identity -v -p codesigning "$keychain" | awk '/\)/ { print $2; exit }')"
-          [ -n "$identity" ] || { echo "No valid signing identity in the certificate"; exit 1; }
+          [ -n "$identity" ] || { security find-identity -p codesigning "$keychain"; exit 1; }
           echo "SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
 
       - name: Build
