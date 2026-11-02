@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/storage"
@@ -320,24 +321,31 @@ func TestCoalescedUpdatesKeepHistoryAndReachStreamCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool := func(status string) sessionevents.Event {
-		return sessionevents.Event{Type: "acp_tool", ACP: &sessionevents.ACPEvent{
+	started := time.UnixMilli(1_000).UTC()
+	tool := func(status string, at time.Time) sessionevents.Event {
+		return sessionevents.Event{Type: "acp_tool", At: at, ACP: &sessionevents.ACPEvent{
 			ID: session.ID, ToolCalls: []sessionevents.ACPToolCall{{ID: "tool-1", Status: status}},
 		}}
 	}
 	status := sessionevents.Event{Type: "acp", ACP: &sessionevents.ACPEvent{ID: session.ID, State: "running"}}
-	if err := store.AppendSessionEvents(session.ID, tool("pending"), status, sessionevents.Event{Type: "note"}); err != nil {
+	if err := store.AppendSessionEvents(session.ID, tool("pending", started), status, sessionevents.Event{Type: "note"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AppendSessionEvents(session.ID, tool("completed"), status); err != nil {
+	update := []sessionevents.Event{tool("completed", started.Add(time.Minute)), status}
+	if err := store.AppendSessionEvents(session.ID, update...); err != nil {
 		t.Fatal(err)
+	}
+	// Messages sent while a tool runs interleave by time, so an update keeps
+	// the time the tool first appeared, for live readers too.
+	if !update[0].At.Equal(started) {
+		t.Fatalf("published update at %v, want %v", update[0].At, started)
 	}
 	after, err := store.LoadSessionEventsAfter(session.ID, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(after) != 2 ||
-		after[0].Seq != 1 || after[0].StreamSeq != 4 || after[0].ACP.ToolCalls[0].Status != "completed" ||
+		after[0].Seq != 1 || after[0].StreamSeq != 4 || after[0].ACP.ToolCalls[0].Status != "completed" || !after[0].At.Equal(started) ||
 		after[1].Seq != 5 || after[1].StreamSeq != 5 || after[1].Type != "acp" {
 		t.Fatalf("events after cursor = %#v", after)
 	}

@@ -222,6 +222,7 @@ func (s *Store) appendSessionEvents(ctx context.Context, id string, now time.Tim
 					events[i] = sessionevents.CompleteProviderSubagentSnapshot(stored, events[i])
 				}
 				events[i].Seq = previous.Seq
+				events[i].At = msToTime(previous.CreatedAtMs)
 			}
 		}
 		events[i].StreamSeq = streamSeq
