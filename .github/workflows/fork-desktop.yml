@@ -1,0 +1,92 @@
+name: Fork desktop
+
+# Builds the macOS app of a fork's deploy branch and publishes it as a release
+# of the fork, which the app's own updater follows. Versions carry a "fork"
+# prerelease channel, so installed fork builds only update to fork builds.
+on:
+  push:
+    branches:
+      - 'local/*-app-stream'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-desktop
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    if: github.repository != 'gluonfield/jaz'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: backend/go.sum
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Test frontend
+        working-directory: frontend
+        run: bun run test
+
+      # Apple Development certificate of the fork owner. Every build must use the
+      # same one: macOS keeps permissions and accepts updates only for an app
+      # signed like the installed one.
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          curl -fsSL -o "$RUNNER_TEMP/AppleWWDRCAG3.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security import "$RUNNER_TEMP/AppleWWDRCAG3.cer" -k "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          identity="$(security find-identity -v -p codesigning "$keychain" | awk '/\)/ { print $2; exit }')"
+          [ -n "$identity" ] || { echo "No valid signing identity in the certificate"; exit 1; }
+          echo "SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Build
+        working-directory: frontend
+        # Release builds require upstream's bundled Telegram app, which forks do
+        # not have; the desktop's local backend works without it.
+        env:
+          CI: 'false'
+        run: |
+          version="$(node -p "require('./package.json').version")-fork.$GITHUB_RUN_NUMBER"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          bun run build:backend
+          bun run build:bundle
+          bunx electron-builder --mac --arm64 --publish never \
+            -c.extraMetadata.version="$version" \
+            -c.mac.identity="$SIGN_IDENTITY" \
+            -c.mac.notarize=false \
+            -c.publish.owner="$GITHUB_REPOSITORY_OWNER" \
+            -c.publish.repo="${GITHUB_REPOSITORY#*/}"
+
+      - name: Publish release
+        working-directory: frontend
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --prerelease \
+            --title "Jaz $VERSION" --notes "Fork build of $GITHUB_REF_NAME at ${GITHUB_SHA::8}." \
+            dist/*.dmg dist/*.zip dist/*.blockmap dist/*-mac.yml
