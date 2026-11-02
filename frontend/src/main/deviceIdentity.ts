@@ -1,10 +1,11 @@
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, type KeyObject } from 'node:crypto'
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { arch, hostname, platform } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app, safeStorage } from 'electron'
 import { buildDeviceProof, deviceAccessTokens, fetchWithDeviceKey, requestDeviceAccessToken } from '@shared/deviceProof'
+import { createEnclaveKey, enclaveSigner } from '@main/enclaveKey'
 import { keychainAvailable } from '@main/keychain'
 
 export type DeviceIdentity = {
@@ -22,9 +23,15 @@ export type DeviceMetadata = {
 
 // Version 2 keeps the private key sealed by the system keychain, so a copy of
 // userData alone cannot sign device proofs. Version 1 holds it in plain text
-// and is sealed on first read wherever a keychain is available.
-type StoredIdentity = DeviceIdentity & { public_key_pem: string; created_at_ms: number } &
-  ({ version: 1; private_key_pem: string } | { version: 2; private_key_sealed: string })
+// and is sealed on first read wherever a keychain is available. Version 3 is a
+// P-256 key in the Secure Enclave: the private key never leaves this Mac, and
+// only its handle is stored, sealed by the keychain.
+type StoredIdentity = DeviceIdentity & { created_at_ms: number } & (
+  | { version: 1; public_key_pem: string; private_key_pem: string }
+  | { version: 2; public_key_pem: string; private_key_sealed: string }
+  | { version: 3; key_handle_sealed: string })
+type Ed25519Identity = Exclude<StoredIdentity, { version: 3 }>
+type Sign = (input: Uint8Array) => Promise<Uint8Array>
 
 const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 
@@ -35,39 +42,46 @@ export function getDeviceIdentity(): DeviceIdentity {
 
 function storedIdentity(): StoredIdentity {
   const existing = readStoredIdentity()
-  if (existing?.version === 2 || (existing && !keychainAvailable())) return existing
-  const plain = existing ?? createIdentity()
-  const stored = keychainAvailable() ? sealIdentity(plain) : plain
+  if (existing && (existing.version !== 1 || !keychainAvailable())) return existing
+  const stored = existing ? sealIdentity(existing) : createIdentity()
   writeStoredIdentity(stored)
   return stored
 }
 
 function sealIdentity({ private_key_pem, ...identity }: Extract<StoredIdentity, { version: 1 }>): StoredIdentity {
-  return { ...identity, version: 2, private_key_sealed: safeStorage.encryptString(private_key_pem).toString('base64') }
+  return { ...identity, version: 2, private_key_sealed: seal(private_key_pem) }
 }
 
-function privateKeyPem(identity: StoredIdentity): string {
-  if (identity.version === 1) return identity.private_key_pem
+function seal(secret: string): string {
+  return safeStorage.encryptString(secret).toString('base64')
+}
+
+function unseal(sealed: string): string {
   try {
-    return safeStorage.decryptString(Buffer.from(identity.private_key_sealed, 'base64'))
+    return safeStorage.decryptString(Buffer.from(sealed, 'base64'))
   } catch (error) {
     throw new Error('Could not unlock the device key. Allow Jaz access to your system keychain, then restart Jaz.', { cause: error })
   }
 }
 
-let signingKey: { identity: DeviceIdentity; key: KeyObject } | undefined
+let signingKey: { identity: DeviceIdentity; sign: Sign } | undefined
 
 function deviceSigner() {
   if (!signingKey) {
     const identity = storedIdentity()
-    const pem = privateKeyPem(identity)
-    if (!keyPairMatches(identity.public_key_pem, pem)) {
-      throw new Error('Device identity keys do not match')
-    }
-    signingKey = { identity: { device_id: identity.device_id, public_key: identity.public_key }, key: createPrivateKey(pem) }
+    const sign = identity.version === 3 ? enclaveSigner(deviceKeyHelper(), unseal(identity.key_handle_sealed)) : ed25519Signer(identity)
+    signingKey = { identity: { device_id: identity.device_id, public_key: identity.public_key }, sign }
   }
-  const { identity, key } = signingKey
-  return { identity, sign: async (input: Uint8Array) => new Uint8Array(sign(null, input, key)) }
+  return signingKey
+}
+
+function ed25519Signer(identity: Ed25519Identity): Sign {
+  const pem = identity.version === 1 ? identity.private_key_pem : unseal(identity.private_key_sealed)
+  if (!keyPairMatches(identity.public_key_pem, pem)) {
+    throw new Error('Device identity keys do not match')
+  }
+  const key = createPrivateKey(pem)
+  return async (input) => new Uint8Array(sign(null, input, key))
 }
 
 // Proofs and assertions are built here so the renderer never gets a general
@@ -112,15 +126,16 @@ function readStoredIdentity(): StoredIdentity | null {
   try {
     const identity = JSON.parse(contents) as StoredIdentity
     if (
-      typeof identity.public_key_pem !== 'string' ||
-      !(identity.version === 1 && typeof identity.private_key_pem === 'string') &&
-      !(identity.version === 2 && typeof identity.private_key_sealed === 'string')
+      !(identity.version === 1 && typeof identity.public_key_pem === 'string' && typeof identity.private_key_pem === 'string') &&
+      !(identity.version === 2 && typeof identity.public_key_pem === 'string' && typeof identity.private_key_sealed === 'string') &&
+      !(identity.version === 3 && typeof identity.public_key === 'string' && typeof identity.key_handle_sealed === 'string')
     ) {
       throw new Error('Invalid device identity format')
     }
-    const raw = rawPublicKey(identity.public_key_pem)
+    const raw = identity.version === 3 ? Buffer.from(identity.public_key, 'base64url') : rawPublicKey(identity.public_key_pem)
     // A sealed private key is checked against the public one when it is unsealed.
     if (identity.device_id !== deviceIDForRawKey(raw) || identity.public_key !== base64Url(raw) ||
+      (identity.version === 3 && raw.length !== 65) ||
       (identity.version === 1 && !keyPairMatches(identity.public_key_pem, identity.private_key_pem))) {
       throw new Error('Device identity keys do not match')
     }
@@ -130,7 +145,38 @@ function readStoredIdentity(): StoredIdentity | null {
   }
 }
 
-function createIdentity(): Extract<StoredIdentity, { version: 1 }> {
+// A Mac with the device-key helper keeps a new key in the Secure Enclave;
+// elsewhere, or if the enclave refuses, the key is Ed25519 sealed by the keychain.
+function createIdentity(): StoredIdentity {
+  const enclave = keychainAvailable() && existsSync(deviceKeyHelper()) ? createEnclaveIdentity() : null
+  if (enclave) return enclave
+  const plain = createEd25519Identity()
+  return keychainAvailable() ? sealIdentity(plain) : plain
+}
+
+function createEnclaveIdentity(): StoredIdentity | null {
+  try {
+    const { handle, publicKey } = createEnclaveKey(deviceKeyHelper())
+    return {
+      version: 3,
+      device_id: deviceIDForRawKey(publicKey),
+      public_key: base64Url(publicKey),
+      key_handle_sealed: seal(handle),
+      created_at_ms: Date.now(),
+    }
+  } catch (error) {
+    console.warn('Secure Enclave device key unavailable, using a keychain-sealed key', error)
+    return null
+  }
+}
+
+function deviceKeyHelper(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'bin/jaz-device-key')
+    : join(app.getAppPath(), 'resources/bin/jaz-device-key')
+}
+
+function createEd25519Identity(): Extract<StoredIdentity, { version: 1 }> {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519')
   const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' })
   const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' })

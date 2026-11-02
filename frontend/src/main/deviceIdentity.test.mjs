@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { build } from 'bun'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { resolve, join } from 'node:path'
 
@@ -28,7 +28,7 @@ function keychain() {
 
 function fixture(root = mkdtempSync(resolve('../runs/identity-regressions/case-')), safeStorage = keychain()) {
   const module = { exports: {} }
-  evaluate((name) => name === 'electron' ? { app: { getPath: () => root }, safeStorage } : require(name), module, module.exports)
+  evaluate((name) => name === 'electron' ? { app: { getPath: () => root, getAppPath: () => root, isPackaged: false }, safeStorage } : require(name), module, module.exports)
   return { root, safeStorage, get: module.exports.getDeviceIdentity, proof: module.exports.deviceProof, file: join(root, 'device-identity.json') }
 }
 
@@ -96,4 +96,42 @@ test('existing unreadable identity path is not treated as first install', () => 
   const f = fixture()
   mkdirSync(f.file)
   expect(f.get).toThrow('Could not read the existing device identity')
+})
+
+// Stands in for native/device-key: the same line protocol, with a software
+// P-256 key whose PKCS#8 bytes play the enclave handle.
+const FAKE_DEVICE_KEY = `#!${process.execPath}
+const { createPrivateKey, generateKeyPairSync, sign } = require('node:crypto')
+const { createInterface } = require('node:readline')
+if (process.argv[2] === 'create') {
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+  const jwk = publicKey.export({ format: 'jwk' })
+  const raw = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')])
+  console.log(JSON.stringify({ handle: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'), public_key: raw.toString('base64') }))
+} else {
+  let key
+  createInterface({ input: process.stdin }).on('line', (line) => {
+    if (!key) key = createPrivateKey({ key: Buffer.from(line, 'base64'), format: 'der', type: 'pkcs8' })
+    else console.log(sign('sha256', Buffer.from(line, 'base64'), { key, dsaEncoding: 'ieee-p1363' }).toString('base64'))
+  })
+}
+`
+
+test('a Mac with the device-key helper keeps the key in the Secure Enclave and signs ES256 proofs', async () => {
+  const f = fixture()
+  mkdirSync(join(f.root, 'resources/bin'), { recursive: true })
+  writeFileSync(join(f.root, 'resources/bin/jaz-device-key'), FAKE_DEVICE_KEY)
+  chmodSync(join(f.root, 'resources/bin/jaz-device-key'), 0o755)
+  const { public_key } = f.get()
+  const stored = JSON.parse(readFileSync(f.file, 'utf8'))
+  expect(stored.version).toBe(3)
+  expect(Buffer.from(public_key, 'base64url')).toHaveLength(65)
+  expect(Buffer.from(stored.key_handle_sealed, 'base64').toString()).toStartWith('sealed:')
+  const key = await crypto.subtle.importKey('raw', Buffer.from(public_key, 'base64url'), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
+  for (const proof of await Promise.all([1, 2, 3].map(() => f.proof('GET', 'https://jaz.example/v1/sessions', 'jaz_token')))) {
+    const [header, claims, signature] = proof.split('.')
+    expect(JSON.parse(Buffer.from(header, 'base64url').toString()).alg).toBe('ES256')
+    expect(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, Buffer.from(signature, 'base64url'), new TextEncoder().encode(header + '.' + claims))).toBeTrue()
+  }
+  expect(fixture(f.root, f.safeStorage).get()).toEqual(f.get())
 })
