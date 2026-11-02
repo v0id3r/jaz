@@ -398,6 +398,38 @@ func TestCompactTranscriptKeepsTaskSurfaceBetweenOneTextRun(t *testing.T) {
 	}
 }
 
+func TestOverviewEventsDoNotSplitTextRun(t *testing.T) {
+	events := []Event{
+		compactACPTextRun(1, TypeACPMessage, "- в", "message:m1", compactACPState("thread", "running")),
+		{Seq: 2, SessionID: "thread", Type: TypeAgentTask, AgentTask: &AgentTask{ID: "task"}, At: compactAt(2)},
+		{Seq: 3, SessionID: "thread", Type: TypeAgentSession, AgentSession: &AgentSession{}, At: compactAt(3)},
+		compactACPTextRun(4, TypeACPMessage, " «About Jaz»", "message:m1", compactACPState("thread", "running")),
+	}
+
+	annotator := Annotator{}
+	keys := map[string]bool{}
+	for _, event := range events {
+		if event = annotator.Annotate(event); isACPTextEvent(event) {
+			keys[event.ProjectionKey] = true
+		}
+	}
+	if len(keys) != 1 {
+		t.Fatalf("text run got %d projection keys", len(keys))
+	}
+	var texts []string
+	for _, event := range CompactTranscript(events) {
+		if isACPTextEvent(event) {
+			texts = append(texts, event.Content)
+		}
+	}
+	if len(texts) != 1 || texts[0] != "- в «About Jaz»" {
+		t.Fatalf("texts = %q", texts)
+	}
+	if segments := CompactTextSegments(events, 0); len(segments) != 1 {
+		t.Fatalf("segments = %#v", segments)
+	}
+}
+
 func TestCompactTranscriptDoesNotMergeAcrossSessions(t *testing.T) {
 	other := compactACP(2, "acp_message", "two", compactACPState("thread", "running"))
 	other.SessionID = "other"
