@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState } from 'react'
 import { File as FileIcon, Image as ImageIcon, LoaderCircle } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
+import { apiMediaCrossOrigin } from '@/lib/api/client'
 import { sessionAttachmentUrl } from '@/lib/api/sessions'
 import { usePinnedUrl } from '@/lib/hooks/usePinnedUrl'
 
@@ -66,9 +67,7 @@ export function AttachmentTile({
   const remoteUrl = attachment.uri && !attachment.uri.startsWith('file:') ? attachment.uri : ''
   const apiUrl = !objectUrl && !remoteUrl && attachmentSessionId && attachment.id ? sessionAttachmentUrl(attachmentSessionId, attachment.id) : ''
   const [src, retry] = usePinnedUrl(objectUrl || remoteUrl || apiUrl)
-  // The desktop renderer (app://jaz) is another origin than the API, and an auth
-  // proxy in between may only admit cross-origin media that announces its Origin.
-  const crossOrigin = apiUrl ? 'anonymous' : undefined
+  const crossOrigin = apiMediaCrossOrigin(src)
   const available = isImage && Boolean(src) && src !== failedSrc
   const fail = () => {
     if (!retry()) setFailedSrc(src)

@@ -420,6 +420,12 @@ export function withCurrentTicket(url: string): string {
   return replaceTicket(url, resourceTickets.get(baseUrl)?.token ?? '')
 }
 
+// The desktop renderer (app://jaz) is another origin than the API, and an auth
+// proxy in between may only admit cross-origin media that announces its Origin.
+export function apiMediaCrossOrigin(url: string): 'anonymous' | undefined {
+  return URL.canParse(url) && new URL(url).origin === baseUrl ? 'anonymous' : undefined
+}
+
 function replaceTicket(url: string, token: string): string {
   if (!URL.canParse(url) || !new URL(url).searchParams.has('ticket')) return url
   const parsed = new URL(url)

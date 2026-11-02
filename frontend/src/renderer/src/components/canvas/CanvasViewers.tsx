@@ -9,6 +9,7 @@ import { extension, fileName, viewerFor } from './board'
 import { useCanvas } from './canvasContext'
 import { FitContent } from '@/components/canvas/FitContent'
 import { rawUrl, ViewerFrame } from './ViewerFrame'
+import { apiMediaCrossOrigin } from '@/lib/api/client'
 import { usePinnedUrl } from '@/lib/hooks/usePinnedUrl'
 
 const CadViewer = lazy(() => import('./CadViewer'))
@@ -27,7 +28,7 @@ export function FileViewer({ id, file }: { id: string; file: CanvasFile }) {
     case 'image':
       return (
         <ViewerFrame id={id}>
-          <img className="canvas-image" src={src} alt={fileName(file.path)} draggable={false} onError={retry} />
+          <img className="canvas-image" src={src} crossOrigin={apiMediaCrossOrigin(src)} alt={fileName(file.path)} draggable={false} onError={retry} />
         </ViewerFrame>
       )
     case 'pdf':

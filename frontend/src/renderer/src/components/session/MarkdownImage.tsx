@@ -1,6 +1,7 @@
 import { ImageOff } from 'lucide-react'
 import { createContext, useContext, useState, type ComponentProps } from 'react'
 import { Modal } from '@/components/ui/Modal'
+import { apiMediaCrossOrigin } from '@/lib/api/client'
 import { usePinnedUrl } from '@/lib/hooks/usePinnedUrl'
 
 export const MarkdownImageLinkContext = createContext(false)
@@ -8,6 +9,7 @@ export const MarkdownImageLinkContext = createContext(false)
 export function MarkdownImage({ src: url = '', alt = '', title }: ComponentProps<'img'>) {
   const linked = useContext(MarkdownImageLinkContext)
   const [src, retry] = usePinnedUrl(url)
+  const crossOrigin = apiMediaCrossOrigin(src)
   const [failedSource, setFailedSource] = useState('')
   const [open, setOpen] = useState(false)
   if (!src || src === failedSource) {
@@ -21,6 +23,7 @@ export function MarkdownImage({ src: url = '', alt = '', title }: ComponentProps
   const image = (
     <img
       src={src}
+      crossOrigin={crossOrigin}
       alt={alt}
       title={title}
       loading="lazy"
@@ -48,6 +51,7 @@ export function MarkdownImage({ src: url = '', alt = '', title }: ComponentProps
           <div className="grid min-h-0 place-items-center bg-bg p-3 sm:p-4">
             <img
               src={src}
+              crossOrigin={crossOrigin}
               alt={alt}
               referrerPolicy="no-referrer"
               className="max-h-[calc(100dvh-7rem)] max-w-full rounded-[8px] object-contain"

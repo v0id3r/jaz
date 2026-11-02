@@ -181,6 +181,7 @@ test.each([
     expect(url.searchParams.get('ticket')).toBe('test-image-ticket')
     expect(html).toContain('Expand image: Chart')
     expect(html).toContain('referrerPolicy="no-referrer"')
+    expect(html).toContain('crossorigin="anonymous"')
   }
 })
 
@@ -216,6 +217,7 @@ test('protocol-relative images remain web URLs in the packaged desktop app', asy
   const source = html.match(/<img[^>]+src="([^"]+)"/)[1]
   const desktopURL = new URL(source, 'file:///Applications/Jaz.app/Contents/renderer/index.html')
   expect(desktopURL.href).toBe('https://images.example/chart.png')
+  expect(html).not.toContain('crossorigin')
 })
 
 test('the Markdown pipeline rejects unsupported image schemes and unsafe links', async () => {
