@@ -189,9 +189,14 @@ func TestRecordAndPublishCarriesStreamSeqOfToolUpdates(t *testing.T) {
 	}
 
 	started := publish("pending")
+	time.Sleep(10 * time.Millisecond)
 	completed := publish("completed")
 	if completed.Seq != started.Seq || completed.StreamSeq <= started.StreamSeq {
 		t.Fatalf("update published as seq %d stream_seq %d after seq %d stream_seq %d", completed.Seq, completed.StreamSeq, started.Seq, started.StreamSeq)
+	}
+	// Live readers interleave messages by time, so the update keeps the start time.
+	if completed.At.UnixMilli() != started.At.UnixMilli() {
+		t.Fatalf("update published at %v, started at %v", completed.At, started.At)
 	}
 }
 
