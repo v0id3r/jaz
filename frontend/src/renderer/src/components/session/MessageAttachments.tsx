@@ -2,6 +2,7 @@ import { useLayoutEffect, useState } from 'react'
 import { File as FileIcon, Image as ImageIcon, LoaderCircle } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { sessionAttachmentUrl } from '@/lib/api/sessions'
+import { usePinnedUrl } from '@/lib/hooks/usePinnedUrl'
 
 const IMAGE_MIME_TYPES = new Set([
   'image/avif',
@@ -63,14 +64,14 @@ export function AttachmentTile({
   const isImage = isImageAttachment(attachment)
   const objectUrl = useObjectUrl(isImage ? attachment.file : undefined)
   const remoteUrl = attachment.uri && !attachment.uri.startsWith('file:') ? attachment.uri : ''
-  const [apiUrl, retryApiUrl] = useAttachmentUrl(remoteUrl ? '' : attachmentSessionId, attachment.id)
-  const src = objectUrl || remoteUrl || apiUrl
+  const apiUrl = !objectUrl && !remoteUrl && attachmentSessionId && attachment.id ? sessionAttachmentUrl(attachmentSessionId, attachment.id) : ''
+  const [src, retry] = usePinnedUrl(objectUrl || remoteUrl || apiUrl)
   // The desktop renderer (app://jaz) is another origin than the API, and an auth
   // proxy in between may only admit cross-origin media that announces its Origin.
-  const crossOrigin = apiUrl && src === apiUrl ? 'anonymous' : undefined
+  const crossOrigin = apiUrl ? 'anonymous' : undefined
   const available = isImage && Boolean(src) && src !== failedSrc
   const fail = () => {
-    if (src !== apiUrl || !retryApiUrl()) setFailedSrc(src)
+    if (!retry()) setFailedSrc(src)
   }
   const status = attachmentStatus(attachment)
   if (!available && variant === 'message') {
@@ -125,27 +126,6 @@ export function AttachmentTile({
       ) : null}
     </>
   )
-}
-
-// API URLs carry a short-lived ticket that rotates every few seconds. Keep the
-// URL an image loaded from so rerenders do not refetch it, and take a fresh
-// ticket only to retry a failed load once.
-function useAttachmentUrl(sessionId = '', attachmentId = ''): [string, () => boolean] {
-  const key = sessionId && attachmentId ? `${sessionId}/${attachmentId}` : ''
-  const build = () => (key ? sessionAttachmentUrl(sessionId, attachmentId) : '')
-  const [pinned, setPinned] = useState(() => ({ key, url: build(), retried: false }))
-  let current = pinned
-  if (pinned.key !== key) {
-    current = { key, url: build(), retried: false }
-    setPinned(current)
-  }
-  const retry = () => {
-    const url = build()
-    if (current.retried || url === current.url) return false
-    setPinned({ key, url, retried: true })
-    return true
-  }
-  return [current.url, retry]
 }
 
 function useObjectUrl(file?: File): string {

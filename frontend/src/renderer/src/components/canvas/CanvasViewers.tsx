@@ -9,6 +9,7 @@ import { extension, fileName, viewerFor } from './board'
 import { useCanvas } from './canvasContext'
 import { FitContent } from '@/components/canvas/FitContent'
 import { rawUrl, ViewerFrame } from './ViewerFrame'
+import { usePinnedUrl } from '@/lib/hooks/usePinnedUrl'
 
 const CadViewer = lazy(() => import('./CadViewer'))
 const DxfViewer = lazy(() => import('./DxfViewer'))
@@ -16,6 +17,7 @@ const DxfViewer = lazy(() => import('./DxfViewer'))
 export function FileViewer({ id, file }: { id: string; file: CanvasFile }) {
   const { sessionId, view, focused: focusedId } = useCanvas()
   const focused = focusedId === id
+  const [src, retry] = usePinnedUrl(rawUrl(sessionId, file))
   if (!file.version) {
     return <ViewerFrame id={id}><div className="canvas-viewer-empty">File missing</div></ViewerFrame>
   }
@@ -25,25 +27,25 @@ export function FileViewer({ id, file }: { id: string; file: CanvasFile }) {
     case 'image':
       return (
         <ViewerFrame id={id}>
-          <img className="canvas-image" src={rawUrl(sessionId, file)} alt={fileName(file.path)} draggable={false} />
+          <img className="canvas-image" src={src} alt={fileName(file.path)} draggable={false} onError={retry} />
         </ViewerFrame>
       )
     case 'pdf':
       return (
         <ViewerFrame id={id} focusable paper>
-          <iframe className="canvas-frame" title={fileName(file.path)} src={`${rawUrl(sessionId, file)}#${focused ? 'view=FitH' : 'toolbar=0&view=FitH'}`} />
+          <iframe className="canvas-frame" title={fileName(file.path)} src={`${src}#${focused ? 'view=FitH' : 'toolbar=0&view=FitH'}`} />
         </ViewerFrame>
       )
     case 'cad':
       return (
         <Suspense fallback={<ViewerFrame id={id} focusable><div className="canvas-viewer-empty">Opening…</div></ViewerFrame>}>
-          <CadViewer id={id} src={rawUrl(sessionId, file)} kind={extension(file.path)} focused={focused} />
+          <CadViewer id={id} src={src} kind={extension(file.path)} focused={focused} />
         </Suspense>
       )
     case 'dxf':
       return (
         <Suspense fallback={<ViewerFrame id={id} focusable paper><div className="canvas-viewer-empty">Opening…</div></ViewerFrame>}>
-          <DxfViewer id={id} src={rawUrl(sessionId, file)} />
+          <DxfViewer id={id} src={src} />
         </Suspense>
       )
     case 'markdown':

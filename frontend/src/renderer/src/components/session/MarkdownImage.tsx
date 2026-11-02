@@ -1,11 +1,13 @@
 import { ImageOff } from 'lucide-react'
 import { createContext, useContext, useState, type ComponentProps } from 'react'
 import { Modal } from '@/components/ui/Modal'
+import { usePinnedUrl } from '@/lib/hooks/usePinnedUrl'
 
 export const MarkdownImageLinkContext = createContext(false)
 
-export function MarkdownImage({ src, alt = '', title }: ComponentProps<'img'>) {
+export function MarkdownImage({ src: url = '', alt = '', title }: ComponentProps<'img'>) {
   const linked = useContext(MarkdownImageLinkContext)
+  const [src, retry] = usePinnedUrl(url)
   const [failedSource, setFailedSource] = useState('')
   const [open, setOpen] = useState(false)
   if (!src || src === failedSource) {
@@ -24,7 +26,7 @@ export function MarkdownImage({ src, alt = '', title }: ComponentProps<'img'>) {
       loading="lazy"
       decoding="async"
       referrerPolicy="no-referrer"
-      onError={() => setFailedSource(src)}
+      onError={() => retry() || setFailedSource(src)}
       className="block h-auto max-h-[32rem] max-w-full rounded-[8px] object-contain outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10"
     />
   )

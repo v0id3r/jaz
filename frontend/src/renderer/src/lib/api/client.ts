@@ -13,6 +13,7 @@ const authTokens = new Map<string, string>()
 // request presents a short-lived access token it obtains.
 const keyCredentials = new Set<string>()
 const resourceTickets = new Map<string, ResourceTicket>()
+let ticketRenewal: ReturnType<typeof setTimeout> | undefined
 let credentialRevision = 0
 const sessionListeners = new Set<() => void>()
 let sessionRequests = new AbortController()
@@ -237,6 +238,7 @@ export function clearApiSession(): void {
   authTokens.clear()
   keyCredentials.clear()
   resourceTickets.clear()
+  clearTimeout(ticketRenewal)
   notifySessionChange()
 }
 
@@ -379,11 +381,54 @@ function assertBackendRelativePath(path: string, helper: string): void {
 }
 
 export function setResourceTicket(url: string, ticket?: { token: string; expires_at: string }): void {
+  const key = normalizeBaseUrl(url)
   if (ticket) {
-    resourceTickets.set(normalizeBaseUrl(url), ticket)
+    resourceTickets.set(key, ticket)
   } else {
-    resourceTickets.delete(normalizeBaseUrl(url))
+    resourceTickets.delete(key)
   }
+  if (key !== baseUrl) return
+  clearTimeout(ticketRenewal)
+  if (ticket) {
+    const halfLife = (Date.parse(ticket.expires_at) - Date.now()) / 2 || 0
+    ticketRenewal = setTimeout(() => void renewResourceTicket(key), Math.min(30_000, Math.max(5_000, halfLife)))
+  }
+}
+
+// Tickets live about a minute. Every window renews its own at half life, so
+// embedded media never waits on an event stream or the main window's poll.
+async function renewResourceTicket(url: string): Promise<void> {
+  const revision = credentialRevision
+  const auth = await apiFetch('/v1/auth/check', undefined, url)
+    .then((response) => response.ok ? response.json() as Promise<{ resource_ticket?: ResourceTicket }> : null)
+    .catch(() => null)
+  if (revision !== credentialRevision || url !== baseUrl) return
+  if (auth) {
+    setResourceTicket(url, auth.resource_ticket)
+  } else {
+    ticketRenewal = setTimeout(() => void renewResourceTicket(url), 5_000)
+  }
+}
+
+// The ticket is the only part of an embedded URL that changes while the
+// resource stays the same.
+export function embeddedUrlKey(url: string): string {
+  return replaceTicket(url, '')
+}
+
+export function withCurrentTicket(url: string): string {
+  return replaceTicket(url, resourceTickets.get(baseUrl)?.token ?? '')
+}
+
+function replaceTicket(url: string, token: string): string {
+  if (!URL.canParse(url) || !new URL(url).searchParams.has('ticket')) return url
+  const parsed = new URL(url)
+  if (token) {
+    parsed.searchParams.set('ticket', token)
+  } else {
+    parsed.searchParams.delete('ticket')
+  }
+  return parsed.toString()
 }
 
 function defaultConnectionScheme(value: string): string {

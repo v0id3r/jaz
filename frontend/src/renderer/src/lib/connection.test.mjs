@@ -433,19 +433,23 @@ test('a late same-origin candidate cannot replace the verified token or ticket',
   expect(stored.has('jaz.backendAuth.https://jaz.example')).toBe(false)
 })
 
-test('the connection poll keeps the resource ticket fresh', async () => {
+test('a connected window renews its resource ticket on its own', async () => {
   let ticket = 'first-ticket'
   const { connection, timers } = await fixture({
     auth: () => Response.json({ ok: true, auth_kind: 'device', device_id: 'identity', resource_ticket: { token: ticket, expires_at: '2099-01-01T00:00:00Z' } }),
   })
   await connection.connectRemote('https://jaz.example#key=jaz_token')
-  expect(connection.apiEmbeddedGetUrl('/fixture/file')).toContain('first-ticket')
+  const pinned = connection.apiEmbeddedGetUrl('/fixture/file')
+  expect(pinned).toContain('first-ticket')
   ticket = 'next-ticket'
-  const [id, poll] = [...timers.entries()].find(([, timer]) => timer.delay === 5_000)
+  const [id, renewal] = [...timers.entries()].find(([, timer]) => timer.delay === 30_000)
   timers.delete(id)
-  await poll.callback()
+  await renewal.callback()
   await settle()
   expect(connection.apiEmbeddedGetUrl('/fixture/file')).toContain('next-ticket')
+  expect(connection.withCurrentTicket(pinned)).toBe(connection.apiEmbeddedGetUrl('/fixture/file'))
+  expect(connection.embeddedUrlKey(pinned)).toBe('https://jaz.example/fixture/file')
+  expect(connection.withCurrentTicket('https://example.com/a.png')).toBe('https://example.com/a.png')
 })
 
 test('explicit remember failure preserves the verified session and prior ciphertext', async () => {

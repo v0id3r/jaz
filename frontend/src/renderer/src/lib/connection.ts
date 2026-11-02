@@ -3,7 +3,7 @@ import {
   apiBaseUrl, cachedApiAuthToken, clearApiSession, CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER,
   consumeStartupConnectUrl, isLocalBackendUrl, localBaseUrl, normalizeBaseUrl,
   parseBackendConnectUrl, rememberApiAuthToken, restoreApiAuthToken, secureBackendConnection,
-  setApiAuthToken, setApiBaseUrl, onApiAuthRejected, forgetApiAuthToken, apiUsesDeviceKey, setResourceTicket,
+  setApiAuthToken, setApiBaseUrl, onApiAuthRejected, forgetApiAuthToken, apiUsesDeviceKey,
 } from '@/lib/api/client'
 import { rememberBackend, removeKnownBackend } from '@/lib/backends'
 import { clientRuntime } from '@/lib/clientRuntime'
@@ -216,7 +216,6 @@ function schedulePoll(value: Attempt, candidate: Candidate): void {
       }
       setState({ status: 'reconnecting', error: access.error })
     } else {
-      if ('kind' in access) setResourceTicket(value.url, access.ticket)
       setState({ status: 'connected', error: null })
     }
     schedulePoll(value, candidate)
