@@ -8,6 +8,7 @@ import { taskSurfaceFromEvent } from '@/lib/taskSurface'
 import {
   buildTimeline,
   classifyTurnItems,
+  itemEnd,
   stableEventKey,
   type TimelineItem,
 } from './timeline'
@@ -269,7 +270,7 @@ export const Transcript = memo(function Transcript({
           )
           if (workItems.length) {
             const durationMs =
-              workItems[workItems.length - 1].at - (turn.opener?.at ?? workItems[0].at)
+              Math.max(...workItems.map(itemEnd)) - (turn.opener?.at ?? workItems[0].at)
             sections.push(
               <WorkSection
                 key="work"
