@@ -27,6 +27,7 @@ import (
 	slackconnector "github.com/wins/jaz/backend/internal/connectors/slack"
 	"github.com/wins/jaz/backend/internal/coordinator"
 	"github.com/wins/jaz/backend/internal/deviceauth"
+	"github.com/wins/jaz/backend/internal/gitjail"
 	botsapi "github.com/wins/jaz/backend/internal/httpapi/bots"
 	hooksapi "github.com/wins/jaz/backend/internal/httpapi/hooks"
 	"github.com/wins/jaz/backend/internal/integrationingest"
@@ -442,6 +443,7 @@ func startServer(
 			if api := cfg.Identity.Mesh.WorkloadAPI; api != "" {
 				listener = meshListener(ctx, api, listener, srv.Handler, logger, lc)
 			}
+			logger.WithPrefix("git").Info("git runs jailed", "landlock_abi", gitjail.ABI())
 			go func() {
 				if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 					fmt.Fprintln(os.Stderr, "serve:", err)

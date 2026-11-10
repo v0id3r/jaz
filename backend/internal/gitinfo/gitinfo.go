@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/wins/jaz/backend/internal/gitjail"
 )
 
 // Info is the JSON shape served to the frontend; the zero value means "not a
@@ -283,8 +285,44 @@ func Push(ctx context.Context, dir string) error {
 		name, _, _ := strings.Cut(names, "\n")
 		remote = strings.TrimSpace(name)
 	}
-	_, err := git(ctx, dir, "push", "-u", remote, "HEAD")
+	url, err := git(ctx, dir, "remote", "get-url", remote)
+	if err != nil {
+		return err
+	}
+	access, err := pushAccess(dir, url)
+	if err != nil {
+		return err
+	}
+	_, err = gitIn(ctx, dir, access, nil, "push", "-u", remote, "HEAD")
 	return err
+}
+
+// pushAccess is what a push to url takes: the network, or for a repository
+// on this machine, writing it through git's shell-run receive-pack. Only a
+// bare repository qualifies, so the repository's own config cannot point the
+// push at an arbitrary directory.
+func pushAccess(dir, url string) (gitjail.Policy, error) {
+	path, local := strings.CutPrefix(url, "file://")
+	if !local {
+		host, _, _ := strings.Cut(url, "/")
+		local = !strings.Contains(url, "://") && !strings.Contains(host, ":")
+	}
+	if !local {
+		return gitjail.Policy{Network: true}, nil
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	path, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return gitjail.Policy{}, err
+	}
+	head, headErr := os.Stat(filepath.Join(path, "HEAD"))
+	objects, objectsErr := os.Stat(filepath.Join(path, "objects"))
+	if headErr != nil || objectsErr != nil || !head.Mode().IsRegular() || !objects.IsDir() {
+		return gitjail.Policy{}, fmt.Errorf("push to %s: only bare repositories on this machine are supported", url)
+	}
+	return gitjail.Policy{Writable: []string{path}, Shell: true}, nil
 }
 
 func BranchExists(ctx context.Context, dir, branch string) bool {
@@ -324,7 +362,8 @@ func RemoveManagedWorktree(ctx context.Context, dir, branch, message string) err
 	if err := snapshotAll(ctx, dir, message); err != nil {
 		return err
 	}
-	if _, err := git(ctx, root, "worktree", "remove", "--force", dir); err != nil {
+	// Removing the worktree directory itself takes write access to its parent.
+	if _, err := gitIn(ctx, root, gitjail.Policy{Writable: []string{dir, filepath.Dir(dir)}}, nil, "worktree", "remove", "--force", dir); err != nil {
 		return fmt.Errorf("remove worktree: %w", err)
 	}
 	_, _ = git(ctx, root, "worktree", "prune")
@@ -348,7 +387,7 @@ func RestoreManagedWorktree(ctx context.Context, repo, worktree, branch string) 
 		return err
 	}
 	_, _ = git(ctx, root, "worktree", "prune")
-	if _, err := git(ctx, root, "worktree", "add", worktree, branch); err != nil {
+	if err := addWorktree(ctx, root, worktree, "worktree", "add", worktree, branch); err != nil {
 		return fmt.Errorf("restore worktree: %w", err)
 	}
 	return nil
@@ -446,10 +485,23 @@ func AddWorktree(ctx context.Context, workspace, dir, slug, baseRef string) (str
 	if baseRef = strings.TrimSpace(baseRef); baseRef != "" {
 		args = append(args, baseRef)
 	}
-	if _, err := git(ctx, repo, args...); err != nil {
+	if err := addWorktree(ctx, repo, worktree, args...); err != nil {
 		return "", "", fmt.Errorf("create worktree: %w", err)
 	}
 	return worktree, projectPath, nil
+}
+
+// addWorktree runs `git worktree add` into a directory Jaz creates, so jailed
+// git writes only that directory besides the repository.
+func addWorktree(ctx context.Context, repo, worktree string, args ...string) error {
+	if err := os.Mkdir(worktree, 0o755); err != nil {
+		return err
+	}
+	_, err := gitIn(ctx, repo, gitjail.Policy{Writable: []string{worktree}}, nil, args...)
+	if err != nil {
+		_ = os.Remove(worktree)
+	}
+	return err
 }
 
 // ListFiles returns the repository's non-ignored files under dir (tracked
@@ -483,9 +535,33 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 func gitWithOptions(ctx context.Context, dir string, options []string, args ...string) (string, error) {
-	gitArgs := append([]string{"-C", dir}, options...)
-	gitArgs = append(gitArgs, args...)
-	cmd := exec.CommandContext(ctx, "git", gitArgs...)
+	return gitIn(ctx, dir, gitjail.Policy{}, options, args...)
+}
+
+// command runs git in dir under gitjail, with extra granting what the
+// command needs beyond dir's repository. Repository settings that would run
+// commands are switched off where Jaz can do without them, so jailed git does
+// not fail on them.
+func command(ctx context.Context, dir string, extra gitjail.Policy, options []string, args ...string) (*exec.Cmd, error) {
+	policy, err := gitjail.ForRepo(dir)
+	if err != nil {
+		return nil, err
+	}
+	policy.Writable = append(policy.Writable, extra.Writable...)
+	policy.Network, policy.Shell = extra.Network, extra.Shell
+	gitArgs := []string{"-C", dir, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"}
+	gitArgs = append(gitArgs, options...)
+	if len(args) > 0 && args[0] == "diff" {
+		args = append([]string{"diff", "--no-ext-diff", "--no-textconv"}, args[1:]...)
+	}
+	return gitjail.Command(ctx, policy, append(gitArgs, args...)...)
+}
+
+func gitIn(ctx context.Context, dir string, extra gitjail.Policy, options []string, args ...string) (string, error) {
+	cmd, err := command(ctx, dir, extra, options, args...)
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w", args[0], err)
+	}
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
