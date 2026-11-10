@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,8 @@ import (
 
 	"github.com/charmbracelet/log"
 	"github.com/creack/pty"
+
+	"github.com/wins/jaz/backend/internal/mesh"
 )
 
 // ServeRunner is `jaz runner`: it accepts process launches from Jaz on a unix
@@ -45,6 +48,23 @@ func ServeRunner(args []string) int {
 		}
 		defer r.identities.conn.Close()
 		r.identities.removeStale()
+	}
+	if cfg.Mesh.Enabled() {
+		if r.mesh, err = mesh.NewOutbound(cfg.Mesh, logger); err != nil {
+			logger.Error("mesh", "error", err)
+			return 1
+		}
+		binary, err := os.Executable()
+		if err == nil {
+			var stopHooks func()
+			if stopHooks, err = r.mesh.Start(binary); err == nil {
+				defer stopHooks()
+			}
+		}
+		if err != nil {
+			logger.Error("mesh hooks", "error", err)
+			return 1
+		}
 	}
 	listener, err := r.listen()
 	if err != nil {
@@ -73,6 +93,7 @@ type runner struct {
 	cfg        RunnerConfig
 	log        *log.Logger
 	identities *identities
+	mesh       *mesh.Outbound
 	mu         sync.Mutex
 	active     map[string]struct{}
 }
@@ -128,6 +149,13 @@ func (r *runner) serve(conn net.Conn) {
 		if release, err = r.identities.acquire(context.Background(), req.Session, false); err == nil {
 			defer release()
 		}
+	}
+	if err == nil && req.Session != "" && r.mesh != nil {
+		// podman's createRuntime hook reports the container, and the runner
+		// captures its network before the session's command starts.
+		global, annotations := r.mesh.PodmanArgs(name, req.Session)
+		args = slices.Concat(global, args[:1], annotations, args[1:])
+		defer r.mesh.Expect(name, req.Session)()
 	}
 	var proc *process
 	if err == nil {

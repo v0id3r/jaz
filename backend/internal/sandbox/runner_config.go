@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/wins/jaz/backend/internal/mesh"
 )
 
 // RunnerConfig configures `jaz runner`. ReadOnly, ReadWrite and Writable hold
@@ -36,6 +38,9 @@ type RunnerConfig struct {
 	Args []string
 	// Identity, when set, gives sessions SPIFFE identities from SPIRE.
 	Identity RunnerIdentity
+	// Mesh, when set, tunnels sessions' connections to chosen destinations
+	// over mTLS with their identities.
+	Mesh mesh.Config
 }
 
 type PathMapping struct {
