@@ -28,16 +28,19 @@ func TestSandboxedThreadsStayInTheSandbox(t *testing.T) {
 
 	for _, tc := range []struct {
 		from, target string
+		tunneled     bool
 		allowed      bool
 	}{
-		{"sb", "sb2", true},
-		{"sb", "admin", false},
-		{"sb", "missing", false},
-		{"admin", "sb", true},
-		{"admin", "admin", true},
-		{"", "admin", true},
+		{"sb", "sb2", false, true},
+		{"sb", "admin", false, false},
+		{"sb", "missing", false, false},
+		{"admin", "sb", false, true},
+		{"admin", "admin", false, true},
+		{"", "admin", false, true},
+		{"unknown", "admin", true, false},
+		{"unknown", "sb", true, true},
 	} {
-		if err := m.confine(tc.from, tc.target); (err == nil) != tc.allowed {
+		if err := m.confine(tc.from, tc.target, tc.tunneled); (err == nil) != tc.allowed {
 			t.Errorf("%s -> %s: err %v, allowed %t", tc.from, tc.target, err, tc.allowed)
 		}
 	}
@@ -56,6 +59,7 @@ func TestSandboxedThreadsStayInTheSandbox(t *testing.T) {
 		"worktree": {SpawnRequest{ParentID: "sb", Directory: "/sb/a", Worktree: true}, AgentConfig{}},
 		"home":     {SpawnRequest{ParentID: "sb", Home: "/var/lib/jaz/chats"}, AgentConfig{}},
 		"local":    {SpawnRequest{ParentID: "sb", Directory: "/sb/a"}, AgentConfig{Local: true}},
+		"tunneled": {SpawnRequest{ParentID: "unknown", Tunneled: true}, AgentConfig{}},
 	} {
 		if _, err := m.confineSpawn(tc.req, tc.cfg); err == nil {
 			t.Errorf("%s: a sandboxed thread started a thread outside the sandbox", name)
@@ -64,7 +68,7 @@ func TestSandboxedThreadsStayInTheSandbox(t *testing.T) {
 	if req, err := m.confineSpawn(SpawnRequest{ParentID: "admin", Directory: "/var/lib/jaz/other", Worktree: true}, AgentConfig{Local: true}); err != nil || req.Directory != "/var/lib/jaz/other" {
 		t.Fatalf("a thread outside the sandbox was confined: %v", err)
 	}
-	if !errors.Is(m.confine("sb", "admin"), errConfined) {
+	if !errors.Is(m.confine("sb", "admin", false), errConfined) {
 		t.Fatal("confine error is not errConfined")
 	}
 }

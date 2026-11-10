@@ -38,10 +38,16 @@ func (m *Manager) sandboxedThread(ref string) bool {
 	return ok && cwd != "" && sandbox.Sandboxes(m.cfg.Launcher, cwd)
 }
 
-// confine refuses a sandboxed thread an action on a thread outside the
+// sandboxedCaller reports whether a thread tool call comes from the sandbox:
+// through a session tunnel, or from a thread that runs sandboxed.
+func (m *Manager) sandboxedCaller(from string, tunneled bool) bool {
+	return tunneled || m.sandboxedThread(from)
+}
+
+// confine refuses a sandboxed caller an action on a thread outside the
 // sandbox, or on one it cannot be told is inside.
-func (m *Manager) confine(from, target string) error {
-	if !m.sandboxedThread(from) || m.sandboxedThread(target) {
+func (m *Manager) confine(from, target string, tunneled bool) error {
+	if !m.sandboxedCaller(from, tunneled) || m.sandboxedThread(target) {
 		return nil
 	}
 	return errConfined
@@ -52,7 +58,7 @@ func (m *Manager) confine(from, target string) error {
 // never on an agent that runs in Jaz itself, and never in a worktree, which
 // Jaz would create by running git on the sandbox's repository.
 func (m *Manager) confineSpawn(req SpawnRequest, cfg AgentConfig) (SpawnRequest, error) {
-	if !m.sandboxedThread(req.ParentID) {
+	if !m.sandboxedCaller(req.ParentID, req.Tunneled) {
 		return req, nil
 	}
 	if cfg.Local {

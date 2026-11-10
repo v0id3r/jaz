@@ -33,7 +33,7 @@ func TestInboundSplitsTunnelsFromPlainHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "session="+Session(r.Context())+" header="+r.Header.Get(mcpsession.HeaderName))
+		_, _ = io.WriteString(w, "session="+Session(r.Context())+" header="+r.Header.Get(mcpsession.HeaderName)+" tunnel="+r.Header.Get(mcpsession.TunnelHeader))
 	})
 	plain, err := in.Listen(ln, handler)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestInboundSplitsTunnelsFromPlainHTTP(t *testing.T) {
 	}
 	got, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if string(got) != "session= header=" {
+	if string(got) != "session= header= tunnel=" {
 		t.Fatalf("plain request saw %q", got)
 	}
 
@@ -82,7 +82,7 @@ func TestInboundSplitsTunnelsFromPlainHTTP(t *testing.T) {
 	}
 	got, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !strings.HasPrefix(string(got), "session=s2 header=s2") {
+	if !strings.HasPrefix(string(got), "session=s2 header=s2 tunnel=1") {
 		t.Fatalf("tunnelled request saw %q", got)
 	}
 }

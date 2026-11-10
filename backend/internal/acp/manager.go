@@ -130,6 +130,9 @@ type Manager struct {
 
 type SpawnRequest struct {
 	ParentID string
+	// Tunneled marks a request whose parent reached Jaz through a session
+	// tunnel, so it is sandboxed whatever Jaz knows of the parent.
+	Tunneled bool
 	ACPAgent string
 	Slug     string
 	Title    string

@@ -92,6 +92,7 @@ func (t *MCPTools) Create(ctx context.Context, req *mcp.CallToolRequest, input M
 	parent := mcpsession.SessionID(req)
 	job, err := t.Service.Start(ctx, SpawnRequest{
 		ParentID:        parent,
+		Tunneled:        mcpsession.Tunneled(req),
 		ACPAgent:        input.Agent,
 		Slug:            input.Slug,
 		Title:           input.Title,
@@ -117,12 +118,12 @@ type MCPSendInput struct {
 
 // confiner keeps a sandboxed caller's thread actions in the sandbox.
 type confiner interface {
-	confine(from, target string) error
+	confine(from, target string, tunneled bool) error
 }
 
 func (t *MCPTools) confine(req *mcp.CallToolRequest, target string) error {
 	if c, ok := t.Service.(confiner); ok {
-		return c.confine(mcpsession.SessionID(req), target)
+		return c.confine(mcpsession.SessionID(req), target, mcpsession.Tunneled(req))
 	}
 	return nil
 }
