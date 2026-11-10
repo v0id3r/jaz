@@ -4,11 +4,14 @@ package gitjail
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -191,4 +194,103 @@ func TestNetworkOnlyWhenAllowed(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("jailed git did not connect with Network")
 	}
+}
+
+// The jail stays with git: once jailed commands have run, from many
+// goroutines at once, no thread of this process is confined.
+func TestProcessStaysUnconfined(t *testing.T) {
+	dir := repository(t)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() { jailed(t, dir, Policy{}, "status", "--short") })
+	}
+	wg.Wait()
+	var confined []string
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		confined = confinedThreads(t)
+		if len(confined) == 0 || time.Now().After(deadline) {
+			break
+		}
+	}
+	if len(confined) > 0 {
+		t.Fatalf("threads still confined: %v (pid %d)", confined, os.Getpid())
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, nil, 0o600); err != nil {
+		t.Fatalf("this process lost file access: %v", err)
+	}
+	ln, err := net.Listen("unix", filepath.Join(t.TempDir(), "sock"))
+	if err != nil {
+		t.Fatalf("this process lost unix sockets: %v", err)
+	}
+	ln.Close()
+}
+
+// confinedThreads are this process's threads with more seccomp filters than
+// the process started with; the jail adds one with its Landlock domain.
+func confinedThreads(t *testing.T) []string {
+	t.Helper()
+	tasks, err := os.ReadDir("/proc/self/task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var confined []string
+	for _, task := range tasks {
+		if n := seccompFilters(t, filepath.Join("/proc/self/task", task.Name(), "status")); n > baseFilters {
+			confined = append(confined, fmt.Sprintf("%s: %d filters", task.Name(), n))
+		}
+	}
+	return confined
+}
+
+var baseFilters = func() int {
+	data, _ := os.ReadFile("/proc/self/status")
+	return parseFilters(string(data))
+}()
+
+func seccompFilters(t *testing.T, path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0 // the thread just ended
+	}
+	return parseFilters(string(data))
+}
+
+func parseFilters(status string) int {
+	for line := range strings.Lines(status) {
+		if value, ok := strings.CutPrefix(line, "Seccomp_filters:"); ok {
+			n, _ := strconv.Atoi(strings.TrimSpace(value))
+			return n
+		}
+	}
+	return 0
+}
+
+func BenchmarkGit(b *testing.B) {
+	dir := b.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		b.Fatalf("%v: %s", err, out)
+	}
+	b.Run("plain", func(b *testing.B) {
+		for b.Loop() {
+			if out, err := exec.Command("git", "-C", dir, "status", "--short").CombinedOutput(); err != nil {
+				b.Fatalf("%v: %s", err, out)
+			}
+		}
+	})
+	b.Run("jailed", func(b *testing.B) {
+		policy, err := ForRepo(dir)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for b.Loop() {
+			cmd, err := Command(context.Background(), policy, "-C", dir, "status", "--short")
+			if err != nil {
+				b.Fatal(err)
+			}
+			if out, err := cmd.CombinedOutput(); err != nil {
+				b.Fatalf("%v: %s", err, out)
+			}
+		}
+	})
 }

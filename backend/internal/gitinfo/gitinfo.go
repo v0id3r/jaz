@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -542,7 +541,7 @@ func gitWithOptions(ctx context.Context, dir string, options []string, args ...s
 // command needs beyond dir's repository. Repository settings that would run
 // commands are switched off where Jaz can do without them, so jailed git does
 // not fail on them.
-func command(ctx context.Context, dir string, extra gitjail.Policy, options []string, args ...string) (*exec.Cmd, error) {
+func command(ctx context.Context, dir string, extra gitjail.Policy, options []string, args ...string) (*gitjail.Cmd, error) {
 	policy, err := gitjail.ForRepo(dir)
 	if err != nil {
 		return nil, err

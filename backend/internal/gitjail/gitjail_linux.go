@@ -4,17 +4,16 @@ package gitjail
 
 import (
 	"debug/elf"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"unsafe"
 
-	"github.com/landlock-lsm/go-landlock/landlock"
 	ll "github.com/landlock-lsm/go-landlock/landlock/syscall"
 	"golang.org/x/sys/unix"
 )
@@ -24,7 +23,6 @@ const supported = true
 // hostSystem is what the helper needs to know about git, found once by Jaz
 // before any repository is involved.
 type hostSystem struct {
-	self string
 	// Git is the git binary.
 	Git string `json:"g"`
 	// Exec are the files and directories git may execute: its exec path and
@@ -49,9 +47,6 @@ var systemPaths = []string{
 var system = sync.OnceValues(func() (hostSystem, error) {
 	var sys hostSystem
 	var err error
-	if sys.self, err = executable(os.Executable()); err != nil {
-		return sys, err
-	}
 	if sys.Git, err = executable(exec.LookPath("git")); err != nil {
 		return sys, err
 	}
@@ -126,65 +121,147 @@ func ABI() int {
 	return abi
 }
 
-// The helper runs in a fresh Jaz process: it confines itself and execs git.
-func init() {
-	if len(os.Args) > 3 && os.Args[1] == helperArg && os.Args[3] == "--" {
-		os.Exit(helper(os.Args[2], os.Args[4:]))
-	}
+// start confines a fresh thread and starts git from it, so git inherits the
+// thread's Landlock domain and seccomp filter. The thread stays locked: the
+// runtime ends it with the goroutine instead of reusing it, and threads it
+// would spawn from here come from its clean template thread. The main thread
+// is never confined: the runtime cannot end it and would park it for good.
+func (c *Cmd) start() error {
+	errc := make(chan error, 1)
+	go c.startOnOwnThread(errc)
+	return <-errc
 }
 
-func helper(payload string, args []string) int {
-	var req request
-	err := json.Unmarshal([]byte(payload), &req)
-	if err == nil {
-		err = confine(req)
+func (c *Cmd) startOnOwnThread(errc chan<- error) {
+	runtime.LockOSThread()
+	if unix.Gettid() == unix.Getpid() {
+		// Holding the main thread keeps the retry off it.
+		errc <- c.start()
+		runtime.UnlockOSThread()
+		return
 	}
-	if err == nil {
-		err = syscall.Exec(req.System.Git, append([]string{"git"}, args...), os.Environ())
+	if err := confine(c.policy, c.system); err != nil {
+		errc <- fmt.Errorf("jaz git jail: %w", err)
+		return
 	}
-	fmt.Fprintln(os.Stderr, "jaz git jail:", err)
-	return 126
+	errc <- c.Cmd.Start()
 }
 
 const (
 	accessRead  = ll.AccessFSReadFile | ll.AccessFSReadDir
 	accessWrite = ll.AccessFSWriteFile | ll.AccessFSTruncate | ll.AccessFSRemoveDir | ll.AccessFSRemoveFile |
 		ll.AccessFSMakeDir | ll.AccessFSMakeReg | ll.AccessFSMakeSym | ll.AccessFSRefer
-	accessFile = ll.AccessFSReadFile | ll.AccessFSWriteFile | ll.AccessFSTruncate | ll.AccessFSExecute
+	accessFile = ll.AccessFSReadFile | ll.AccessFSWriteFile | ll.AccessFSTruncate | ll.AccessFSExecute | ll.AccessFSIoctlDev
 )
 
-func confine(req request) error {
-	var rules []landlock.Rule
-	add := func(access landlock.AccessFSSet, paths ...string) {
-		for _, path := range paths {
-			if info, err := os.Stat(path); err == nil && !info.IsDir() {
-				access &= accessFile
-			}
-			rules = append(rules, landlock.PathAccess(access, path).IgnoreIfMissing())
+// handled are the Landlock rights each ABI adds; the jail handles all the
+// kernel knows, so whatever no rule grants is denied.
+func handled(abi int, network bool) ll.RulesetAttr {
+	var attr ll.RulesetAttr
+	if abi < 1 {
+		return attr
+	}
+	attr.HandledAccessFS = ll.AccessFSExecute | ll.AccessFSWriteFile | ll.AccessFSReadFile | ll.AccessFSReadDir |
+		ll.AccessFSRemoveDir | ll.AccessFSRemoveFile | ll.AccessFSMakeChar | ll.AccessFSMakeDir | ll.AccessFSMakeReg |
+		ll.AccessFSMakeSock | ll.AccessFSMakeFifo | ll.AccessFSMakeBlock | ll.AccessFSMakeSym
+	for _, step := range []struct {
+		abi    int
+		fs     uint64
+		net    uint64
+		scoped uint64
+	}{
+		{abi: 2, fs: ll.AccessFSRefer},
+		{abi: 3, fs: ll.AccessFSTruncate},
+		{abi: 4, net: ll.AccessNetBindTCP | ll.AccessNetConnectTCP},
+		{abi: 5, fs: ll.AccessFSIoctlDev},
+		{abi: 6, scoped: ll.ScopeAbstractUnixSocket | ll.ScopeSignal},
+		{abi: 9, fs: ll.AccessFSResolveUnix},
+		{abi: 10, net: ll.AccessNetBindUDP | ll.AccessNetConnectSendUDP},
+	} {
+		if abi >= step.abi {
+			attr.HandledAccessFS |= step.fs
+			attr.HandledAccessNet |= step.net
+			attr.Scoped |= step.scoped
 		}
 	}
-	add(accessRead, systemPaths...)
-	add(accessRead, req.System.Read...)
-	add(accessRead, req.Readable...)
-	add(accessRead|ll.AccessFSExecute, req.System.Git)
-	add(accessRead|ll.AccessFSExecute, req.System.Exec...)
-	if req.Shell {
-		add(accessRead|ll.AccessFSExecute, req.System.Shell)
+	if network {
+		attr.HandledAccessNet = 0
 	}
-	add(accessRead|accessWrite, req.Writable...)
-	add(ll.AccessFSReadFile|ll.AccessFSWriteFile, os.DevNull)
-	config := landlock.V11.BestEffort()
-	if req.Network {
-		config = landlock.MustConfig(landlock.V11.HandledAccessFS, landlock.V11.Scoped).BestEffort()
+	return attr
+}
+
+// confine restricts the calling thread, which must be locked to its goroutine
+// and never run anything else.
+func confine(policy Policy, sys hostSystem) error {
+	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
+		return err
 	}
-	if err := config.Restrict(rules...); err != nil {
-		return fmt.Errorf("landlock: %w", err)
+	if attr := handled(ABI(), policy.Network); attr.HandledAccessFS != 0 {
+		if err := restrict(attr, policy, sys); err != nil {
+			return fmt.Errorf("landlock: %w", err)
+		}
 	}
-	return denySockets(req.Network)
+	return denySockets(policy.Network)
+}
+
+func restrict(attr ll.RulesetAttr, policy Policy, sys hostSystem) error {
+	ruleset, err := ll.LandlockCreateRuleset(&attr, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(ruleset)
+	add := func(access uint64, paths ...string) error {
+		for _, path := range paths {
+			fd, err := unix.Open(path, unix.O_PATH|unix.O_CLOEXEC, 0)
+			if errors.Is(err, unix.ENOENT) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			allowed := access & attr.HandledAccessFS
+			var st unix.Stat_t
+			if err := unix.Fstat(fd, &st); err == nil && st.Mode&unix.S_IFMT != unix.S_IFDIR {
+				allowed &= accessFile
+			}
+			err = ll.LandlockAddPathBeneathRule(ruleset, &ll.PathBeneathAttr{AllowedAccess: allowed, ParentFd: fd}, 0)
+			unix.Close(fd)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+		}
+		return nil
+	}
+	for _, rule := range []struct {
+		access uint64
+		paths  []string
+	}{
+		{accessRead, systemPaths},
+		{accessRead, sys.Read},
+		{accessRead, policy.Readable},
+		{accessRead | ll.AccessFSExecute, []string{sys.Git}},
+		{accessRead | ll.AccessFSExecute, sys.Exec},
+		{accessRead | ll.AccessFSExecute, shell(policy, sys)},
+		{accessRead | accessWrite, policy.Writable},
+		{ll.AccessFSReadFile | ll.AccessFSWriteFile, []string{os.DevNull}},
+	} {
+		if err := add(rule.access, rule.paths...); err != nil {
+			return err
+		}
+	}
+	return ll.LandlockRestrictSelf(ruleset, 0)
+}
+
+func shell(policy Policy, sys hostSystem) []string {
+	if policy.Shell {
+		return []string{sys.Shell}
+	}
+	return nil
 }
 
 // denySockets keeps git from opening unix sockets, which Landlock only
 // controls from ABI 9, and without network from opening IP sockets at all.
+// The filter is the calling thread's alone.
 func denySockets(network bool) error {
 	families := []uint32{unix.AF_UNIX}
 	if !network {
@@ -214,11 +291,8 @@ func denySockets(network bool) error {
 		unix.SockFilter{Code: ret, K: unix.SECCOMP_RET_ALLOW},
 		unix.SockFilter{Code: ret, K: unix.SECCOMP_RET_ERRNO | uint32(unix.EACCES)},
 	)
-	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
-		return err
-	}
 	prog := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
-	if _, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, unix.SECCOMP_FILTER_FLAG_TSYNC, uintptr(unsafe.Pointer(&prog))); errno != 0 {
+	if _, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, 0, uintptr(unsafe.Pointer(&prog))); errno != 0 {
 		return fmt.Errorf("seccomp: %w", errno)
 	}
 	return nil

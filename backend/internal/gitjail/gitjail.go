@@ -8,11 +8,14 @@
 // the repository it works on, read only system files and its global config,
 // and open no network or unix sockets (seccomp covers what this kernel's
 // Landlock does not). Elsewhere git runs as before.
+//
+// The jail is set up on a dedicated thread of Jaz that then starts git and
+// ends with it confined, so confining git costs no extra process.
 package gitjail
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -21,42 +24,56 @@ import (
 	"strings"
 )
 
-// helperArg makes the Jaz binary confine itself and exec git; see helper.
-const helperArg = "__jaz_git_jail"
-
 // Policy is what one git command may touch beyond system files.
 type Policy struct {
 	// Writable are the directories git may change.
-	Writable []string `json:"w,omitempty"`
+	Writable []string
 	// Readable are directories git may only read.
-	Readable []string `json:"r,omitempty"`
+	Readable []string
 	// Network lets git reach remotes over TCP, for push and fetch.
-	Network bool `json:"n,omitempty"`
+	Network bool
 	// Shell lets git run /bin/sh, which its local transport needs. Commands
 	// a repository configures then run too, but inside the same jail.
-	Shell bool `json:"sh,omitempty"`
+	Shell bool
+}
+
+// Cmd is a git command that starts in its jail.
+type Cmd struct {
+	*exec.Cmd
+	policy Policy
+	system hostSystem
 }
 
 // Command returns `git args...` run under policy.
-func Command(ctx context.Context, policy Policy, args ...string) (*exec.Cmd, error) {
+func Command(ctx context.Context, policy Policy, args ...string) (*Cmd, error) {
 	if !supported {
-		return exec.CommandContext(ctx, "git", args...), nil
+		return &Cmd{Cmd: exec.CommandContext(ctx, "git", args...)}, nil
 	}
 	sys, err := system()
 	if err != nil {
 		return nil, err
 	}
 	policy.Readable = append(policy.Readable, globalConfig()...)
-	payload, err := json.Marshal(request{Policy: policy, System: sys})
-	if err != nil {
-		return nil, err
-	}
-	return exec.CommandContext(ctx, sys.self, append([]string{helperArg, string(payload), "--"}, args...)...), nil
+	return &Cmd{Cmd: exec.CommandContext(ctx, sys.Git, args...), policy: policy, system: sys}, nil
 }
 
-type request struct {
-	Policy
-	System hostSystem `json:"s"`
+// Start starts git in its jail.
+func (c *Cmd) Start() error { return c.start() }
+
+// Run starts git in its jail and waits for it.
+func (c *Cmd) Run() error {
+	if err := c.Start(); err != nil {
+		return err
+	}
+	return c.Wait()
+}
+
+// CombinedOutput runs git in its jail and returns its stdout and stderr.
+func (c *Cmd) CombinedOutput() ([]byte, error) {
+	var out bytes.Buffer
+	c.Stdout, c.Stderr = &out, &out
+	err := c.Run()
+	return out.Bytes(), err
 }
 
 // ForRepo is the policy for a git command in dir: it may write the working
