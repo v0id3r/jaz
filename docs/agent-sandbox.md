@@ -25,7 +25,7 @@ jaz:
   sandbox:
     runtime: runner # empty (default) runs agents as local child processes
     socket: /run/jaz-runner/runner.sock
-    paths: [/var/lib/jaz/workspaces/share/runner-canary] # optional canary scope
+    paths: [/var/lib/jaz/workspaces/sandbox-canary] # optional canary scope
 ```
 
 With `paths`, only agents whose working directory is under one of them run in
@@ -55,28 +55,36 @@ host.
 ```yaml
 socket: /run/jaz-runner/runner.sock
 socketowner: "10001:999"          # Jaz user in its container
-image: docker.io/local/jaz:vX.Y.Z  # podman pull docker-daemon:local/jaz:vX.Y.Z
+image: localhost/jaz:vX.Y.Z        # the Jaz backend image, in podman's store
 network: jaz-sessions             # podman network for sessions
 dns: [10.0.0.1]
 hosts: ["tbot:10.0.1.97"]
 user: "10001:999"
+home: /var/lib/jaz-agent          # HOME for agents, outside Jaz's own state
 stoptimeout: 10s
 mounts:
-  - {container: /var/lib/jaz, host: /var/lib/docker/volumes/jaz_jaz-data/_data}
+  - {container: /var/lib/jaz, host: /srv/jaz/data}
   - {container: /var/lib/jaz/workspaces/work, host: /srv/jaz/workspaces}
+  - {container: /var/lib/jaz-agent, host: /srv/jaz/agent-home}
 readonly:                         # every session, read-only
   - /var/lib/jaz/.local/share/mise
-  - /var/lib/jaz/.config/mise
-  - /var/lib/jaz/.gitconfig
   - /var/lib/jaz/skills
-readwrite:                        # every session, writable
-  - /var/lib/jaz/memory
   - /var/lib/jaz/AGENTS.md
+  - /var/lib/jaz/workspaces
+readwrite:                        # every session, writable
+  - /var/lib/jaz-agent
+  - /var/lib/jaz/memory
 writable:                         # roots a launch may request as writable
   - /var/lib/jaz/workspaces
   - /var/lib/jaz/acp
-args: ["--memory=4g", "--pids-limit=4096", "--security-opt=apparmor=jaz-session"]
+args: ["--memory=4g", "--pids-limit=4096", "--security-opt=apparmor=jaz-session",
+  "--security-opt=seccomp=/etc/jaz/seccomp-docker-default.json"]
 ```
+
+With `workspaces` read-only and writable per launch, a session writes only its
+own working directory. A working directory under a read-only parent needs its
+mount point to exist in the parent's host directory. The docker default seccomp
+profile denies user namespaces and mounts, which podman's default allows.
 
 Host files are in [recipes/agent-runner](recipes/agent-runner): the systemd unit,
 the `jaz-session` AppArmor profile (`/etc/apparmor.d/jaz-session`, load with
@@ -105,8 +113,6 @@ and stops a container when its Jaz client disappears.
 
 - Previews: the preview proxy only targets Jaz's loopback, while a sandboxed
   agent's dev server listens in its own container.
-- The user's terminal for a session runs in the Jaz container, not in the
-  session's container.
 - Login flows and the Codex token refresh run in the Jaz container (they write
   the same mounted agent homes).
 - Agents lose what only the Jaz container had: Machine ID certificates,
