@@ -369,6 +369,8 @@ func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, pro
 	cfg.ACP.SystemPrompt = prompts
 	cfg.ACP.MCPStore = mcpServers
 	cfg.ACP.Launcher = launch
+	// Agents of mesh-only networks are admitted by their session certificate.
+	cfg.ACP.SandboxMCPWithoutKey = len(cfg.Identity.Mesh.Require) > 0
 	promptBuilder := loops.RuntimePromptBuilder{Repo: store, PromptExtras: []func(loops.Loop, loops.Run) string{bots.RoutineInstructions(store)}}
 	if widgetService != nil {
 		promptBuilder.PromptExtras = append(promptBuilder.PromptExtras, widgetService.LoopPromptExtra)

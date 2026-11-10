@@ -89,11 +89,24 @@ type scoped struct {
 }
 
 func (s scoped) Command(spec Spec) (Spec, func(), error) {
-	dir := filepath.Clean(spec.Dir)
-	if slices.ContainsFunc(s.paths, func(path string) bool { return within(path, dir) }) {
+	if s.sandboxes(spec.Dir) {
 		return s.sandbox.Command(spec)
 	}
 	return s.local.Command(spec)
+}
+
+func (s scoped) sandboxes(dir string) bool {
+	dir = filepath.Clean(dir)
+	return slices.ContainsFunc(s.paths, func(path string) bool { return within(path, dir) })
+}
+
+func (runnerLauncher) sandboxes(string) bool { return true }
+
+// Sandboxes reports whether the launcher runs a process started in dir in
+// the sandbox, outside Jaz's network namespace.
+func Sandboxes(l Launcher, dir string) bool {
+	s, ok := l.(interface{ sandboxes(dir string) bool })
+	return ok && s.sandboxes(dir)
 }
 
 // Local runs processes directly on the host.

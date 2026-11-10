@@ -80,26 +80,20 @@ func ServeGateway(args []string) int {
 	return 0
 }
 
-type gateway struct {
-	target *url.URL
-	td     spiffeid.TrustDomain
-	proxy  http.RoundTripper
-	log    *log.Logger
+// tunnels terminates HBONE tunnels from the sessions of a trust domain and
+// serves the HTTP inside each tunnel with the handler for its session. The
+// session comes from the client certificate alone.
+type tunnels struct {
+	td      spiffeid.TrustDomain
+	allow   func(destination string) bool
+	handler func(session string) http.Handler
+	log     *log.Logger
 }
 
-func newGateway(target *url.URL, td spiffeid.TrustDomain, logger *log.Logger) *gateway {
-	return &gateway{target: target, td: td, log: logger, proxy: &http.Transport{
-		Proxy:               nil,
-		DialContext:         (&net.Dialer{Timeout: dialTimeout}).DialContext,
-		MaxIdleConnsPerHost: 16,
-		IdleConnTimeout:     90 * time.Second,
-	}}
-}
-
-// authorize admits session identities of the gateway's trust domain only.
-func (g *gateway) authorize(id spiffeid.ID) error {
-	if _, ok := sessionOf(id, g.td); !ok {
-		return fmt.Errorf("%s is not a session of %s", id, g.td)
+// authorize admits session identities of the trust domain only.
+func (t *tunnels) authorize(id spiffeid.ID) error {
+	if _, ok := sessionOf(id, t.td); !ok {
+		return fmt.Errorf("%s is not a session of %s", id, t.td)
 	}
 	return nil
 }
@@ -109,19 +103,19 @@ func sessionOf(id spiffeid.ID, td spiffeid.TrustDomain) (string, bool) {
 	return session, ok && id.TrustDomain() == td && session != "" && !strings.Contains(session, "/")
 }
 
-func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (t *tunnels) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodConnect || r.ProtoMajor != 2 || r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		http.Error(w, "HBONE tunnels only", http.StatusMethodNotAllowed)
 		return
 	}
 	id, err := x509svid.IDFromCert(r.TLS.PeerCertificates[0])
-	session, ok := sessionOf(id, g.td)
+	session, ok := sessionOf(id, t.td)
 	if err != nil || !ok {
 		http.Error(w, "not a session", http.StatusForbidden)
 		return
 	}
-	if r.Host != g.target.Host {
-		g.log.Warn("tunnel refused", "session", session, "destination", r.Host)
+	if !t.allow(r.Host) {
+		t.log.Warn("tunnel refused", "session", session, "destination", r.Host)
 		http.Error(w, "destination not served", http.StatusForbidden)
 		return
 	}
@@ -131,30 +125,55 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn := newStreamConn(r.Body, w, rc, r.RemoteAddr)
-	g.log.Info("tunnel", "session", session, "destination", r.Host)
-	server := &http.Server{Handler: g.forward(session), ReadHeaderTimeout: 30 * time.Second}
+	t.log.Info("tunnel", "session", session, "destination", r.Host)
+	server := &http.Server{Handler: t.withSession(session), ReadHeaderTimeout: 30 * time.Second}
 	_ = server.Serve(&oneConnListener{conn: conn})
 	<-conn.closed
 }
 
-// forward proxies one tunnel's requests to Jaz as the tunnel's session.
-func (g *gateway) forward(session string) http.Handler {
-	proxy := &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(g.target)
-			pr.Out.Header.Set(mcpsession.HeaderName, session)
-		},
-		Transport:     g.proxy,
-		FlushInterval: -1,
-		ErrorLog:      nil,
-	}
+// withSession names the tunnel's session in every request, replacing
+// whatever session header the agent sent.
+func (t *tunnels) withSession(session string) http.Handler {
+	next := t.handler(session)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if claimed := r.Header.Get(mcpsession.HeaderName); claimed != "" && claimed != session {
-			g.log.Warn("session header replaced", "session", session, "claimed", claimed)
+			t.log.Warn("session header replaced", "session", session, "claimed", claimed)
 		}
-		g.log.Debug("request", "session", session, "method", r.Method, "path", r.URL.Path)
-		proxy.ServeHTTP(w, r)
+		r.Header.Set(mcpsession.HeaderName, session)
+		next.ServeHTTP(w, r.WithContext(WithSession(r.Context(), session)))
 	})
+}
+
+type sessionKey struct{}
+
+// WithSession marks ctx as a request that came through a tunnel of session.
+func WithSession(ctx context.Context, session string) context.Context {
+	return context.WithValue(ctx, sessionKey{}, session)
+}
+
+// Session is the session a request arrived as through a mesh tunnel; empty
+// for any other request.
+func Session(ctx context.Context) string {
+	session, _ := ctx.Value(sessionKey{}).(string)
+	return session
+}
+
+// newGateway serves tunnels to target only and forwards their requests there.
+func newGateway(target *url.URL, td spiffeid.TrustDomain, logger *log.Logger) *tunnels {
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) { pr.SetURL(target) },
+		Transport: &http.Transport{
+			DialContext:         (&net.Dialer{Timeout: dialTimeout}).DialContext,
+			MaxIdleConnsPerHost: 16,
+			IdleConnTimeout:     90 * time.Second,
+		},
+		FlushInterval: -1,
+	}
+	return &tunnels{
+		td: td, log: logger,
+		allow:   func(destination string) bool { return destination == target.Host },
+		handler: func(string) http.Handler { return proxy },
+	}
 }
 
 // streamConn is the inside of an HBONE stream as a net.Conn: reads come from

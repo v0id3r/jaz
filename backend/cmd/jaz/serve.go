@@ -35,6 +35,7 @@ import (
 	"github.com/wins/jaz/backend/internal/managedtool"
 	mcpruntime "github.com/wins/jaz/backend/internal/mcp"
 	"github.com/wins/jaz/backend/internal/memoryservice"
+	"github.com/wins/jaz/backend/internal/mesh"
 	"github.com/wins/jaz/backend/internal/modelcatalog"
 	"github.com/wins/jaz/backend/internal/provider"
 	"github.com/wins/jaz/backend/internal/runtimeauth"
@@ -252,6 +253,25 @@ func conciseError(err error) error {
 	return err
 }
 
+// meshListener lets Jaz terminate session tunnels on its listener. Without
+// its own SVID Jaz serves plain HTTP only: agents of mesh-only networks are
+// then refused, the rest keep working.
+func meshListener(ctx context.Context, api string, ln net.Listener, handler http.Handler, logger *log.Logger, lc fx.Lifecycle) net.Listener {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	inbound, err := mesh.NewInbound(ctx, api, logger)
+	if err == nil {
+		var split net.Listener
+		if split, err = inbound.Listen(ln, handler); err == nil {
+			lc.Append(fx.StopHook(inbound.Close))
+			return split
+		}
+		inbound.Close()
+	}
+	logger.WithPrefix("mesh").Error("session tunnels unavailable", "error", err)
+	return ln
+}
+
 func startServer(
 	lc fx.Lifecycle,
 	a *agent.Agent,
@@ -290,6 +310,11 @@ func startServer(
 	ingestWriter integrationingest.MaterializingWriter,
 ) error {
 	authKey := string(runtimeAuthKey)
+	meshNetworks, err := cfg.Identity.Mesh.Networks()
+	if err != nil {
+		return err
+	}
+	serverConfig.MeshNetworks = meshNetworks
 	handler := &server.Server{
 		Agent:                 a,
 		Store:                 store,
@@ -413,6 +438,9 @@ func startServer(
 			listener, err := net.Listen("tcp", srv.Addr)
 			if err != nil {
 				return err
+			}
+			if api := cfg.Identity.Mesh.WorkloadAPI; api != "" {
+				listener = meshListener(ctx, api, listener, srv.Handler, logger, lc)
 			}
 			go func() {
 				if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {

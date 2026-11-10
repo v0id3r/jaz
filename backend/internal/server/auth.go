@@ -13,6 +13,7 @@ import (
 	"github.com/wins/jaz/backend/internal/deviceauth"
 	"github.com/wins/jaz/backend/internal/httpapi"
 	devicesapi "github.com/wins/jaz/backend/internal/httpapi/devices"
+	"github.com/wins/jaz/backend/internal/mesh"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 	"github.com/wins/jaz/backend/internal/sessioncontext"
 )
@@ -31,6 +32,17 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				return
 			}
 			s.serveDevice(w, r, principal, next)
+			return
+		}
+		if session := mesh.Session(r.Context()); session != "" {
+			// A tunnel's certificate names its session, and that admits it to
+			// the internal MCP endpoints in place of the backend key.
+			if !internalMCPPath(r.URL.Path) {
+				writeAuthError(w, http.StatusForbidden, "forbidden", fmt.Errorf("mesh sessions reach only the internal MCP endpoints"))
+				return
+			}
+			principal := deviceauth.Principal{Kind: deviceauth.PrincipalRoot}
+			next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 			return
 		}
 		token := requestAuthKey(r)
@@ -62,6 +74,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			deviceErr = err
 		}
 		if subtle.ConstantTimeCompare([]byte(token), []byte(key)) == 1 {
+			if meshRequired(r, s.ServerConfig.MeshNetworks) {
+				writeAuthError(w, http.StatusForbidden, "mesh_required", fmt.Errorf("agents of this network reach Jaz only through the mesh"))
+				return
+			}
 			if s.Devices == nil || (httpapi.TrustedLocalRequest(r) && (rootKeyAllowed(r) || s.rootKeyHasFullAccess())) || agentMCPRequest(r, s.ServerConfig.AgentNetworks) {
 				principal := deviceauth.Principal{Kind: deviceauth.PrincipalRoot}
 				next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
@@ -230,6 +246,20 @@ func internalMCPPath(path string) bool {
 	default:
 		return false
 	}
+}
+
+// meshRequired reports a request from a network whose agents must come
+// through the mesh; the backend key alone does not admit them.
+func meshRequired(r *http.Request, networks []netip.Prefix) bool {
+	if len(networks) == 0 {
+		return false
+	}
+	addr, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := addr.Addr().Unmap()
+	return slices.ContainsFunc(networks, func(network netip.Prefix) bool { return network.Contains(ip) })
 }
 
 // agentMCPRequest reports an internal MCP request from sandboxed agents, which

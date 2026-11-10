@@ -25,6 +25,10 @@ type Config struct {
 	// their requests reach the internal MCP endpoints the way loopback
 	// requests do.
 	AgentNetworks []netip.Prefix
+	// MeshNetworks are agent networks whose agents reach the internal MCP
+	// endpoints only through mesh tunnels, as the session their certificate
+	// names; the backend key does not admit them.
+	MeshNetworks []netip.Prefix
 }
 
 type URLs struct {

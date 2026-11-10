@@ -10,9 +10,13 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
+
+// tunnelMark is the socket mark ("jz") on the runner's own tunnel sockets.
+const tunnelMark = 0x6a7a
 
 // netns makes sockets inside another network namespace: a goroutine locked to
 // an OS thread that joined the namespace. The thread never leaves it; Go
@@ -76,7 +80,16 @@ func (n *netns) listen(addr string) (net.Listener, error) {
 func (n *netns) dial(addr string) (net.Conn, error) {
 	var conn net.Conn
 	var err error
-	if derr := n.do(func() { conn, err = net.DialTimeout("tcp", addr, dialTimeout) }); derr != nil {
+	// The mark exempts the tunnel itself from the capture rules, for tunnels
+	// to a captured destination such as Jaz.
+	dialer := net.Dialer{Timeout: dialTimeout, Control: func(_, _ string, raw syscall.RawConn) error {
+		var serr error
+		if err := raw.Control(func(fd uintptr) { serr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, tunnelMark) }); err != nil {
+			return err
+		}
+		return serr
+	}}
+	if derr := n.do(func() { conn, err = dialer.Dial("tcp", addr) }); derr != nil {
 		return nil, derr
 	}
 	return conn, err
@@ -90,6 +103,7 @@ func (n *netns) close() { close(n.done) }
 func (n *netns) capture(destinations []netip.AddrPort, port int) error {
 	var rules strings.Builder
 	rules.WriteString("table ip jaz_mesh {\n chain output {\n  type nat hook output priority dstnat; policy accept;\n")
+	fmt.Fprintf(&rules, "  meta mark %#x return\n", tunnelMark)
 	for _, dst := range destinations {
 		fmt.Fprintf(&rules, "  ip daddr %s tcp dport %d redirect to :%d\n", dst.Addr(), dst.Port(), port)
 	}

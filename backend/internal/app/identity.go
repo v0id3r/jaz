@@ -1,7 +1,10 @@
 package app
 
 import (
+	"fmt"
+	"net/netip"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/log"
 	"go.uber.org/fx"
@@ -16,6 +19,35 @@ type IdentityConfig struct {
 	// with the runner sandbox, agents outside the sandbox get the SPIFFE
 	// identity of their session too.
 	Delegate string
+	Mesh     MeshConfig
+}
+
+// MeshConfig lets Jaz terminate session tunnels (HBONE over mTLS with the
+// sessions' SVIDs) on its own listener.
+type MeshConfig struct {
+	// WorkloadAPI is where Jaz gets its own SVID, e.g.
+	// unix:///run/spire-agent/public/api.sock; empty turns the mesh off.
+	WorkloadAPI string
+	// Require lists agent networks, as CIDRs, that reach the internal MCP
+	// endpoints only through the mesh; sandboxed agents then get no backend
+	// key in their MCP configuration.
+	Require []string
+}
+
+// Networks parses Require.
+func (c MeshConfig) Networks() ([]netip.Prefix, error) {
+	networks := make([]netip.Prefix, 0, len(c.Require))
+	for _, cidr := range c.Require {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(cidr))
+		if err != nil {
+			return nil, fmt.Errorf("identity.mesh.require: %w", err)
+		}
+		networks = append(networks, prefix)
+	}
+	if len(networks) > 0 && c.WorkloadAPI == "" {
+		return nil, fmt.Errorf("identity.mesh.require needs identity.mesh.workloadAPI")
+	}
+	return networks, nil
 }
 
 // NewLauncher builds the process launcher, with session identities for local

@@ -127,6 +127,9 @@ type Config struct {
 	SteerNote func(storage.Session) string
 	// Launcher starts agent processes; nil runs them directly on the host.
 	Launcher sandbox.Launcher
+	// SandboxMCPWithoutKey leaves the backend key out of the MCP servers of
+	// sandboxed agents, which Jaz admits by their session certificate.
+	SandboxMCPWithoutKey bool
 }
 
 type AgentConfig struct {

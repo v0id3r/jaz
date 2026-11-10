@@ -278,6 +278,8 @@ type agentConn struct {
 	initRaw       json.RawMessage
 	stderr        *processStderrTail
 	promptTracker *promptTrackingConn
+	// sandboxed agents run in the sandbox, outside Jaz's network namespace.
+	sandboxed bool
 }
 
 func (c *agentConn) close() {
@@ -338,7 +340,8 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 	promptTracker := newPromptTrackingConn(conn)
 	state := newConnectionState()
 	peer := jsonrpc.NewPeer(promptTracker, state.handler(m, handler))
-	ac := &agentConn{state: state, conn: promptTracker, peer: peer, cancel: cancel, closed: runCtx.Done(), stderr: stderr, promptTracker: promptTracker}
+	ac := &agentConn{state: state, conn: promptTracker, peer: peer, cancel: cancel, closed: runCtx.Done(), stderr: stderr, promptTracker: promptTracker,
+		sandboxed: sandbox.Sandboxes(m.cfg.Launcher, cwd)}
 	defer func() {
 		if err != nil {
 			ac.close()
@@ -467,7 +470,7 @@ func (m *Manager) newACPSession(ctx context.Context, ac *agentConn, agent string
 	return m.newACPProtocolSession(ctx, ac, "agent", newSessionRequest{
 		Meta:       meta,
 		Cwd:        cwd,
-		MCPServers: m.mcpServersForAgent(ctx, ac.initRaw, mcpServerPolicy),
+		MCPServers: m.mcpServersForAgent(m.mcpAuthContext(ctx, ac.sandboxed), ac.initRaw, mcpServerPolicy),
 	})
 }
 
