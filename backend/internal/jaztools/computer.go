@@ -21,7 +21,7 @@ func (s *Service) SetComputer(store storage.SettingsStorage, backend computercon
 }
 
 func (s *Service) syncComputerToolsFor(slot *serverSlot, surface toolSurface) {
-	if surface.workerOnly() || surface == sandboxSurface || slot.server == nil || s.computerSettings == nil {
+	if surface.workerOnly() || slot.server == nil || s.computerSettings == nil {
 		return
 	}
 	enabled := settings.ComputerEnabled(s.computerSettings)

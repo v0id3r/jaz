@@ -11,9 +11,6 @@ import (
 const (
 	HeaderName        = "X-Jaz-Session-ID"
 	HeaderPlaceholder = "{{jaz_session_id}}"
-	// TunnelHeader is set by Jaz on requests that came through a session
-	// tunnel; a client that sends it only confines itself.
-	TunnelHeader = "X-Jaz-Tunnel"
 )
 
 type key struct{}
@@ -47,9 +44,4 @@ func SessionID(req *mcp.CallToolRequest) string {
 		return ""
 	}
 	return strings.TrimSpace(req.Extra.Header.Get(HeaderName))
-}
-
-// Tunneled reports whether req came through a session tunnel.
-func Tunneled(req *mcp.CallToolRequest) bool {
-	return req != nil && req.Extra != nil && req.Extra.Header.Get(TunnelHeader) != ""
 }

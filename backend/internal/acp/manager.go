@@ -130,9 +130,6 @@ type Manager struct {
 
 type SpawnRequest struct {
 	ParentID string
-	// Tunneled marks a request whose parent reached Jaz through a session
-	// tunnel, so it is sandboxed whatever Jaz knows of the parent.
-	Tunneled bool
 	ACPAgent string
 	Slug     string
 	Title    string
@@ -500,9 +497,6 @@ func (m *Manager) createSession(ctx context.Context, req SpawnRequest, queue []s
 	}
 	req, cfg, effort, err := m.spawnConfig(req)
 	if err != nil {
-		return createdSession{}, err
-	}
-	if req, err = m.confineSpawn(req, cfg); err != nil {
 		return createdSession{}, err
 	}
 	if req.Directory == "" && req.Home == "" && !req.Worktree {

@@ -140,7 +140,6 @@ func (t *tunnels) withSession(session string) http.Handler {
 			t.log.Warn("session header replaced", "session", session, "claimed", claimed)
 		}
 		r.Header.Set(mcpsession.HeaderName, session)
-		r.Header.Set(mcpsession.TunnelHeader, "1")
 		next.ServeHTTP(w, r.WithContext(WithSession(r.Context(), session)))
 	})
 }
