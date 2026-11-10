@@ -18,8 +18,9 @@ const (
 // runArgs builds the `podman run` arguments for a request and the environment
 // of the podman process. Environment values reach the container through
 // podman's own environment (`--env NAME`), so secrets never appear in argv;
-// only variables podman itself interprets are passed by value.
-func (c RunnerConfig) runArgs(name string, req Request) ([]string, []string, error) {
+// only variables podman itself interprets are passed by value. home, when
+// set, is the host directory mounted as the session's HOME.
+func (c RunnerConfig) runArgs(name string, req Request, home string) ([]string, []string, error) {
 	if len(req.Args) == 0 {
 		return nil, nil, errors.New("request has no command")
 	}
@@ -53,6 +54,14 @@ func (c RunnerConfig) runArgs(name string, req Request) ([]string, []string, err
 			return nil, nil, fmt.Errorf("%s is not under a writable root", path)
 		}
 		mounts[path] = true
+	}
+	if home != "" {
+		// The session's own HOME stands in for the shared one.
+		for path := range mounts {
+			if within(c.Home, path) {
+				delete(mounts, path)
+			}
+		}
 	}
 
 	args := []string{
@@ -88,6 +97,15 @@ func (c RunnerConfig) runArgs(name string, req Request) ([]string, []string, err
 			options += ",ro"
 		}
 		args = append(args, "--volume", host+":"+path+":"+options)
+	}
+	if home != "" {
+		volumes, err := c.homeVolumes(home)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, volume := range volumes {
+			args = append(args, "--volume", volume)
+		}
 	}
 	env := []string{podmanPath}
 	if c.Home != "" {

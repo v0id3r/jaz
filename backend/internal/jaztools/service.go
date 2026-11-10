@@ -16,6 +16,7 @@ import (
 	mcpconfig "github.com/wins/jaz/backend/internal/mcpconfig"
 	"github.com/wins/jaz/backend/internal/mcpsession"
 	"github.com/wins/jaz/backend/internal/memoryservice"
+	"github.com/wins/jaz/backend/internal/mesh"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/sessiongoal"
@@ -85,6 +86,7 @@ type Service struct {
 	source      serverSlot
 	retired     serverSlot
 	canvas      serverSlot
+	sandbox     serverSlot
 	handlerOnce sync.Once
 	handler     http.Handler
 }
@@ -99,6 +101,10 @@ const (
 	sourceWorkerSurface
 	retiredWorkerSurface
 	canvasSurface
+	// sandboxSurface serves agents that reach Jaz through a mesh tunnel:
+	// threads, questions, goals, memory and visuals, but nothing that acts
+	// outside Jaz (loops, bots, mail and chat, calendar, browser, computer).
+	sandboxSurface
 )
 
 type surfaceSlot struct {
@@ -229,6 +235,7 @@ func (s *Service) slots() []surfaceSlot {
 		{surface: sourceWorkerSurface, slot: &s.source},
 		{surface: retiredWorkerSurface, slot: &s.retired},
 		{surface: canvasSurface, slot: &s.canvas},
+		{surface: sandboxSurface, slot: &s.sandbox},
 	}
 }
 
@@ -246,6 +253,8 @@ func (s *Service) slot(surface toolSurface) *serverSlot {
 		return &s.retired
 	case canvasSurface:
 		return &s.canvas
+	case sandboxSurface:
+		return &s.sandbox
 	default:
 		return &s.thread
 	}
@@ -258,6 +267,14 @@ func (s *Service) newServer(surface toolSurface) *mcp.Server {
 		Version: Version,
 	}, nil)
 	if surface.workerOnly() {
+		return server
+	}
+	if surface == sandboxSurface {
+		if s.goalTools != nil {
+			s.goalTools.AddTo(server)
+		}
+		s.visualizeTools.AddReadMeTo(server)
+		s.visualizeTools.AddShowWidgetTo(server)
 		return server
 	}
 	s.loopTools.AddTo(server)
@@ -314,6 +331,18 @@ func (s *Service) Handler() http.Handler {
 
 func (s *Service) surface(r *http.Request) toolSurface {
 	requestedSurface := strings.ToLower(strings.TrimSpace(r.URL.Query().Get(surfaceQueryParam)))
+	if mesh.Session(r.Context()) != "" {
+		// Sandboxed agents choose only among surfaces narrower than theirs.
+		switch requestedSurface {
+		case memorySearchSurfaceName:
+			return searchWorkerSurface
+		case memorySourceSurfaceName:
+			return sourceWorkerSurface
+		case retiredWorkerSurfaceName:
+			return retiredWorkerSurface
+		}
+		return sandboxSurface
+	}
 	switch requestedSurface {
 	case memorySearchSurfaceName:
 		return searchWorkerSurface
@@ -399,6 +428,7 @@ func (s *Service) syncThreadTools() {
 	s.syncThreadToolsFor(&s.thread, threadSurface)
 	s.syncThreadToolsFor(&s.widget, widgetSurface)
 	s.syncThreadToolsFor(&s.canvas, canvasSurface)
+	s.syncThreadToolsFor(&s.sandbox, sandboxSurface)
 }
 
 func (s *Service) syncAgentToolsFor(slot *serverSlot, surface toolSurface) {
@@ -435,7 +465,7 @@ func (s *Service) syncMemoryToolsFor(slot *serverSlot, surface toolSurface) {
 }
 
 func (s *Service) syncBrowserToolsFor(slot *serverSlot, surface toolSurface) {
-	if surface.workerOnly() || slot.server == nil || s.browserSettings == nil {
+	if surface.workerOnly() || surface == sandboxSurface || slot.server == nil || s.browserSettings == nil {
 		return
 	}
 	if jazsettings.BrowserEnabled(s.browserSettings) {

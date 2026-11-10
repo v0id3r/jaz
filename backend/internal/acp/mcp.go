@@ -115,7 +115,22 @@ type MCPSendInput struct {
 	Plan     bool   `json:"plan,omitempty" jsonschema:"Request the agent's plan mode for this prompt."`
 }
 
+// confiner keeps a sandboxed caller's thread actions in the sandbox.
+type confiner interface {
+	confine(from, target string) error
+}
+
+func (t *MCPTools) confine(req *mcp.CallToolRequest, target string) error {
+	if c, ok := t.Service.(confiner); ok {
+		return c.confine(mcpsession.SessionID(req), target)
+	}
+	return nil
+}
+
 func (t *MCPTools) Send(ctx context.Context, req *mcp.CallToolRequest, input MCPSendInput) (*mcp.CallToolResult, ThreadSnapshot, error) {
+	if err := t.confine(req, input.ThreadID); err != nil {
+		return nil, ThreadSnapshot{}, err
+	}
 	job, err := t.Service.Input(ctx, SteerRequest{
 		Session: input.ThreadID, Message: input.Prompt, PlanRequested: input.Plan,
 		ParentVisible: true, From: mcpsession.SessionID(req),
@@ -160,7 +175,10 @@ func (t *MCPTools) Wait(ctx context.Context, _ *mcp.CallToolRequest, input MCPWa
 	return nil, out, err
 }
 
-func (t *MCPTools) Cancel(ctx context.Context, _ *mcp.CallToolRequest, input MCPThreadInput) (*mcp.CallToolResult, ThreadSnapshot, error) {
+func (t *MCPTools) Cancel(ctx context.Context, req *mcp.CallToolRequest, input MCPThreadInput) (*mcp.CallToolResult, ThreadSnapshot, error) {
+	if err := t.confine(req, input.ThreadID); err != nil {
+		return nil, ThreadSnapshot{}, err
+	}
 	job, err := t.Service.Cancel(ctx, input.ThreadID)
 	return nil, snapshotThread(job), err
 }

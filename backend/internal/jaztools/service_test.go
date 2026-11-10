@@ -23,6 +23,7 @@ import (
 	"github.com/wins/jaz/backend/internal/loops"
 	"github.com/wins/jaz/backend/internal/mcpsession"
 	"github.com/wins/jaz/backend/internal/memoryservice"
+	"github.com/wins/jaz/backend/internal/mesh"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	jazsettings "github.com/wins/jaz/backend/internal/settings"
@@ -935,4 +936,52 @@ func structured[T any](t *testing.T, res *mcp.CallToolResult) T {
 		t.Fatal(err)
 	}
 	return out
+}
+
+func TestMeshSessionsGetTheSandboxSurface(t *testing.T) {
+	store, err := sqlitestore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	memory, err := jazmem.Open(jazmem.Config{Root: t.TempDir(), DBPath: filepath.Join(t.TempDir(), "memory.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = memory.Close() })
+	service := New(
+		memoryservice.New(memory, store, fakeScheduler{}, "http://127.0.0.1:5299/mcp/jaztools"),
+		serverconfig.URLs{JazToolsMCP: "http://127.0.0.1:5299/mcp/jaztools"},
+		store,
+		sessionevents.New(),
+		store,
+		store,
+		&widgets.SessionPublisher{Service: widgets.NewService(store, nil), Sessions: store, Loops: store},
+		testCalendarTools(t, store),
+		testGmailTools(t, store),
+		connections.NewWhatsAppMCPTools(store, nil, nil),
+		connections.NewTelegramMCPTools(store, nil, nil),
+	)
+	service.SetLoops(loops.NewService(store, &fakeExecutor{started: make(chan loops.Run, 1)}, nil))
+	service.SetAgents(fakeACPService{spawned: make(chan acp.SpawnRequest, 1)})
+	for _, query := range []string{"", "?jaztools_surface=bot", "?jaztools_surface=widget"} {
+		r := sessionRequest("s1")
+		r.URL.RawQuery = strings.TrimPrefix(query, "?")
+		r = r.WithContext(mesh.WithSession(r.Context(), "s1"))
+		if got := service.surface(r); got != sandboxSurface {
+			t.Fatalf("mesh request %q got surface %d, want the sandbox surface", query, got)
+		}
+	}
+	client, closeClient := connectClient(t, service.server(sandboxSurface))
+	defer closeClient()
+	for _, name := range []string{"create_thread", "send_message_to_thread", "stop_thread", "ask_user"} {
+		if !hasTool(t, client, name) {
+			t.Errorf("sandbox surface lacks %s", name)
+		}
+	}
+	for _, name := range []string{"loop_create", "loop_run", "message_bot", "gmail_send_draft", "whatsapp_send_message", "google_calendar_create_event"} {
+		if hasTool(t, client, name) {
+			t.Errorf("sandbox surface offers %s", name)
+		}
+	}
 }

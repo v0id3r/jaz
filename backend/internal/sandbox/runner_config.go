@@ -3,6 +3,7 @@ package sandbox
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -26,7 +27,14 @@ type RunnerConfig struct {
 	User string
 	// Home replaces the HOME a launch asks for, so sessions keep their own
 	// dotfiles and caches apart from the Jaz process's home.
-	Home        string
+	Home string
+	// Homes, when set, is the host directory holding each session's own
+	// HOME, seeded from Home on first use. HomeSkip entries (caches) are not
+	// copied; HomeShared entries are mounted read-only from Home instead, so
+	// shared settings change in one place.
+	Homes       string
+	HomeSkip    []string
+	HomeShared  []string
 	StopTimeout time.Duration
 	Mounts      []PathMapping
 	// ReadOnly and ReadWrite are mounted into every container.
@@ -75,6 +83,18 @@ func (c *RunnerConfig) normalize() error {
 	}
 	if c.Home != "" && !filepath.IsAbs(c.Home) {
 		return fmt.Errorf("runner config: home %s must be absolute", c.Home)
+	}
+	if c.Homes != "" && (c.Home == "" || !filepath.IsAbs(c.Homes)) {
+		return fmt.Errorf("runner config: homes %s needs home and an absolute path", c.Homes)
+	}
+	for _, list := range []*[]string{&c.HomeSkip, &c.HomeShared} {
+		for i, rel := range *list {
+			rel = filepath.Clean(rel)
+			if !filepath.IsLocal(rel) || strings.ContainsAny(rel, ":,") {
+				return fmt.Errorf("runner config: home entry %q must be a plain relative path", rel)
+			}
+			(*list)[i] = rel
+		}
 	}
 	for _, mount := range c.Mounts {
 		if !filepath.IsAbs(mount.Container) || !filepath.IsAbs(mount.Host) {

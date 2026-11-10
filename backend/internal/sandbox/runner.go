@@ -141,8 +141,15 @@ func (r *runner) serve(conn net.Conn) {
 		r.holdIdentity(conn, out, req.Session)
 		return
 	}
+	var home string
+	if err == nil && r.cfg.Homes != "" {
+		var cleanup func()
+		if home, cleanup, err = r.cfg.sessionHome(name, req.Session); err == nil {
+			defer cleanup()
+		}
+	}
 	if err == nil {
-		args, env, err = r.cfg.runArgs(name, req)
+		args, env, err = r.cfg.runArgs(name, req, home)
 	}
 	if err == nil && req.Session != "" && r.identities != nil {
 		var release func()
