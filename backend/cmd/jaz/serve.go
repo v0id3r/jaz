@@ -39,7 +39,6 @@ import (
 	"github.com/wins/jaz/backend/internal/provider"
 	"github.com/wins/jaz/backend/internal/runtimeauth"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
-	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/server"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 	"github.com/wins/jaz/backend/internal/sessionevents"
@@ -121,7 +120,7 @@ func serveOptions(args []string) []fx.Option {
 			app.NewACPAgentConfigSource,
 			app.NewACPAdapterManager,
 			app.NewManagedToolManager,
-			sandbox.New,
+			app.NewLauncher,
 			app.NewACPConfig,
 			acp.NewManager,
 			sessionlock.New,
@@ -181,8 +180,7 @@ func newLogger() *log.Logger {
 type config struct {
 	fx.Out
 
-	Jaz     app.Config
-	Sandbox sandbox.Config
+	Jaz app.Config
 }
 
 func loadConfig() (config, error) {
@@ -190,7 +188,7 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	return config{Jaz: loaded.Jaz, Sandbox: loaded.Jaz.Sandbox}, nil
+	return config{Jaz: loaded.Jaz}, nil
 }
 
 func parseServeConfig(args serveArgs) (serverconfig.Config, error) {

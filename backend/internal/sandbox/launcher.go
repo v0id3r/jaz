@@ -20,6 +20,16 @@ type Spec struct {
 	ReadWrite []string
 	// TTY marks an interactive process started on a terminal.
 	TTY bool
+	// Session is the Jaz session the process works for, if any; it decides
+	// the process's identity.
+	Session string
+}
+
+// LocalIdentity gives a process that runs outside the sandbox the identity of
+// its session: environment to add and a release once the process exits. It
+// degrades to no identity rather than failing the launch.
+type LocalIdentity interface {
+	Acquire(session string) (env []string, release func())
 }
 
 // Launcher turns a Spec into the command to execute. The returned cleanup
@@ -34,13 +44,16 @@ type Config struct {
 	// Paths limits the sandbox to processes whose working directory is under
 	// one of them; others run locally. Empty sandboxes every process.
 	Paths []string
+	// Identity, if set, gives local processes their session's identity.
+	Identity LocalIdentity
 }
 
 func New(cfg Config) (Launcher, error) {
 	var sandbox Launcher
+	local := Local{Identity: cfg.Identity}
 	switch runtime := strings.TrimSpace(cfg.Runtime); runtime {
 	case "":
-		return Local{}, nil
+		return local, nil
 	case "runner":
 		socket := strings.TrimSpace(cfg.Socket)
 		if socket == "" {
@@ -65,13 +78,14 @@ func New(cfg Config) (Launcher, error) {
 		}
 		paths = append(paths, path)
 	}
-	return scoped{paths: paths, sandbox: sandbox}, nil
+	return scoped{paths: paths, sandbox: sandbox, local: local}, nil
 }
 
 // scoped sandboxes only processes started under its paths.
 type scoped struct {
 	paths   []string
 	sandbox Launcher
+	local   Local
 }
 
 func (s scoped) Command(spec Spec) (Spec, func(), error) {
@@ -79,14 +93,21 @@ func (s scoped) Command(spec Spec) (Spec, func(), error) {
 	if slices.ContainsFunc(s.paths, func(path string) bool { return within(path, dir) }) {
 		return s.sandbox.Command(spec)
 	}
-	return Local{}.Command(spec)
+	return s.local.Command(spec)
 }
 
 // Local runs processes directly on the host.
-type Local struct{}
+type Local struct {
+	Identity LocalIdentity
+}
 
-func (Local) Command(spec Spec) (Spec, func(), error) {
-	return spec, func() {}, nil
+func (l Local) Command(spec Spec) (Spec, func(), error) {
+	if l.Identity == nil || spec.Session == "" {
+		return spec, func() {}, nil
+	}
+	env, release := l.Identity.Acquire(spec.Session)
+	spec.Env = append(slices.Clip(spec.Env), env...)
+	return spec, release, nil
 }
 
 // runnerLauncher starts each process in a runner-managed container through
@@ -101,6 +122,9 @@ func (r runnerLauncher) Command(spec Spec) (Spec, func(), error) {
 	args := []string{"sandbox-attach", "--socket", r.socket}
 	if spec.TTY {
 		args = append(args, "--tty")
+	}
+	if spec.Session != "" {
+		args = append(args, "--session", spec.Session)
 	}
 	for _, path := range spec.ReadOnly {
 		args = append(args, "--ro", path)

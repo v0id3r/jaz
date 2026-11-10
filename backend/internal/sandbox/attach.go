@@ -12,7 +12,7 @@ import (
 	"syscall"
 )
 
-const attachUsage = "usage: jaz sandbox-attach --socket path [--tty] [--ro path]... [--rw path]... -- command [args...]"
+const attachUsage = "usage: jaz sandbox-attach --socket path [--tty] [--session id] [--ro path]... [--rw path]... -- command [args...]"
 
 // Attach runs a command in a runner-managed container, relaying stdio and
 // termination signals, and returns the command's exit status. The command
@@ -25,6 +25,7 @@ func Attach(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs.Var((*pathList)(&req.ReadOnly), "ro", "path the command reads (repeatable)")
 	fs.Var((*pathList)(&req.ReadWrite), "rw", "path the command writes (repeatable)")
 	fs.BoolVar(&req.TTY, "tty", false, "run the command on a terminal sized like stdin's")
+	fs.StringVar(&req.Session, "session", "", "Jaz session the command works for")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

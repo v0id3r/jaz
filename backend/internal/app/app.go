@@ -63,6 +63,7 @@ type Config struct {
 	Voice          VoiceConfig
 	ACP            acp.Config
 	Sandbox        sandbox.Config
+	Identity       IdentityConfig
 	Memory         MemoryConfig
 	Connections    ConnectionsConfig
 	Devices        DevicesConfig

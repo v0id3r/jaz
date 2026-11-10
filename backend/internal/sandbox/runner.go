@@ -38,6 +38,14 @@ func ServeRunner(args []string) int {
 	}
 	r := &runner{cfg: cfg, log: logger, active: map[string]struct{}{}}
 	r.removeOrphans()
+	if cfg.Identity.enabled() {
+		if r.identities, err = newIdentities(cfg.Identity, logger); err != nil {
+			logger.Error("session identities", "error", err)
+			return 1
+		}
+		defer r.identities.conn.Close()
+		r.identities.removeStale()
+	}
 	listener, err := r.listen()
 	if err != nil {
 		logger.Error("listen", "socket", cfg.Socket, "error", err)
@@ -62,10 +70,11 @@ func ServeRunner(args []string) int {
 }
 
 type runner struct {
-	cfg    RunnerConfig
-	log    *log.Logger
-	mu     sync.Mutex
-	active map[string]struct{}
+	cfg        RunnerConfig
+	log        *log.Logger
+	identities *identities
+	mu         sync.Mutex
+	active     map[string]struct{}
 }
 
 func (r *runner) listen() (net.Listener, error) {
@@ -107,8 +116,18 @@ func (r *runner) serve(conn net.Conn) {
 	if err == nil {
 		err = json.Unmarshal(payload, &req)
 	}
+	if err == nil && req.IdentityLease {
+		r.holdIdentity(conn, out, req.Session)
+		return
+	}
 	if err == nil {
 		args, env, err = r.cfg.runArgs(name, req)
+	}
+	if err == nil && req.Session != "" && r.identities != nil {
+		var release func()
+		if release, err = r.identities.acquire(context.Background(), req.Session, false); err == nil {
+			defer release()
+		}
 	}
 	var proc *process
 	if err == nil {

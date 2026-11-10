@@ -34,6 +34,8 @@ type RunnerConfig struct {
 	Writable []string
 	// Args are extra `podman run` arguments, such as resource limits.
 	Args []string
+	// Identity, when set, gives sessions SPIFFE identities from SPIRE.
+	Identity RunnerIdentity
 }
 
 type PathMapping struct {

@@ -328,7 +328,8 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 			return nil, err
 		}
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
+	// The process outlives ctx but keeps its session, which decides its identity.
+	runCtx, cancel := context.WithCancel(mcpsession.With(context.Background(), mcpsession.ID(ctx)))
 	conn, stderr, err := m.openConn(runCtx, name, cfg, env, cwd, launchPrompt)
 	if err != nil {
 		cancel()

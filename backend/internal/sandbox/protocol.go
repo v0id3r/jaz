@@ -20,6 +20,12 @@ type Request struct {
 	TTY  bool   `json:"tty,omitempty"`
 	Rows uint16 `json:"rows,omitempty"`
 	Cols uint16 `json:"cols,omitempty"`
+	// Session is the Jaz session the process belongs to; with an identity
+	// configured, the container gets that session's SPIFFE identity.
+	Session string `json:"session,omitempty"`
+	// IdentityLease starts no process: it holds the session's identity for a
+	// local process until the client closes the connection.
+	IdentityLease bool `json:"identityLease,omitempty"`
 }
 
 const (

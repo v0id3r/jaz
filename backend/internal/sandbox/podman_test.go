@@ -72,3 +72,37 @@ func TestRunArgsRejectsSymlinkOutOfWritableRoots(t *testing.T) {
 		t.Fatalf("err = %v, want a symlink escape rejection", err)
 	}
 }
+
+func TestRunArgsGiveTheSessionItsIdentity(t *testing.T) {
+	data := t.TempDir()
+	cfg := RunnerConfig{
+		Image: "jaz:test", Network: "sessions",
+		Mounts:   []PathMapping{{Container: "/var/lib/jaz", Host: data}},
+		Writable: []string{"/var/lib/jaz"},
+		Identity: RunnerIdentity{Server: "/run/spire-server/api.sock", WorkloadAPI: "/run/spire-agent/public"},
+	}
+	args, _, err := cfg.runArgs("jaz-x", Request{Args: []string{"agent"}, Dir: "/var/lib/jaz", Session: "20261110T030025-2100cd54"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"--label jaz.session=20261110T030025-2100cd54",
+		"--volume /run/spire-agent/public:/run/spire/agent:ro",
+		"--env SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/agent/api.sock",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args lack %q:\n%s", want, joined)
+		}
+	}
+	for _, session := range []string{"../x", "a b", "a=b", ""} {
+		req := Request{Args: []string{"agent"}, Dir: "/var/lib/jaz", Session: session}
+		args, _, err := cfg.runArgs("jaz-x", req)
+		if session != "" && err == nil {
+			t.Fatalf("session %q accepted", session)
+		}
+		if session == "" && (err != nil || strings.Contains(strings.Join(args, " "), "jaz.session")) {
+			t.Fatalf("no session: err %v, args %v", err, args)
+		}
+	}
+}

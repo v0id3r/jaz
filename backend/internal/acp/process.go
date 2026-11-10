@@ -18,6 +18,7 @@ import (
 	"github.com/gluonfield/acp-transport/jsonrpc"
 	"github.com/gluonfield/acp-transport/stdio"
 	"github.com/gluonfield/acp-transport/streamhttp"
+	"github.com/wins/jaz/backend/internal/mcpsession"
 	"github.com/wins/jaz/backend/internal/processenv"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
 	"github.com/wins/jaz/backend/internal/sandbox"
@@ -170,6 +171,7 @@ func (m *Manager) openConn(ctx context.Context, name string, cfg AgentConfig, en
 		Dir:       cwd,
 		ReadOnly:  readOnly,
 		ReadWrite: agentStateDirs(env),
+		Session:   mcpsession.ID(ctx),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("prepare acp agent %q launch: %w", name, err)

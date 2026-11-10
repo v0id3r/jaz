@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	runnerLabel = "jaz.runner=1"
-	podmanPath  = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	runnerLabelKey = "jaz.runner"
+	runnerLabel    = runnerLabelKey + "=1"
+	podmanPath     = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
 
 // runArgs builds the `podman run` arguments for a request and the environment
@@ -107,6 +108,16 @@ func (c RunnerConfig) runArgs(name string, req Request) ([]string, []string, err
 	entrypoint, err := json.Marshal(req.Args)
 	if err != nil {
 		return nil, nil, err
+	}
+	if req.Session != "" {
+		if err := validSessionID(req.Session); err != nil {
+			return nil, nil, err
+		}
+		args = append(args, "--label", sessionLabel+"="+req.Session)
+		if c.Identity.WorkloadAPI != "" {
+			args = append(args, "--volume", c.Identity.WorkloadAPI+":"+workloadAPIDir+":ro",
+				"--env", "SPIFFE_ENDPOINT_SOCKET=unix://"+workloadAPIDir+"/api.sock")
+		}
 	}
 	args = append(args, c.Args...)
 	return append(args, "--entrypoint", string(entrypoint), c.Image), env, nil
