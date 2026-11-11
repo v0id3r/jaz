@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,17 @@ type Config struct {
 	GatewayID string
 	// Capture lists the ip:port destinations that go through the mesh.
 	Capture []string
+	// Egress is the host:port of a second gateway, the agent broker's, that
+	// takes every other TCP connection of a session. With it the session sends
+	// nothing else but DNS to DNS and connections to Direct: other UDP, IPv6
+	// and ICMP are dropped.
+	Egress string
+	// EgressID is the SPIFFE ID the egress gateway must present.
+	EgressID string
+	// DNS lists the resolvers (IPv4) sessions query directly, over port 53.
+	DNS []string
+	// Direct lists ip:port destinations sessions reach without a tunnel.
+	Direct []string
 	// Port is the capture listener's port on a session's loopback.
 	Port int
 	// TTL is the lifetime of a session's SVIDs; they renew at half of it.
@@ -64,7 +76,10 @@ const (
 type Outbound struct {
 	cfg       Config
 	gatewayID spiffeid.ID
+	egressID  spiffeid.ID
 	capture   []netip.AddrPort
+	direct    []netip.AddrPort
+	dns       []netip.Addr
 	issuer    *issuer
 	bundles   *bundleCache
 	log       *log.Logger
@@ -94,25 +109,51 @@ func NewOutbound(cfg Config, logger *log.Logger) (*Outbound, error) {
 	if _, err := netip.ParseAddrPort(cfg.Gateway); err != nil {
 		return nil, fmt.Errorf("mesh gateway: %w", err)
 	}
-	capture := make([]netip.AddrPort, 0, len(cfg.Capture))
-	for _, dst := range cfg.Capture {
-		addr, err := netip.ParseAddrPort(dst)
-		if err != nil || !addr.Addr().Is4() {
-			return nil, fmt.Errorf("mesh capture %q: want an IPv4 ip:port", dst)
-		}
-		capture = append(capture, addr)
+	capture, err := addrPorts("capture", cfg.Capture)
+	if err != nil {
+		return nil, err
 	}
 	if len(capture) == 0 {
 		return nil, errors.New("mesh capture is empty")
 	}
-	issuer, err := newIssuer(cfg.Server, td, cfg.TTL)
-	if err != nil {
+	o := &Outbound{cfg: cfg, gatewayID: gatewayID, capture: capture, log: logger.WithPrefix("mesh"), tunnels: map[string]*tunnel{}}
+	if cfg.Egress != "" {
+		if _, err := netip.ParseAddrPort(cfg.Egress); err != nil {
+			return nil, fmt.Errorf("mesh egress: %w", err)
+		}
+		if o.egressID, err = spiffeid.FromString(cfg.EgressID); err != nil {
+			return nil, fmt.Errorf("mesh egressID: %w", err)
+		}
+		if o.direct, err = addrPorts("direct", cfg.Direct); err != nil {
+			return nil, err
+		}
+		for _, s := range cfg.DNS {
+			addr, err := netip.ParseAddr(s)
+			if err != nil || !addr.Is4() {
+				return nil, fmt.Errorf("mesh dns %q: want an IPv4 address", s)
+			}
+			o.dns = append(o.dns, addr)
+		}
+	} else if cfg.EgressID != "" || len(cfg.DNS) > 0 || len(cfg.Direct) > 0 {
+		return nil, errors.New("mesh egressID, dns and direct need egress")
+	}
+	if o.issuer, err = newIssuer(cfg.Server, td, cfg.TTL); err != nil {
 		return nil, err
 	}
-	return &Outbound{
-		cfg: cfg, gatewayID: gatewayID, capture: capture, issuer: issuer,
-		bundles: &bundleCache{issuer: issuer}, log: logger.WithPrefix("mesh"), tunnels: map[string]*tunnel{},
-	}, nil
+	o.bundles = &bundleCache{issuer: o.issuer}
+	return o, nil
+}
+
+func addrPorts(name string, list []string) ([]netip.AddrPort, error) {
+	out := make([]netip.AddrPort, 0, len(list))
+	for _, dst := range list {
+		addr, err := netip.ParseAddrPort(dst)
+		if err != nil || !addr.Addr().Is4() {
+			return nil, fmt.Errorf("mesh %s %q: want an IPv4 ip:port", name, dst)
+		}
+		out = append(out, addr)
+	}
+	return out, nil
 }
 
 // PodmanArgs are the global podman arguments and the `podman run` arguments
@@ -127,7 +168,8 @@ func (o *Outbound) PodmanArgs(name, session string) (global, run []string) {
 func (o *Outbound) Expect(name, session string) func() {
 	ctx, cancel := context.WithCancel(context.Background())
 	t := &tunnel{
-		name: name, session: session, gateway: o.cfg.Gateway, ctx: ctx, cancel: cancel, log: o.log,
+		name: name, session: session, gateway: o.cfg.Gateway, egress: o.cfg.Egress, jaz: o.capture,
+		ctx: ctx, cancel: cancel, log: o.log,
 		svid:        &sessionSVID{issuer: o.issuer, id: spiffeid.RequireFromPath(o.issuer.td, "/session/"+session)},
 		destination: originalDst,
 	}
@@ -183,7 +225,7 @@ func (o *Outbound) Start(binary string) (func(), error) {
 			go o.serveHook(conn)
 		}
 	}()
-	o.log.Info("capture", "gateway", o.cfg.Gateway, "gatewayID", o.gatewayID, "capture", o.cfg.Capture, "port", o.cfg.Port)
+	o.log.Info("capture", "gateway", o.cfg.Gateway, "gatewayID", o.gatewayID, "capture", o.cfg.Capture, "egress", o.cfg.Egress, "egressID", o.egressID, "dns", o.cfg.DNS, "direct", o.cfg.Direct, "port", o.cfg.Port)
 	return func() { ln.Close() }, nil
 }
 
@@ -228,7 +270,7 @@ func (o *Outbound) attach(req hookRequest) error {
 	}
 	ln, err := ns.listen(fmt.Sprintf("127.0.0.1:%d", o.cfg.Port))
 	if err == nil {
-		err = ns.capture(o.capture, o.cfg.Port)
+		err = ns.capture(captureRules(o.capture, o.direct, o.dns, o.cfg.Port, o.cfg.Egress != ""))
 	}
 	if err != nil {
 		if ln != nil {
@@ -237,8 +279,18 @@ func (o *Outbound) attach(req hookRequest) error {
 		ns.close()
 		return err
 	}
-	transport := &http2.Transport{
-		TLSClientConfig: tlsconfig.MTLSClientConfig(t.svid, o.bundles, tlsconfig.AuthorizeID(o.gatewayID)),
+	var egress *http2.Transport
+	if o.cfg.Egress != "" {
+		egress = o.transport(t, ns, o.egressID)
+	}
+	return t.start(ns, ln, o.transport(t, ns, o.gatewayID), egress)
+}
+
+// transport tunnels from inside ns, as t's session, to a gateway that must
+// present gateway.
+func (o *Outbound) transport(t *tunnel, ns *netns, gateway spiffeid.ID) *http2.Transport {
+	return &http2.Transport{
+		TLSClientConfig: tlsconfig.MTLSClientConfig(t.svid, o.bundles, tlsconfig.AuthorizeID(gateway)),
 		DialTLSContext: func(ctx context.Context, _, addr string, cfg *tls.Config) (net.Conn, error) {
 			raw, err := ns.dial(addr)
 			if err != nil {
@@ -254,25 +306,28 @@ func (o *Outbound) attach(req hookRequest) error {
 		ReadIdleTimeout: 30 * time.Second,
 		PingTimeout:     10 * time.Second,
 	}
-	return t.start(ns, ln, transport)
 }
 
-// tunnel carries one container's captured connections.
+// tunnel carries one container's captured connections: those to jaz go to
+// the gateway, the rest to egress when there is one.
 type tunnel struct {
 	name, session, gateway string
+	egress                 string
+	jaz                    []netip.AddrPort
 	svid                   x509svid.Source
 	destination            func(net.Conn) (netip.AddrPort, error)
 	ctx                    context.Context
 	cancel                 context.CancelFunc
 	log                    *log.Logger
 
-	mu        sync.Mutex
-	ns        *netns
-	ln        net.Listener
-	transport *http2.Transport
+	mu              sync.Mutex
+	ns              *netns
+	ln              net.Listener
+	transport       *http2.Transport
+	egressTransport *http2.Transport
 }
 
-func (t *tunnel) start(ns *netns, ln net.Listener, transport *http2.Transport) error {
+func (t *tunnel) start(ns *netns, ln net.Listener, transport, egress *http2.Transport) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.ctx.Err() != nil || t.ln != nil {
@@ -280,7 +335,7 @@ func (t *tunnel) start(ns *netns, ln net.Listener, transport *http2.Transport) e
 		ns.close()
 		return errors.New("container already gone or captured")
 	}
-	t.ns, t.ln, t.transport = ns, ln, transport
+	t.ns, t.ln, t.transport, t.egressTransport = ns, ln, transport, egress
 	go t.accept(ln)
 	return nil
 }
@@ -302,12 +357,16 @@ func (t *tunnel) relay(conn net.Conn) {
 		t.log.Warn("captured connection without destination", "session", t.session, "error", err)
 		return
 	}
+	gateway, transport := t.gateway, t.transport
+	if t.egress != "" && !slices.Contains(t.jaz, dst) {
+		gateway, transport = t.egress, t.egressTransport
+	}
 	body, feed := io.Pipe()
 	req := (&http.Request{
-		Method: http.MethodConnect, URL: &url.URL{Scheme: "https", Host: t.gateway},
+		Method: http.MethodConnect, URL: &url.URL{Scheme: "https", Host: gateway},
 		Host: dst.String(), Header: http.Header{}, Body: body, ContentLength: -1,
 	}).WithContext(t.ctx)
-	resp, err := t.transport.RoundTrip(req)
+	resp, err := transport.RoundTrip(req)
 	if err != nil {
 		feed.Close()
 		t.log.Warn("tunnel", "session", t.session, "destination", dst, "error", err)
@@ -334,10 +393,20 @@ func (t *tunnel) close() {
 		t.ln.Close()
 	}
 	if t.ns != nil {
+		if t.egress != "" {
+			// What the session sent past the tunnels, such as UDP or IPv6.
+			if n, err := t.ns.dropped(); err != nil {
+				t.log.Warn("dropped packets unknown", "session", t.session, "error", err)
+			} else if n > 0 {
+				t.log.Info("dropped packets", "session", t.session, "container", t.name, "packets", n)
+			}
+		}
 		t.ns.close()
 	}
-	if t.transport != nil {
-		t.transport.CloseIdleConnections()
+	for _, tr := range []*http2.Transport{t.transport, t.egressTransport} {
+		if tr != nil {
+			tr.CloseIdleConnections()
+		}
 	}
 }
 

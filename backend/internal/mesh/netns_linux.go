@@ -4,6 +4,7 @@ package mesh
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/netip"
@@ -14,9 +15,6 @@ import (
 
 	"golang.org/x/sys/unix"
 )
-
-// tunnelMark is the socket mark ("jz") on the runner's own tunnel sockets.
-const tunnelMark = 0x6a7a
 
 // netns makes sockets inside another network namespace: a goroutine locked to
 // an OS thread that joined the namespace. The thread never leaves it; Go
@@ -97,25 +95,55 @@ func (n *netns) dial(addr string) (net.Conn, error) {
 
 func (n *netns) close() { close(n.done) }
 
-// capture redirects the namespace's connections to the destinations to the
-// capture port on its loopback; only the runner, not the session, can change
-// these rules, as sessions hold no network capabilities.
-func (n *netns) capture(destinations []netip.AddrPort, port int) error {
-	var rules strings.Builder
-	rules.WriteString("table ip jaz_mesh {\n chain output {\n  type nat hook output priority dstnat; policy accept;\n")
-	fmt.Fprintf(&rules, "  meta mark %#x return\n", tunnelMark)
-	for _, dst := range destinations {
-		fmt.Fprintf(&rules, "  ip daddr %s tcp dport %d redirect to :%d\n", dst.Addr(), dst.Port(), port)
+// capture loads rules, from captureRules, into the namespace; only the runner,
+// not the session, can change them, as sessions hold no network capabilities.
+func (n *netns) capture(rules string) error {
+	_, err := n.nft(rules, "-f", "-")
+	return err
+}
+
+// dropped reads how many packets the namespace's rules dropped.
+func (n *netns) dropped() (int64, error) {
+	out, err := n.nft("", "-j", "list", "counter", "inet", "jaz_mesh", "dropped")
+	if err != nil {
+		return 0, err
 	}
-	rules.WriteString(" }\n}\n")
-	cmd := exec.Command("nsenter", fmt.Sprintf("--net=/proc/%d/ns/net", n.pid), "nft", "-f", "-")
-	cmd.Stdin = strings.NewReader(rules.String())
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("nft: %w: %s", err, strings.TrimSpace(out.String()))
+	var listing struct {
+		Nftables []struct {
+			Counter *struct {
+				Packets int64 `json:"packets"`
+			} `json:"counter"`
+		} `json:"nftables"`
 	}
-	return nil
+	if err := json.Unmarshal(out, &listing); err != nil {
+		return 0, err
+	}
+	for _, item := range listing.Nftables {
+		if item.Counter != nil {
+			return item.Counter.Packets, nil
+		}
+	}
+	return 0, fmt.Errorf("nft: no dropped counter")
+}
+
+// nft runs nft from the namespace's thread, so the child starts in the
+// namespace; it works even after the container's process is gone.
+func (n *netns) nft(stdin string, args ...string) ([]byte, error) {
+	var out, errOut bytes.Buffer
+	var err error
+	derr := n.do(func() {
+		cmd := exec.Command("nft", args...)
+		cmd.Stdin = strings.NewReader(stdin)
+		cmd.Stdout, cmd.Stderr = &out, &errOut
+		err = cmd.Run()
+	})
+	if derr != nil {
+		return nil, derr
+	}
+	if err != nil {
+		return nil, fmt.Errorf("nft: %w: %s", err, strings.TrimSpace(errOut.String()))
+	}
+	return out.Bytes(), nil
 }
 
 // originalDst is where a redirected connection was headed (SO_ORIGINAL_DST).

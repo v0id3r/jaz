@@ -200,3 +200,90 @@ func TestTunnelEndsAfterConnectionClose(t *testing.T) {
 		t.Fatalf("response %q, %v: the tunnel did not end", got, err)
 	}
 }
+
+// TestTunnelRoutesByDestination: with an egress gateway, connections to Jaz
+// still go to the Jaz gateway and every other one to egress, each as the
+// session and to its original destination.
+func TestTunnelRoutesByDestination(t *testing.T) {
+	ca := newTestCA(t)
+	bundle := x509bundle.FromX509Authorities(td, []*x509.Certificate{ca.cert})
+	jaz := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "jaz")
+	}))
+	t.Cleanup(jaz.Close)
+	target, _ := url.Parse(jaz.URL)
+
+	serve := func(svid *x509svid.SVID, h http.Handler) string {
+		server := &http.Server{Handler: h, TLSConfig: tlsconfig.MTLSServerConfig(svid, bundle, tlsconfig.AuthorizeMemberOf(td))}
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() { _ = server.ServeTLS(ln, "", "") }()
+		t.Cleanup(func() { server.Close() })
+		return ln.Addr().String()
+	}
+	gatewaySVID, brokerSVID := ca.svid(t, "/mesh-gateway"), ca.svid(t, "/broker")
+	g := newGateway(target, td, log.Default())
+	jazGateway := serve(gatewaySVID, g)
+	seen := make(chan string, 1)
+	egressGateway := serve(brokerSVID, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := x509svid.IDFromCert(r.TLS.PeerCertificates[0])
+		seen <- id.String() + " " + r.Host
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		_, _ = io.WriteString(w, "egress")
+	}))
+
+	session := ca.svid(t, "/session/s1")
+	transport := func(gateway spiffeid.ID) *http2.Transport {
+		return &http2.Transport{
+			TLSClientConfig: tlsconfig.MTLSClientConfig(session, bundle, tlsconfig.AuthorizeID(gateway)),
+			DialTLSContext: func(ctx context.Context, _, addr string, cfg *tls.Config) (net.Conn, error) {
+				return (&tls.Dialer{Config: cfg}).DialContext(ctx, "tcp", addr)
+			},
+		}
+	}
+	jazAddr := netip.MustParseAddrPort(target.Host)
+	other := netip.MustParseAddrPort("93.184.215.14:443")
+	next := make(chan netip.AddrPort, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	tun := &tunnel{
+		session: "s1", gateway: jazGateway, egress: egressGateway, jaz: []netip.AddrPort{jazAddr},
+		svid: session, ctx: ctx, cancel: cancel, log: log.Default(),
+		destination: func(net.Conn) (netip.AddrPort, error) { return <-next, nil },
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tun.ln, tun.transport, tun.egressTransport = ln, transport(gatewaySVID.ID), transport(brokerSVID.ID)
+	go tun.accept(ln)
+	t.Cleanup(tun.close)
+
+	next <- jazAddr
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get("http://" + ln.Addr().String() + "/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "jaz" {
+		t.Fatalf("Jaz destination: %q", body)
+	}
+
+	next <- other
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	got := make([]byte, 6)
+	if _, err := io.ReadFull(conn, got); err != nil || string(got) != "egress" {
+		t.Fatalf("other destination: %q %v", got, err)
+	}
+	if s := <-seen; s != "spiffe://mesh.test/session/s1 "+other.String() {
+		t.Fatalf("egress saw %q", s)
+	}
+}
