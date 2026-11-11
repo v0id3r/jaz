@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"os/signal"
 	"strings"
 	"sync"
@@ -177,22 +178,82 @@ func newGateway(target *url.URL, td spiffeid.TrustDomain, logger *log.Logger) *t
 }
 
 // streamConn is the inside of an HBONE stream as a net.Conn: reads come from
-// the request body, writes go out as response data, flushed at once.
+// the request body, writes go out as response data, flushed at once. The body
+// is read by a goroutine of its own, so a read deadline can end a Read without
+// losing data: after each response net/http stops its background read with a
+// past deadline and waits for it, and a no-op deadline would hang the tunnel.
 type streamConn struct {
 	body   io.ReadCloser
 	w      io.Writer
 	rc     *http.ResponseController
 	remote string
+	chunks chan streamChunk
 
 	once   sync.Once
 	closed chan struct{}
+
+	rest []byte // of the last chunk, for the next Read
+	err  error  // that ended the body, once rest is read
+
+	mu       sync.Mutex
+	deadline chan struct{} // closed once the read deadline passes
+	timer    *time.Timer
+	gen      int // of the deadline the timer is for
+}
+
+type streamChunk struct {
+	b   []byte
+	err error
 }
 
 func newStreamConn(body io.ReadCloser, w io.Writer, rc *http.ResponseController, remote string) *streamConn {
-	return &streamConn{body: body, w: w, rc: rc, remote: remote, closed: make(chan struct{})}
+	c := &streamConn{
+		body: body, w: w, rc: rc, remote: remote, chunks: make(chan streamChunk),
+		closed: make(chan struct{}), deadline: make(chan struct{}),
+	}
+	go c.pump()
+	return c
 }
 
-func (c *streamConn) Read(p []byte) (int, error) { return c.body.Read(p) }
+func (c *streamConn) pump() {
+	for {
+		b := make([]byte, 32<<10)
+		n, err := c.body.Read(b)
+		select {
+		case c.chunks <- streamChunk{b[:n], err}:
+		case <-c.closed:
+			return
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (c *streamConn) Read(p []byte) (int, error) {
+	if len(c.rest) == 0 {
+		if c.err != nil {
+			return 0, c.err
+		}
+		c.mu.Lock()
+		deadline := c.deadline
+		c.mu.Unlock()
+		select {
+		case ch := <-c.chunks:
+			c.rest, c.err = ch.b, ch.err
+			if len(c.rest) == 0 {
+				return 0, c.err
+			}
+		case <-deadline:
+			return 0, os.ErrDeadlineExceeded
+		case <-c.closed:
+			return 0, net.ErrClosed
+		}
+	}
+	n := copy(p, c.rest)
+	c.rest = c.rest[n:]
+	return n, nil
+}
 
 func (c *streamConn) Write(p []byte) (int, error) {
 	n, err := c.w.Write(p)
@@ -204,16 +265,45 @@ func (c *streamConn) Write(p []byte) (int, error) {
 
 func (c *streamConn) Close() error {
 	c.once.Do(func() {
-		_ = c.body.Close()
 		close(c.closed)
+		_ = c.body.Close()
 	})
+	return nil
+}
+
+// SetReadDeadline ends a pending Read when the deadline passes.
+func (c *streamConn) SetReadDeadline(t time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.timer != nil {
+		c.timer.Stop()
+	}
+	c.gen++
+	select {
+	case <-c.deadline:
+		c.deadline = make(chan struct{})
+	default:
+	}
+	switch {
+	case t.IsZero():
+	case time.Until(t) <= 0:
+		close(c.deadline)
+	default:
+		gen := c.gen
+		c.timer = time.AfterFunc(time.Until(t), func() {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if c.gen == gen {
+				close(c.deadline)
+			}
+		})
+	}
 	return nil
 }
 
 func (c *streamConn) LocalAddr() net.Addr              { return streamAddr("hbone") }
 func (c *streamConn) RemoteAddr() net.Addr             { return streamAddr(c.remote) }
-func (c *streamConn) SetDeadline(time.Time) error      { return nil }
-func (c *streamConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *streamConn) SetDeadline(t time.Time) error    { return c.SetReadDeadline(t) }
 func (c *streamConn) SetWriteDeadline(time.Time) error { return nil }
 
 type streamAddr string

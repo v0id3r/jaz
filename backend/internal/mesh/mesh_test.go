@@ -180,3 +180,23 @@ func TestGatewayRefusesNonSessions(t *testing.T) {
 		t.Fatalf("got %s, want the connection dropped", resp.Status)
 	}
 }
+
+// TestTunnelEndsAfterConnectionClose: after a response net/http stops its
+// background read with a past read deadline and waits for it, so the tunnel
+// must honour read deadlines or a "Connection: close" exchange never ends.
+func TestTunnelEndsAfterConnectionClose(t *testing.T) {
+	addr := startMesh(t, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = io.WriteString(conn, "GET /x HTTP/1.1\r\nHost: jaz\r\nConnection: close\r\n\r\n")
+	got, err := io.ReadAll(conn)
+	if err != nil || !strings.HasSuffix(string(got), "ok") {
+		t.Fatalf("response %q, %v: the tunnel did not end", got, err)
+	}
+}
