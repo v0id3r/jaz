@@ -28,6 +28,11 @@ func TestCaptureRules(t *testing.T) {
 		"ct status dnat accept",
 		"ip daddr 10.216.94.1 meta l4proto { tcp, udp } th dport 53 accept",
 		"counter name dropped drop",
+		"type route hook output priority mangle;",
+		"ip daddr 10.216.94.1 udp dport 53 return",
+		"meta nfproto ipv4 meta l4proto udp meta mark set 0x6a75",
+		"iifname \"lo\" meta mark 0x6a75 meta nfproto ipv4 meta l4proto udp tproxy ip to 127.0.0.1:15001",
+		"meta mark 0x6a75 meta l4proto udp accept",
 	} {
 		if !strings.Contains(all, want) {
 			t.Errorf("missing %q in\n%s", want, all)
@@ -40,5 +45,8 @@ func TestCaptureRules(t *testing.T) {
 	// Exemptions come before the catch-all redirect.
 	if strings.Index(all, "tcp dport 4010 return") > strings.Index(all, "redirect to") {
 		t.Errorf("direct after the redirect:\n%s", all)
+	}
+	if strings.Index(all, "udp dport 53 return") > strings.Index(all, "meta mark set") {
+		t.Errorf("DNS after the UDP mark:\n%s", all)
 	}
 }

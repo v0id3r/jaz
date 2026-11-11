@@ -4,7 +4,9 @@ package mesh
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -126,13 +128,98 @@ func (n *netns) dropped() (int64, error) {
 	return 0, fmt.Errorf("nft: no dropped counter")
 }
 
-// nft runs nft from the namespace's thread, so the child starts in the
-// namespace; it works even after the container's process is gone.
+// routeUDP sends packets with udpMark to table udpTable, where every address
+// is local: marked UDP comes back in through loopback for TPROXY.
+func (n *netns) routeUDP() error {
+	mark, table := fmt.Sprintf("%#x", udpMark), fmt.Sprint(udpTable)
+	if _, err := n.run("ip", "", "-4", "rule", "add", "fwmark", mark, "lookup", table); err != nil {
+		return err
+	}
+	_, err := n.run("ip", "", "-4", "route", "add", "local", "0.0.0.0/0", "dev", "lo", "table", table)
+	return err
+}
+
+// listenUDP opens the TPROXY socket at addr: it receives the datagrams of
+// any destination that TPROXY hands it and tells each one's destination.
+func (n *netns) listenUDP(addr string) (*net.UDPConn, error) {
+	lc := net.ListenConfig{Control: sockopts(func(fd int) error {
+		if err := unix.SetsockoptInt(fd, unix.SOL_IP, unix.IP_TRANSPARENT, 1); err != nil {
+			return err
+		}
+		return unix.SetsockoptInt(fd, unix.SOL_IP, unix.IP_RECVORIGDSTADDR, 1)
+	})}
+	var conn net.PacketConn
+	var err error
+	if derr := n.do(func() { conn, err = lc.ListenPacket(context.Background(), "udp4", addr) }); derr != nil {
+		return nil, derr
+	}
+	if err != nil {
+		return nil, err
+	}
+	return conn.(*net.UDPConn), nil
+}
+
+// replyAs opens a socket that sends from dst, an address not of the
+// namespace, so that replies reach a session as from where it sent.
+func (n *netns) replyAs(dst netip.AddrPort) (net.PacketConn, error) {
+	lc := net.ListenConfig{Control: sockopts(func(fd int) error {
+		for _, opt := range [][3]int{{unix.SOL_IP, unix.IP_TRANSPARENT, 1}, {unix.SOL_SOCKET, unix.SO_REUSEADDR, 1}, {unix.SOL_SOCKET, unix.SO_MARK, tunnelMark}} {
+			if err := unix.SetsockoptInt(fd, opt[0], opt[1], opt[2]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})}
+	var conn net.PacketConn
+	var err error
+	if derr := n.do(func() { conn, err = lc.ListenPacket(context.Background(), "udp4", dst.String()) }); derr != nil {
+		return nil, derr
+	}
+	return conn, err
+}
+
+func sockopts(set func(fd int) error) func(string, string, syscall.RawConn) error {
+	return func(_, _ string, raw syscall.RawConn) error {
+		var serr error
+		if err := raw.Control(func(fd uintptr) { serr = set(int(fd)) }); err != nil {
+			return err
+		}
+		return serr
+	}
+}
+
+// readUDP reads a datagram from a TPROXY socket with its source and
+// original destination.
+func readUDP(conn *net.UDPConn, buf, oob []byte) (n int, src, dst netip.AddrPort, err error) {
+	n, oobn, _, src, err := conn.ReadMsgUDPAddrPort(buf, oob)
+	if err != nil {
+		return 0, src, dst, err
+	}
+	msgs, err := unix.ParseSocketControlMessage(oob[:oobn])
+	if err != nil {
+		return 0, src, dst, err
+	}
+	for _, m := range msgs {
+		// A sockaddr_in: family, port (big-endian), address.
+		if m.Header.Level == unix.SOL_IP && m.Header.Type == unix.IP_ORIGDSTADDR && len(m.Data) >= 8 {
+			dst = netip.AddrPortFrom(netip.AddrFrom4([4]byte(m.Data[4:8])), uint16(m.Data[2])<<8|uint16(m.Data[3]))
+			return n, netip.AddrPortFrom(src.Addr().Unmap(), src.Port()), dst, nil
+		}
+	}
+	return 0, src, dst, errors.New("datagram without its original destination")
+}
+
 func (n *netns) nft(stdin string, args ...string) ([]byte, error) {
+	return n.run("nft", stdin, args...)
+}
+
+// run runs a program from the namespace's thread, so the child starts in the
+// namespace; it works even after the container's process is gone.
+func (n *netns) run(name, stdin string, args ...string) ([]byte, error) {
 	var out, errOut bytes.Buffer
 	var err error
 	derr := n.do(func() {
-		cmd := exec.Command("nft", args...)
+		cmd := exec.Command(name, args...)
 		cmd.Stdin = strings.NewReader(stdin)
 		cmd.Stdout, cmd.Stderr = &out, &errOut
 		err = cmd.Run()
@@ -141,7 +228,7 @@ func (n *netns) nft(stdin string, args ...string) ([]byte, error) {
 		return nil, derr
 	}
 	if err != nil {
-		return nil, fmt.Errorf("nft: %w: %s", err, strings.TrimSpace(errOut.String()))
+		return nil, fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(errOut.String()))
 	}
 	return out.Bytes(), nil
 }

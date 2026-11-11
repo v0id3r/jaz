@@ -45,9 +45,9 @@ type Config struct {
 	// Capture lists the ip:port destinations that go through the mesh.
 	Capture []string
 	// Egress is the host:port of a second gateway, the agent broker's, that
-	// takes every other TCP connection of a session. With it the session sends
-	// nothing else but DNS to DNS and connections to Direct: other UDP, IPv6
-	// and ICMP are dropped.
+	// takes every other TCP connection of a session and, over connect-udp,
+	// its IPv4 UDP. With it the session sends nothing else but DNS to DNS and
+	// connections to Direct: IPv6, ICMP and other protocols are dropped.
 	Egress string
 	// EgressID is the SPIFFE ID the egress gateway must present.
 	EgressID string
@@ -268,7 +268,14 @@ func (o *Outbound) attach(req hookRequest) error {
 	if err != nil {
 		return err
 	}
-	ln, err := ns.listen(fmt.Sprintf("127.0.0.1:%d", o.cfg.Port))
+	addr := fmt.Sprintf("127.0.0.1:%d", o.cfg.Port)
+	ln, err := ns.listen(addr)
+	var udp *net.UDPConn
+	if err == nil && o.cfg.Egress != "" {
+		if err = ns.routeUDP(); err == nil {
+			udp, err = ns.listenUDP(addr)
+		}
+	}
 	if err == nil {
 		err = ns.capture(captureRules(o.capture, o.direct, o.dns, o.cfg.Port, o.cfg.Egress != ""))
 	}
@@ -276,14 +283,44 @@ func (o *Outbound) attach(req hookRequest) error {
 		if ln != nil {
 			ln.Close()
 		}
+		if udp != nil {
+			udp.Close()
+		}
 		ns.close()
 		return err
 	}
 	var egress *http2.Transport
+	var relay *udpRelay
 	if o.cfg.Egress != "" {
 		egress = o.transport(t, ns, o.egressID)
+		relay = newUDPRelay(t.session, o.log, udpIdle, udpRetry, o.openUDP(t, ns), ns.replyAs)
 	}
-	return t.start(ns, ln, o.transport(t, ns, o.gatewayID), egress)
+	return t.start(ns, ln, o.transport(t, ns, o.gatewayID), egress, udp, relay)
+}
+
+// openUDP makes connect-udp streams from inside ns, as t's session, to the
+// egress gateway, each over a connection of its own.
+func (o *Outbound) openUDP(t *tunnel, ns *netns) func(context.Context, netip.AddrPort) (io.ReadWriteCloser, error) {
+	return func(ctx context.Context, dst netip.AddrPort) (io.ReadWriteCloser, error) {
+		ctx, cancel := context.WithTimeout(ctx, 2*dialTimeout)
+		defer cancel()
+		raw, err := ns.dial(o.cfg.Egress)
+		if err != nil {
+			return nil, err
+		}
+		cfg := tlsconfig.MTLSClientConfig(t.svid, o.bundles, tlsconfig.AuthorizeID(o.egressID))
+		cfg.NextProtos = []string{http2.NextProtoTLS}
+		conn := tls.Client(raw, cfg)
+		if err := conn.HandshakeContext(ctx); err != nil {
+			raw.Close()
+			return nil, err
+		}
+		if p := conn.ConnectionState().NegotiatedProtocol; p != http2.NextProtoTLS {
+			conn.Close()
+			return nil, fmt.Errorf("egress gateway speaks %q, not h2", p)
+		}
+		return openUDP(ctx, conn, o.cfg.Egress, dst)
+	}
 }
 
 // transport tunnels from inside ns, as t's session, to a gateway that must
@@ -325,19 +362,44 @@ type tunnel struct {
 	ln              net.Listener
 	transport       *http2.Transport
 	egressTransport *http2.Transport
+	udp             *net.UDPConn
+	udpRelay        *udpRelay
 }
 
-func (t *tunnel) start(ns *netns, ln net.Listener, transport, egress *http2.Transport) error {
+func (t *tunnel) start(ns *netns, ln net.Listener, transport, egress *http2.Transport, udp *net.UDPConn, relay *udpRelay) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.ctx.Err() != nil || t.ln != nil {
 		ln.Close()
+		if udp != nil {
+			udp.Close()
+			relay.close()
+		}
 		ns.close()
 		return errors.New("container already gone or captured")
 	}
-	t.ns, t.ln, t.transport, t.egressTransport = ns, ln, transport, egress
+	t.ns, t.ln, t.transport, t.egressTransport, t.udp, t.udpRelay = ns, ln, transport, egress, udp, relay
 	go t.accept(ln)
+	if udp != nil {
+		go t.serveUDP(udp, relay)
+	}
 	return nil
+}
+
+// serveUDP hands the datagrams TPROXY takes from the session to the relay.
+func (t *tunnel) serveUDP(conn *net.UDPConn, relay *udpRelay) {
+	buf, oob := make([]byte, maxCapsule), make([]byte, 128)
+	for {
+		n, src, dst, err := readUDP(conn, buf, oob)
+		if errors.Is(err, net.ErrClosed) {
+			return
+		}
+		if err != nil {
+			t.log.Warn("captured datagram", "session", t.session, "error", err)
+			continue
+		}
+		relay.packet(src, dst, slices.Clone(buf[:n]))
+	}
 }
 
 func (t *tunnel) accept(ln net.Listener) {
@@ -392,9 +454,13 @@ func (t *tunnel) close() {
 	if t.ln != nil {
 		t.ln.Close()
 	}
+	if t.udp != nil {
+		t.udp.Close()
+		t.udpRelay.close()
+	}
 	if t.ns != nil {
 		if t.egress != "" {
-			// What the session sent past the tunnels, such as UDP or IPv6.
+			// What the session sent past the tunnels, such as IPv6 or ICMP.
 			if n, err := t.ns.dropped(); err != nil {
 				t.log.Warn("dropped packets unknown", "session", t.session, "error", err)
 			} else if n > 0 {
