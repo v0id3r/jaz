@@ -52,6 +52,8 @@ type Config struct {
 	// EgressID is the SPIFFE ID the egress gateway must present.
 	EgressID string
 	// DNS lists the resolvers (IPv4) sessions query directly, over port 53.
+	// Leave it empty to send DNS through egress too: the agent broker answers
+	// it, decides and logs each query and names later connections by it.
 	DNS []string
 	// Direct lists ip:port destinations sessions reach without a tunnel.
 	Direct []string
