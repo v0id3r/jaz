@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -401,6 +402,48 @@ func TestACPTranscriptTextRunSurvivesToolBarrier(t *testing.T) {
 	}
 	if events[0].ProjectionKey == "" || events[2].ProjectionKey != events[0].ProjectionKey || events[2].ProjectionOp != sessionevents.ProjectionAppend {
 		t.Fatalf("persisted text projection = %#v, %#v", events[0], events[2])
+	}
+}
+
+func TestACPTranscriptEngineTurnKeyGroupsChunks(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.CreateSession(storage.CreateSession{Slug: "main", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{}, nil)
+	manager.Events = sessionevents.New()
+	job := &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPAgent: AgentKimi, ACPSession: "acp-session", State: StateIdle}}
+	manager.jobsByID[session.ID] = job
+
+	chunk := func(turnID int, text string) json.RawMessage {
+		return json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + text + `"},"_meta":{"turnId":` + strconv.Itoa(turnID) + `}}`)
+	}
+	manager.applyJobUpdate(job, chunk(7, "turn seven, "))
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+	manager.applyJobUpdate(job, chunk(7, "same run"))
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+	manager.applyJobUpdate(job, chunk(8, "turn eight"))
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+
+	events, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events = %#v", events)
+	}
+	if events[0].ACP.TextRunID != "engine:7" || events[1].ACP.TextRunID != "engine:7" {
+		t.Fatalf("turn 7 runs = %q, %q", events[0].ACP.TextRunID, events[1].ACP.TextRunID)
+	}
+	if events[2].ACP.TextRunID != "engine:8" {
+		t.Fatalf("turn 8 run = %q", events[2].ACP.TextRunID)
+	}
+	if events[1].ProjectionKey == "" || events[1].ProjectionKey != events[0].ProjectionKey || events[1].ProjectionOp != sessionevents.ProjectionAppend {
+		t.Fatalf("projection = %#v, %#v", events[0], events[1])
 	}
 }
 

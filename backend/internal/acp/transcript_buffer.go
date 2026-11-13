@@ -21,7 +21,11 @@ type acpTranscriptRun struct {
 	eventType         string
 	chunks            []string
 	upstreamMessageID string
-	textRunID         string
+	// engineTurnKey is the agent-reported engine turn id (session/update
+	// `_meta.turnId` extension); when present it keys the run directly and
+	// replaces both the host turn key and the turn-less heuristic.
+	engineTurnKey string
+	textRunID     string
 }
 
 type acpTranscriptBuffers struct {
@@ -139,7 +143,7 @@ func (b *acpTranscriptBuffers) delete(sessionID string) {
 func (b *acpTranscriptBuffer) queue(m *Manager, run acpTranscriptRun, turnKey string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	run.textRunID = b.textRunIDLocked(run.eventType, run.upstreamMessageID, turnKey, time.Now())
+	run.textRunID = b.textRunIDLocked(run, turnKey, time.Now())
 	if n := len(b.runs); n > 0 && run.textRunID != "" && b.runs[n-1].eventType == run.eventType && b.runs[n-1].textRunID == run.textRunID {
 		b.runs[n-1].chunks = append(b.runs[n-1].chunks, run.chunks...)
 	} else {
@@ -166,12 +170,16 @@ func transcriptTurnKey(turn *activeTurn) string {
 	return strconv.FormatInt(turn.startedAt.UnixNano(), 10)
 }
 
-func (b *acpTranscriptBuffer) textRunIDLocked(eventType, upstreamMessageID, turnKey string, now time.Time) string {
-	if upstreamMessageID != "" {
+func (b *acpTranscriptBuffer) textRunIDLocked(run acpTranscriptRun, turnKey string, now time.Time) string {
+	if run.upstreamMessageID != "" {
 		b.currentRunType = ""
 		b.currentRunID = ""
-		return textRunID(upstreamMessageID)
+		return textRunID(run.upstreamMessageID)
 	}
+	if run.engineTurnKey != "" {
+		return "engine:" + run.engineTurnKey
+	}
+	eventType := run.eventType
 	if turnKey == "" {
 		// Turn-less chunks: without a run id every chunk would flush as its
 		// own transcript message. Keep one run open per continuous stream so
