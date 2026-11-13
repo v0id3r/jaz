@@ -12,7 +12,7 @@ import (
 	"github.com/wins/jaz/backend/internal/runtimefiles"
 )
 
-var errKimiModelNotConfigured = errors.New("Kimi sign-in did not finish configuring a model; sign in again")
+var errKimiModelNotConfigured = errors.New("kimi sign-in did not finish configuring a model; sign in again")
 
 type kimiConfig struct {
 	DefaultModel    string                    `toml:"default_model"`

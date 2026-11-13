@@ -73,7 +73,7 @@ func (h *Handler) Input(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusConflict
 		if errors.Is(err, acp.ErrSteeringUnsupported) {
 			status = http.StatusNotImplemented
-			err = errors.New("This agent cannot accept live follow-ups while it is working.")
+			err = errors.New("this agent cannot accept live follow-ups while it is working")
 		}
 		httpapi.WriteError(w, status, err)
 		return

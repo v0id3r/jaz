@@ -24,6 +24,7 @@ func (p *Provider) SendMessage(ctx context.Context, req telegramconnector.SendMe
 		}
 		peerID = resolved
 		if err := p.foregroundCall(runCtx, func(ctx context.Context) error {
+			//lint:ignore SA1019 message.NewSender cannot set an explicit RandomID; migrating changes the send path semantics.
 			return client.SendMessage(ctx, &tg.MessagesSendMessageRequest{
 				Peer:     peer,
 				Message:  req.Message,
@@ -47,6 +48,7 @@ func (p *Provider) SendMessage(ctx context.Context, req telegramconnector.SendMe
 		}
 		peerID = resolved
 		return p.foregroundCall(runCtx, func(ctx context.Context) error {
+			//lint:ignore SA1019 message.NewSender cannot set an explicit RandomID; migrating changes the send path semantics.
 			return client.SendMessage(ctx, &tg.MessagesSendMessageRequest{
 				Peer:     peer,
 				Message:  req.Message,

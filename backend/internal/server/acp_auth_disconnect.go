@@ -79,7 +79,7 @@ func (s *Server) handleDisconnectACPAuth(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if agent == acp.AgentMuse && response.ACPAuth[agent].Authenticated && response.ACPAuth[agent].AuthKind != acp.AuthKindNone {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("Muse is signed in through META_API_KEY; remove the environment variable to disconnect"))
+		writeError(w, http.StatusBadRequest, fmt.Errorf("muse is signed in through META_API_KEY; remove the environment variable to disconnect"))
 		return
 	}
 

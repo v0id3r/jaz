@@ -140,20 +140,6 @@ func (s *Server) providerKeyConfigured(id string) bool {
 	return ok
 }
 
-func (s *Server) validateModelProviderRunnable(id string) error {
-	if s.ModelProviderRuntime == nil {
-		return nil
-	}
-	meta, ok := provider.RunnableModelProviderByID(id)
-	if !ok {
-		return fmt.Errorf("unknown model provider %q", id)
-	}
-	if strings.TrimSpace(meta.APIKeyEnv) == "" || s.providerKeyConfigured(id) {
-		return nil
-	}
-	return fmt.Errorf("model provider %q cannot run without %s; add the key in Settings > Agents", id, meta.APIKeyEnv)
-}
-
 func (s *Server) runtimeKeyEnvPath() string {
 	if s.ModelProviderRuntime != nil {
 		if path := strings.TrimSpace(s.ModelProviderRuntime.APIKeyEnvPath()); path != "" {

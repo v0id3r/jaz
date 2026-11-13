@@ -23,12 +23,6 @@ func (p testPrompt) ACPPromptForContext(_ context.Context, _, _ string) (string,
 	return string(p), nil
 }
 
-type cwdPrompt struct{}
-
-func (cwdPrompt) ACPPromptForContext(_ context.Context, cwd, _ string) (string, error) {
-	return "cwd=" + cwd, nil
-}
-
 type platformPrompt struct{}
 
 func (platformPrompt) ACPPromptForContext(ctx context.Context, _, _ string) (string, error) {

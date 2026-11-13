@@ -199,7 +199,7 @@ func extractBackendBinary(archive []byte) ([]byte, os.FileMode, error) {
 		if filepath.Base(header.Name) != "jaz" {
 			continue
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return nil, 0, errors.New("release archive jaz entry is not a file")
 		}
 		data, err := io.ReadAll(tr)

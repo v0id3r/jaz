@@ -54,10 +54,10 @@ func (m *Manager) resolveCodexCustomProviderModelMetadata(name string, cfg Agent
 		return "", nil
 	}
 	if modelID == "" {
-		return "", fmt.Errorf("Codex provider %q requires an explicit model", providerID)
+		return "", fmt.Errorf("codex provider %q requires an explicit model", providerID)
 	}
 	if m.cfg.ModelCatalog == nil {
-		return "", fmt.Errorf("Codex provider %q model %q requires model metadata", providerID, modelID)
+		return "", fmt.Errorf("codex provider %q model %q requires model metadata", providerID, modelID)
 	}
 	models, err := (ModelCapabilities{Catalog: m.cfg.ModelCatalog}).ProviderModels(AgentCodex, providerID)
 	if err != nil {
@@ -65,10 +65,10 @@ func (m *Manager) resolveCodexCustomProviderModelMetadata(name string, cfg Agent
 	}
 	model, ok := findCapabilityModel(models, modelID)
 	if !ok {
-		return "", fmt.Errorf("Codex provider %q has no metadata for model %q", providerID, modelID)
+		return "", fmt.Errorf("codex provider %q has no metadata for model %q", providerID, modelID)
 	}
 	if model.ContextLength <= 0 || len(model.InputModalities) == 0 || model.Reasoning.Status != modelcatalog.ReasoningReady {
-		return "", fmt.Errorf("Codex provider %q has incomplete metadata for model %q", providerID, modelID)
+		return "", fmt.Errorf("codex provider %q has incomplete metadata for model %q", providerID, modelID)
 	}
 	metadata := codexModelMetadata{
 		ID:                     modelID,

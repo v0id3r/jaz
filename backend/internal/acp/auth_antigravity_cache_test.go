@@ -42,7 +42,8 @@ func TestAntigravityCLIAuthenticatedCachesSuccess(t *testing.T) {
 		t.Skip("fake shell executable unsupported on windows")
 	}
 	env, counter := fakeAgy(t, 0)
-	if !antigravityCLIAuthenticated(env) || !antigravityCLIAuthenticated(env) {
+	first, second := antigravityCLIAuthenticated(env), antigravityCLIAuthenticated(env)
+	if !first || !second {
 		t.Fatal("expected authenticated on both probes")
 	}
 	if got := agyRuns(t, counter); got != 1 {
@@ -57,7 +58,8 @@ func TestAntigravityCLIAuthenticatedDoesNotCacheFailure(t *testing.T) {
 		t.Skip("fake shell executable unsupported on windows")
 	}
 	env, counter := fakeAgy(t, 1)
-	if antigravityCLIAuthenticated(env) || antigravityCLIAuthenticated(env) {
+	first, second := antigravityCLIAuthenticated(env), antigravityCLIAuthenticated(env)
+	if first || second {
 		t.Fatal("expected not authenticated on both probes")
 	}
 	if got := agyRuns(t, counter); got != 2 {

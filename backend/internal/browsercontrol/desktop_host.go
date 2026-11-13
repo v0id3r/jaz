@@ -43,7 +43,7 @@ func (b *DesktopBackend) page(ctx context.Context, session string) (*browserPage
 		return page, nil
 	}
 	if host == nil {
-		return nil, errors.New("Jaz desktop side browser is not connected; open or reconnect the Jaz desktop app")
+		return nil, errors.New("jaz desktop side browser is not connected; open or reconnect the Jaz desktop app")
 	}
 	if err := host.call(ctx, "Jaz.connect", map[string]string{"session": session}, nil); err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func (b *DesktopBackend) page(ctx context.Context, session string) (*browserPage
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-host.done:
-			return nil, errors.New("Jaz desktop side browser disconnected")
+			return nil, errors.New("jaz desktop side browser disconnected")
 		case <-changed:
 		}
 	}

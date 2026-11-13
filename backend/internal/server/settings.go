@@ -151,19 +151,6 @@ func (s *Server) modelProviderKeyConfigured(id string, cfg provider.ModelProvide
 	return ok
 }
 
-func (s *Server) modelProviderConfigured(id string) bool {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return false
-	}
-	for _, provider := range s.settingsModelProviders() {
-		if provider.ID == id {
-			return provider.Implemented && provider.Configured
-		}
-	}
-	return false
-}
-
 func (s *Server) acpAgentAuthStatuses(defaults agentsettings.AgentDefaults) map[string]acpAuthStatusResponse {
 	out := make(map[string]acpAuthStatusResponse, len(s.allACPAgentNames()))
 	for _, name := range s.allACPAgentNames() {
@@ -295,10 +282,6 @@ func enabledACPAgentRequiresAuth(name string, cfg acp.AgentConfig) bool {
 	default:
 		return false
 	}
-}
-
-func (s *Server) agentSettingsSeed() agentsettings.AgentDefaults {
-	return agentsettings.AgentDefaultsFromCatalog(s.selectableACPAgentCatalog())
 }
 
 func (s *Server) allACPAgentNames() []string {

@@ -23,7 +23,7 @@ func configureMusePrompt(dir string, env map[string]string, prompt string) error
 	}
 	if data, err := os.ReadFile(filepath.Join(source, "muse", "settings.json")); err == nil {
 		if json.Unmarshal(data, &settings) == nil && settings.Permissions.DefaultProfile == ":auto-review" {
-			return fmt.Errorf("Muse's :auto-review permission profile requires its native UI; select a served-runtime profile in Muse settings")
+			return fmt.Errorf("muse's :auto-review permission profile requires its native UI; select a served-runtime profile in Muse settings")
 		}
 	}
 	if prompt == "" {

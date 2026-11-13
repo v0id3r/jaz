@@ -41,7 +41,7 @@ func (m *Manager) kimiModels(ctx context.Context, cfg AgentConfig) (catalog Agen
 	}
 	capabilities := initialized.AgentCapabilities
 	if capabilities == nil || capabilities.SessionCapabilities == nil || capabilities.SessionCapabilities.Delete == nil {
-		return catalog, fmt.Errorf("Kimi model discovery requires session/delete support")
+		return catalog, fmt.Errorf("kimi model discovery requires session/delete support")
 	}
 	// Keep the creation receipt so cancellation can still delete the native session.
 	raw, err := ac.peer.Call(lifetime, acpschema.AgentMethodSessionNew, acpschema.NewSessionRequest{Cwd: cwd, MCPServers: []acpschema.MCPServer{}})
@@ -52,7 +52,7 @@ func (m *Manager) kimiModels(ctx context.Context, cfg AgentConfig) (catalog Agen
 		SessionID acpschema.SessionID `json:"sessionId"`
 	}
 	if err := json.Unmarshal(raw, &session); err != nil || session.SessionID == "" {
-		return catalog, fmt.Errorf("Kimi model discovery returned an invalid session")
+		return catalog, fmt.Errorf("kimi model discovery returned an invalid session")
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
@@ -94,7 +94,7 @@ func (m *Manager) kimiModels(ctx context.Context, cfg AgentConfig) (catalog Agen
 				state = parseSessionConfigOptions(raw)
 			}
 			if state.currentModel != choice.Value {
-				return catalog, fmt.Errorf("Kimi did not select model %q", choice.Value)
+				return catalog, fmt.Errorf("kimi did not select model %q", choice.Value)
 			}
 			model := AgentModel{Value: choice.Value, Label: choice.Name, Description: choice.Description,
 				Reasoning: ReasoningCapabilities{Status: modelcatalog.ReasoningUnavailable, Scope: ReasoningScopeAgent}}

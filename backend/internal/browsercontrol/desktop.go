@@ -54,7 +54,7 @@ func (b *DesktopBackend) Call(ctx context.Context, input ActionInput) (ActionOut
 	}
 	if input.Action != ActionScript {
 		if !page.opMu.TryLock() {
-			return ActionOutput{}, errors.New("Another browser action is running for this conversation")
+			return ActionOutput{}, errors.New("another browser action is running for this conversation")
 		}
 		defer page.opMu.Unlock()
 	}
