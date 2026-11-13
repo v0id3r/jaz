@@ -11,6 +11,12 @@ import (
 
 const acpTranscriptFlushInterval = 100 * time.Millisecond
 
+// acpTurnlessRunIdleSplit bounds how long a turn-less text run stays open:
+// chunks of turns no prompt owns (the agent's internal turns, e.g.
+// background-task notifications) share one transcript message until the
+// stream goes quiet for this long or the event type changes.
+const acpTurnlessRunIdleSplit = 30 * time.Second
+
 type acpTranscriptRun struct {
 	eventType         string
 	chunks            []string
@@ -34,6 +40,11 @@ type acpTranscriptBuffer struct {
 	runSeq         int
 	currentRunType string
 	currentRunID   string
+
+	turnlessSeq         int
+	turnlessRunType     string
+	turnlessRunID       string
+	turnlessLastChunkAt time.Time
 }
 
 func (m *Manager) queueACPMessage(job *jobState, content string) {
@@ -128,7 +139,7 @@ func (b *acpTranscriptBuffers) delete(sessionID string) {
 func (b *acpTranscriptBuffer) queue(m *Manager, run acpTranscriptRun, turnKey string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	run.textRunID = b.textRunIDLocked(run.eventType, run.upstreamMessageID, turnKey)
+	run.textRunID = b.textRunIDLocked(run.eventType, run.upstreamMessageID, turnKey, time.Now())
 	if n := len(b.runs); n > 0 && run.textRunID != "" && b.runs[n-1].eventType == run.eventType && b.runs[n-1].textRunID == run.textRunID {
 		b.runs[n-1].chunks = append(b.runs[n-1].chunks, run.chunks...)
 	} else {
@@ -155,14 +166,23 @@ func transcriptTurnKey(turn *activeTurn) string {
 	return strconv.FormatInt(turn.startedAt.UnixNano(), 10)
 }
 
-func (b *acpTranscriptBuffer) textRunIDLocked(eventType, upstreamMessageID, turnKey string) string {
+func (b *acpTranscriptBuffer) textRunIDLocked(eventType, upstreamMessageID, turnKey string, now time.Time) string {
 	if upstreamMessageID != "" {
 		b.currentRunType = ""
 		b.currentRunID = ""
 		return textRunID(upstreamMessageID)
 	}
 	if turnKey == "" {
-		return ""
+		// Turn-less chunks: without a run id every chunk would flush as its
+		// own transcript message. Keep one run open per continuous stream so
+		// the projection merges the whole turn into a single message.
+		if b.turnlessRunID == "" || b.turnlessRunType != eventType || now.Sub(b.turnlessLastChunkAt) > acpTurnlessRunIdleSplit {
+			b.turnlessSeq++
+			b.turnlessRunType = eventType
+			b.turnlessRunID = "turnless:" + strconv.Itoa(b.turnlessSeq)
+		}
+		b.turnlessLastChunkAt = now
+		return b.turnlessRunID
 	}
 	if b.turnKey != turnKey {
 		b.turnKey = turnKey

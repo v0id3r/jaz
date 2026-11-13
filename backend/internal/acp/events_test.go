@@ -362,6 +362,83 @@ func TestACPTranscriptTextRunSurvivesToolBarrier(t *testing.T) {
 	}
 }
 
+func TestACPTranscriptTurnlessChunksShareOneRun(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.CreateSession(storage.CreateSession{Slug: "main", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{}, nil)
+	manager.Events = sessionevents.New()
+	job := &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPAgent: AgentKimi, ACPSession: "acp-session", State: StateIdle}}
+	manager.jobsByID[session.ID] = job
+
+	// No active turn: chunks of an agent-internal turn must still merge into
+	// one transcript run instead of flushing as one message per chunk.
+	manager.queueACPMessage(job, "internal turn, ")
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+	manager.queueACPMessage(job, "still one message")
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+
+	events, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %#v", events)
+	}
+	run := events[0].ACP.TextRunID
+	if run == "" || events[1].ACP.TextRunID != run {
+		t.Fatalf("text run ids = %q, %q; events=%#v", run, events[1].ACP.TextRunID, events)
+	}
+	if events[0].ProjectionKey == "" || events[1].ProjectionKey != events[0].ProjectionKey || events[1].ProjectionOp != sessionevents.ProjectionAppend {
+		t.Fatalf("persisted text projection = %#v, %#v", events[0], events[1])
+	}
+}
+
+func TestACPTranscriptTurnlessRunSplitsAfterIdleGap(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.CreateSession(storage.CreateSession{Slug: "main", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{}, nil)
+	manager.Events = sessionevents.New()
+	job := &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPAgent: AgentKimi, ACPSession: "acp-session", State: StateIdle}}
+	manager.jobsByID[session.ID] = job
+
+	manager.queueACPMessage(job, "first run")
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+
+	buffer := manager.transcriptBuffers.get(session.ID, false)
+	if buffer == nil {
+		t.Fatal("transcript buffer missing")
+	}
+	buffer.mu.Lock()
+	buffer.turnlessLastChunkAt = time.Now().Add(-time.Minute)
+	buffer.mu.Unlock()
+
+	manager.queueACPMessage(job, "second run")
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+
+	events, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %#v", events)
+	}
+	if events[0].ACP.TextRunID == "" || events[1].ACP.TextRunID == "" || events[0].ACP.TextRunID == events[1].ACP.TextRunID {
+		t.Fatalf("idle-separated runs must differ: %#v", events)
+	}
+}
+
 func TestACPTranscriptChunksWithoutMessageIDShareTurnRun(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {
