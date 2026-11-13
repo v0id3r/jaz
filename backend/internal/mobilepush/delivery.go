@@ -151,6 +151,7 @@ func (s *Service) deliver(ctx context.Context, session storage.Session, state co
 		return err
 	}
 	var failures []error
+	suppressed := activeSession(alert, registrations, approved)
 	for _, setting := range registrations {
 		if !approved[setting.Key] {
 			continue
@@ -160,10 +161,10 @@ func (s *Service) deliver(ctx context.Context, session storage.Session, state co
 			failures = append(failures, err)
 			continue
 		}
-		if alert != nil && device.Token != "" {
+		if alert != nil && !suppressed && device.Token != "" {
 			failures = append(failures, s.sendAlert(ctx, setting.Key, device.Registration, *alert))
 		}
-		if alert != nil && device.WebPush != nil {
+		if alert != nil && !suppressed && device.WebPush != nil {
 			failures = append(failures, s.sendWebPush(ctx, setting.Key, *device.WebPush, *alert))
 		}
 		if relevant {
@@ -245,6 +246,21 @@ func (s *Service) refresh(ctx context.Context) error {
 		failures = append(failures, s.process(ctx, sessionevents.Event{SessionID: id, Type: sessionevents.TypeSession}))
 	}
 	return errors.Join(failures...)
+}
+
+func activeSession(alert *Alert, registrations []storage.Setting, approved map[string]bool) bool {
+	if alert == nil {
+		return false
+	}
+	now := time.Now()
+	for _, setting := range registrations {
+		var device deviceRegistration
+		if approved[setting.Key] && json.Unmarshal(setting.Value, &device) == nil && device.Presence != nil &&
+			device.Presence.SessionID == alert.SessionID && device.Presence.ExpiresAt.After(now) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) sendAlert(ctx context.Context, deviceID string, registration Registration, alert Alert) error {

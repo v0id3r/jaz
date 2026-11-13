@@ -53,6 +53,20 @@ func (h Handler) UnregisterWebPush(w http.ResponseWriter, r *http.Request) {
 	writeResult(w, h.Service.UnregisterWebPush(deviceID))
 }
 
+func (h Handler) Presence(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := authenticatedDevice(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		SessionID string `json:"session_id"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	writeResult(w, h.Service.MarkPresence(deviceID, input.SessionID))
+}
+
 func (h Handler) RegisterActivity(w http.ResponseWriter, r *http.Request) {
 	deviceID, ok := authenticatedDevice(w, r)
 	if !ok {

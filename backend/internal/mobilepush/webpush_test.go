@@ -14,6 +14,7 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/wins/jaz/backend/internal/sessionevents"
+	"github.com/wins/jaz/backend/internal/storage"
 )
 
 func TestWebPushSendsEncryptedPayloadAndDropsExpiredSubscription(t *testing.T) {
@@ -80,6 +81,60 @@ func TestWebPushDeliveryUsesPairedDeviceAndDedupes(t *testing.T) {
 	}
 	if err := json.Unmarshal(setting.Value, &saved); err != nil || saved.WebPush == nil {
 		t.Fatalf("subscription was not persisted: %v", err)
+	}
+}
+
+func TestActiveSessionSuppressesWebPushAcrossDevices(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		t.Run(map[bool]string{false: "cleared", true: "expired"}[expired], func(t *testing.T) {
+			service, store, _, session := pushFixture(t, "")
+			web := &capturingWebSender{}
+			service.webPush = web
+			if _, err := store.SaveApprovedDevice(storage.SaveApprovedDevice{
+				ID: "desktop", Name: "Desktop", Kind: storage.DeviceKindDesktop, TokenHash: "desktop-hash", CreatedAt: time.Now(), ApprovedAt: time.Now(),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			for _, device := range []string{"phone", "desktop"} {
+				if err := service.RegisterWebPush(device, testWebPushSubscription(t, "https://push.example/"+device)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := service.MarkPresence("desktop", session.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.UpdateSessionStatus(session.ID, storage.StatusRunning, "", time.Time{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.UpdateSessionStatus(session.ID, storage.StatusIdle, "", time.Time{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.CompleteSession(session.ID, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			event := sessionevents.Event{SessionID: session.ID, Type: sessionevents.TypeTurnFinished, ACP: &sessionevents.ACPEvent{State: "idle", StopReason: "end_turn", Assistant: "Ready"}}
+			if err := service.process(t.Context(), event); err != nil {
+				t.Fatal(err)
+			}
+			if len(web.payloads) != 0 {
+				t.Fatalf("active session sent %d pushes", len(web.payloads))
+			}
+			if expired {
+				if err := service.update("desktop", func(device *deviceRegistration) {
+					device.Presence.ExpiresAt = time.Now().Add(-time.Second)
+				}); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := service.MarkPresence("desktop", ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := service.process(t.Context(), event); err != nil {
+				t.Fatal(err)
+			}
+			if len(web.payloads) != 2 {
+				t.Fatalf("restored presence delivery sent %d pushes", len(web.payloads))
+			}
+		})
 	}
 }
 

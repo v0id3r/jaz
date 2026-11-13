@@ -50,6 +50,12 @@ type deviceRegistration struct {
 	Registration
 	WebPush    *WebPushSubscription `json:"web_push,omitempty"`
 	Activities []Activity           `json:"activities,omitempty"`
+	Presence   *Presence            `json:"presence,omitempty"`
+}
+
+type Presence struct {
+	SessionID string    `json:"session_id"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 type Service struct {
@@ -134,6 +140,20 @@ func (s *Service) RegisterWebPush(deviceID string, input WebPushSubscription) er
 func (s *Service) UnregisterWebPush(deviceID string) error {
 	return s.update(deviceID, func(device *deviceRegistration) {
 		device.WebPush = nil
+	})
+}
+
+func (s *Service) MarkPresence(deviceID, sessionID string) error {
+	if sessionID == "" {
+		return s.update(deviceID, func(device *deviceRegistration) {
+			device.Presence = nil
+		})
+	}
+	if _, err := s.store.LoadSession(sessionID); err != nil {
+		return fmt.Errorf("%w: conversation not found", ErrInvalidRegistration)
+	}
+	return s.update(deviceID, func(device *deviceRegistration) {
+		device.Presence = &Presence{SessionID: sessionID, ExpiresAt: time.Now().Add(time.Minute)}
 	})
 }
 
