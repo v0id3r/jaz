@@ -1104,10 +1104,6 @@ func mustJSON(t *testing.T, value any) json.RawMessage {
 	return raw
 }
 
-func ptr[T any](value T) *T {
-	return &value
-}
-
 // Codex streams command output per chunk; output-only updates are coalesced
 // into one deferred publish, and a status change still publishes at once.
 func TestTerminalOutputUpdatesAreCoalesced(t *testing.T) {

@@ -51,11 +51,7 @@ func publish(publisher MCPPublisher, req *mcp.CallToolRequest, input MCPPublishI
 	if sessionID == "" {
 		return nil, MCPPublishOutput{}, fmt.Errorf("%s requires %s", PublishMCPToolName, mcpsession.HeaderName)
 	}
-	widget, warnings, err := publisher.PublishForSession(sessionID, PublishInput{
-		Title:    input.Title,
-		SizeHint: input.SizeHint,
-		HTML:     input.HTML,
-	})
+	widget, warnings, err := publisher.PublishForSession(sessionID, PublishInput(input))
 	if err != nil {
 		return nil, MCPPublishOutput{}, err
 	}

@@ -48,14 +48,15 @@ func codexProviderKeyID(id string) string {
 }
 
 func configureCodexEnv(
+	dir string,
 	env map[string]string,
 	cfg AgentConfig,
 	providers map[string]modelprovider.ModelProviderConfig,
 	developerInstructions string,
-) (func(), error) {
+) error {
 	config, err := decodeCodexConfig(env["CODEX_CONFIG"])
 	if err != nil {
-		return nil, err
+		return err
 	}
 	config["sandbox_mode"] = "danger-full-access"
 	config["approval_policy"] = "never"
@@ -86,21 +87,17 @@ func configureCodexEnv(
 		}
 	}
 
-	file, err := os.CreateTemp("", "jaz-codex-config-*.json")
+	file, err := os.CreateTemp(dir, "codex-config-*.json")
 	if err != nil {
-		return nil, fmt.Errorf("create CODEX_CONFIG: %w", err)
-	}
-	cleanup := func() {
-		_ = os.Remove(file.Name())
+		return fmt.Errorf("create CODEX_CONFIG: %w", err)
 	}
 	writeErr := json.NewEncoder(file).Encode(config)
 	closeErr := file.Close()
 	if err := errors.Join(writeErr, closeErr); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("write CODEX_CONFIG: %w", err)
+		return fmt.Errorf("write CODEX_CONFIG: %w", err)
 	}
 	env["CODEX_CONFIG"] = "@" + file.Name()
-	return cleanup, nil
+	return nil
 }
 
 func codexLaunchProvider(

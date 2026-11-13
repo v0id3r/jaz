@@ -153,6 +153,24 @@ func TestProcessEnvPreparesIsolatedKimiProfile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("Kimi profile must not carry a prompt authority shim: %v", err)
 	}
+	if env["KIMI_MCP_TOOL_TIMEOUT_MS"] != "300000" {
+		t.Fatalf("KIMI_MCP_TOOL_TIMEOUT_MS = %q, want 300000", env["KIMI_MCP_TOOL_TIMEOUT_MS"])
+	}
+}
+
+func TestProcessEnvKeepsConfiguredKimiMcpToolTimeout(t *testing.T) {
+	clearHostEnv(t)
+	root := t.TempDir()
+	env, err := NewManager(nil, Config{Root: root}, nil).processEnvPrepared(AgentKimi, AgentConfig{
+		Auth: AgentAuthConfig{Mode: AuthModeJazProfile},
+		Env:  map[string]string{"KIMI_MCP_TOOL_TIMEOUT_MS": "90000"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["KIMI_MCP_TOOL_TIMEOUT_MS"] != "90000" {
+		t.Fatalf("KIMI_MCP_TOOL_TIMEOUT_MS = %q, want user value 90000", env["KIMI_MCP_TOOL_TIMEOUT_MS"])
+	}
 }
 
 func TestKimiJazProfileCannotEscapeRuntimeRoot(t *testing.T) {

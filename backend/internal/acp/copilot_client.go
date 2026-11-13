@@ -22,7 +22,7 @@ func copilotCall(ctx context.Context, env map[string]string, method string, resu
 	defer cancel()
 	command, err := executableInPath("copilot", env["PATH"])
 	if err != nil {
-		return fmt.Errorf("Copilot CLI executable (copilot) not found")
+		return fmt.Errorf("copilot CLI executable (copilot) not found")
 	}
 	request, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": struct{}{}})
 	if err != nil {
@@ -36,7 +36,7 @@ func copilotCall(ctx context.Context, env map[string]string, method string, resu
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("Copilot %s failed", method)
+		return fmt.Errorf("copilot %s failed", method)
 	}
 	defer process.Terminate()
 	if err := process.Started(); err != nil {
@@ -45,7 +45,7 @@ func copilotCall(ctx context.Context, env map[string]string, method string, resu
 		return fmt.Errorf("start Copilot %s process", method)
 	}
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("Copilot %s failed", method)
+		return fmt.Errorf("copilot %s failed", method)
 	}
 	reader := bufio.NewReader(&output)
 	for {
@@ -75,7 +75,7 @@ func copilotCall(ctx context.Context, env map[string]string, method string, resu
 			continue
 		}
 		if response.Error != nil {
-			return fmt.Errorf("Copilot %s failed (RPC %d)", method, response.Error.Code)
+			return fmt.Errorf("copilot %s failed (RPC %d)", method, response.Error.Code)
 		}
 		if err := json.Unmarshal(response.Result, result); err != nil {
 			return fmt.Errorf("invalid Copilot %s result", method)

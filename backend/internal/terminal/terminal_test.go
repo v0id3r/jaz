@@ -1,13 +1,15 @@
 package terminal
 
 import (
+	"github.com/wins/jaz/backend/internal/sandbox"
+
 	"fmt"
 	"runtime"
 	"testing"
 )
 
 func TestUnsubscribeDoesNotRaceOutput(t *testing.T) {
-	session := newSession(t.TempDir(), 1024, nil)
+	session := newSession(t.TempDir(), 1024, sandbox.Local{}, nil)
 	for i := range 1000 {
 		_, unsubscribe := session.Subscribe()
 		done := make(chan struct{})
@@ -24,7 +26,7 @@ func TestManagerReusesSameCwdAndRestartsChangedCwd(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("terminal sessions are not supported on Windows yet")
 	}
-	manager := New()
+	manager := New(sandbox.Local{})
 	defer manager.Close()
 	firstDir := t.TempDir()
 	secondDir := t.TempDir()

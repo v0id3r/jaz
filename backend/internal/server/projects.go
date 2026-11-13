@@ -204,14 +204,6 @@ func (s *Server) resolveFilesystemDir(path string) (string, error) {
 	return cleanExistingDir(abs)
 }
 
-func (s *Server) resolveWorkingDir(directory string) (string, error) {
-	directory = strings.TrimSpace(directory)
-	if filepath.IsAbs(directory) {
-		return cleanExistingDir(directory)
-	}
-	return s.resolveWorkspaceDir(directory)
-}
-
 func (s *Server) resolveWorkspaceFileRoot(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if filepath.IsAbs(path) {
@@ -268,13 +260,6 @@ func projectsFromPaths(paths []string) []project {
 		}
 	}
 	return projects
-}
-
-func projectPathForRequest(directory, cwd string) string {
-	if strings.TrimSpace(directory) == "." {
-		return ""
-	}
-	return cwd
 }
 
 func projectName(path string) string {

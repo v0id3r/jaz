@@ -16,6 +16,7 @@ export type TimelineItem =
       kind: 'activity'
       entries: ActivityEntry[]
       at: number
+      end: number
       key: string
       header?: ActivityHeader
     }
@@ -133,6 +134,16 @@ function eventActivityEntries(item: ActivityEventItem): ActivityEntry[] {
   return entries
 }
 
+// An event keeps the time it first appeared; its tools run on past it.
+function activityEventEnd(item: ActivityEventItem): number {
+  const elapsed = (item.event.acp.tool_calls ?? []).map((call) => call.runtime?.elapsed_time_seconds ?? 0)
+  return item.at + Math.max(0, ...elapsed) * 1000
+}
+
+export function itemEnd(item: TimelineItem): number {
+  return item.kind === 'activity' ? item.end : item.at
+}
+
 function appendActivityEntries(activity: ActivityEntry[], entries: ActivityEntry[]): void {
   for (const entry of entries) {
     if (entry.kind === 'thought') {
@@ -172,6 +183,7 @@ function groupActivities(items: TimelineItem[]): TimelineItem[] {
         kind: 'activity',
         entries,
         at: item.at,
+        end: activityEventEnd(item),
         key: `activity-${stableEventKey(item.event, item.eventIndex)}`,
         header: item.showHeader
           ? { agent: item.event.acp.agent, title: item.event.acp.title, at: item.event.at }
@@ -182,6 +194,7 @@ function groupActivities(items: TimelineItem[]): TimelineItem[] {
     }
     appendActivityEntries(activity.entries, eventActivityEntries(item))
     activity.at = item.at
+    activity.end = Math.max(activity.end, activityEventEnd(item))
   }
   flush()
   return out

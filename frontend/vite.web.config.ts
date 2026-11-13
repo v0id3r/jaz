@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
@@ -5,9 +7,14 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { defineTelemetryEnv } from './vite.telemetry'
 
+const commit = gitCommit()
+
 export default defineConfig(({ mode }) => ({
   root: resolve('src/renderer'),
-  define: defineTelemetryEnv(mode),
+  define: {
+    ...defineTelemetryEnv(mode),
+    'import.meta.env.VITE_JAZ_COMMIT': JSON.stringify(commit),
+  },
   resolve: {
     alias: {
       '@shared': resolve('src/shared'),
@@ -22,6 +29,12 @@ export default defineConfig(({ mode }) => ({
     }),
     react(),
     tailwindcss(),
+    {
+      name: 'jaz-commit',
+      closeBundle() {
+        writeFileSync(resolve('dist-web', 'commit.txt'), `${commit}\n`)
+      },
+    },
   ],
   build: {
     outDir: resolve('dist-web'),
@@ -38,3 +51,11 @@ export default defineConfig(({ mode }) => ({
     },
   },
 }))
+
+function gitCommit(): string {
+  try {
+    return execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim() || 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}

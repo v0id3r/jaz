@@ -57,6 +57,40 @@ func TestSessionEventCompactionRunsOnce(t *testing.T) {
 	}
 }
 
+func TestSessionEventCompactionLeavesCompactHistoryUntouched(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(storage.CreateSession{Slug: "compact-history"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendSessionEvents(session.ID, sessionevents.Event{Type: "acp_tool", ACP: &sessionevents.ACPEvent{
+		ID: session.ID, ToolCalls: []sessionevents.ACPToolCall{{ID: "tool-1", Status: "completed"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	revision := func() (value int64) {
+		if err := store.db.QueryRow(`SELECT transcript_revision FROM threads WHERE id = ?`, session.ID).Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	before := revision()
+	if _, err := store.db.Exec(`UPDATE threads SET event_compaction_version = 0 WHERE id = ?`, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.CompactNextSessionEvents(t.Context())
+	if err != nil || result.ThreadID != session.ID || !result.Complete {
+		t.Fatalf("compaction = %#v, %v", result, err)
+	}
+	if after := revision(); after != before {
+		t.Fatalf("transcript revision %d -> %d with nothing to compact", before, after)
+	}
+}
+
 func TestCompletedTextRunIsCompactedOffTheWritePath(t *testing.T) {
 	store, err := New(t.TempDir())
 	if err != nil {
@@ -214,9 +248,9 @@ func TestSessionEventCompactionPreservesConcurrentAppend(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(`
-		INSERT INTO session_events (thread_id, seq, type, content, acp, created_at_ms, coalesce_key)
-		VALUES (?, 1, 'acp_message', 'Hel', ?, 1, ''),
-		       (?, 2, 'acp_message', 'lo', ?, 2, '')`,
+		INSERT INTO session_events (thread_id, seq, stream_seq, type, content, acp, created_at_ms, coalesce_key)
+		VALUES (?, 1, 1, 'acp_message', 'Hel', ?, 1, ''),
+		       (?, 2, 2, 'acp_message', 'lo', ?, 2, '')`,
 		session.ID, `{"id":"agent-1","state":"running"}`,
 		session.ID, `{"id":"agent-1","state":"running"}`,
 	); err != nil {
@@ -500,7 +534,7 @@ func TestTextCompactionResumesWithoutDuplicatingSnapshot(t *testing.T) {
 	for i := range events {
 		events[i] = sessionevents.Event{
 			Type: sessionevents.TypeACPMessage, Content: "x",
-			ACP: &sessionevents.ACPEvent{ID: session.ID, State: "running", TextRunID: "message:one"},
+			ACP: &sessionevents.ACPEvent{ID: session.ID, State: "running", TextRunID: fmt.Sprintf("message:%d", i/5)},
 		}
 	}
 	if err := store.AppendSessionEvents(session.ID, events...); err != nil {
@@ -533,9 +567,65 @@ func TestTextCompactionResumesWithoutDuplicatingSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projected := sessionevents.CompactTranscript(stored)
-	if len(projected) != 1 || projected[0].Content != strings.Repeat("x", len(events)) {
-		t.Fatalf("resumed text snapshot = %#v", stored)
+	if len(stored) != len(events)/5 {
+		t.Fatalf("resumed compaction left %d rows, want %d", len(stored), len(events)/5)
+	}
+	for _, event := range stored {
+		if event.Content != "xxxxx" || event.ProjectionOp != sessionevents.ProjectionReplace {
+			t.Fatalf("resumed text snapshot = %#v", event)
+		}
+	}
+}
+
+func TestTextCompactionFoldsARunAcrossPagesIntoOneReplaceRow(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(storage.CreateSession{Slug: "text-run-pages"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []sessionevents.Event
+	for i := range 130 {
+		if i == eventCompactionPageRows-1 {
+			events = append(events, sessionevents.Event{Type: "acp_tool", ACP: &sessionevents.ACPEvent{
+				ID: session.ID, ToolCalls: []sessionevents.ACPToolCall{{ID: "tool-1", Status: "completed"}},
+			}})
+		}
+		events = append(events, sessionevents.Event{
+			Type: sessionevents.TypeACPMessage, Content: "x",
+			ACP: &sessionevents.ACPEvent{ID: session.ID, State: "running", TextRunID: "message:one"},
+		})
+	}
+	if err := store.AppendSessionEvents(session.ID, events...); err != nil {
+		t.Fatal(err)
+	}
+	for steps := 0; ; steps++ {
+		result, err := store.CompactNextSessionEvents(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Complete {
+			break
+		}
+		if steps > 4 {
+			t.Fatal("text compaction did not converge")
+		}
+	}
+	stored, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []sessionevents.Event
+	for _, event := range stored {
+		if event.Type == sessionevents.TypeACPMessage {
+			texts = append(texts, event)
+		}
+	}
+	if len(texts) != 1 || texts[0].Content != strings.Repeat("x", 130) || texts[0].ProjectionOp != sessionevents.ProjectionReplace {
+		t.Fatalf("text rows = %#v", texts)
 	}
 }
 
@@ -549,7 +639,7 @@ func TestSessionEventCompactionBoundsTextSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const chunks = 100
+	const chunks = 300
 	chunk := strings.Repeat("x", 8<<10)
 	events := make([]sessionevents.Event, chunks)
 	for i := range events {
@@ -584,6 +674,9 @@ func TestSessionEventCompactionBoundsTextSnapshots(t *testing.T) {
 		if len(event.Content) > eventCompactionTextBytes {
 			t.Fatalf("snapshot has %d bytes, limit %d", len(event.Content), eventCompactionTextBytes)
 		}
+		if event.ProjectionOp != sessionevents.ProjectionAppend {
+			t.Fatalf("part of a split run is stored as %q", event.ProjectionOp)
+		}
 	}
 	projected := sessionevents.CompactTranscript(stored)
 	if len(projected) != 1 {
@@ -591,5 +684,48 @@ func TestSessionEventCompactionBoundsTextSnapshots(t *testing.T) {
 	}
 	if len(projected[0].Content) != chunks*len(chunk) {
 		t.Fatalf("projected text = %d bytes", len(projected[0].Content))
+	}
+}
+
+func TestTextCompactionKeepsALongRunWithinTheBatchBudget(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(storage.CreateSession{Slug: "long-run-rows"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make([]sessionevents.Event, 2500)
+	for i := range events {
+		events[i] = sessionevents.Event{
+			Type: sessionevents.TypeACPMessage, Content: "tok ",
+			ACP: &sessionevents.ACPEvent{ID: session.ID, State: "running", TextRunID: "message:" + strings.Repeat("r", 2<<10)},
+		}
+	}
+	if err := store.AppendSessionEvents(session.ID, events...); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		result, err := store.CompactNextSessionEvents(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Complete {
+			break
+		}
+	}
+	var version int
+	if err := store.db.QueryRow(`SELECT event_compaction_version FROM threads WHERE id = ?`, session.ID).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected := sessionevents.CompactTranscript(stored)
+	if version != 1 || len(stored) < 2 || len(projected) != 1 || projected[0].Content != strings.Repeat("tok ", len(events)) {
+		t.Fatalf("version %d, %d rows, projected %d", version, len(stored), len(projected))
 	}
 }

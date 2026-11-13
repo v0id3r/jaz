@@ -2,7 +2,9 @@ export const CONNECTION_SESSION_CHANNEL = 'jaz:connection-session'
 export const LOCAL_SESSION_CHANNEL = 'jaz:local-session'
 
 export type ResourceTicket = { token: string; expires_at: string }
-export type VerifiedSession = { url: string; token: string; deviceId: string; remembered: boolean }
+// deviceKey marks a proof-mode session, whose credential is the device key
+// rather than token.
+export type VerifiedSession = { url: string; token: string; deviceId: string; deviceKey?: boolean; remembered: boolean }
 export type LocalSession = VerifiedSession & { ticket?: ResourceTicket }
 export type SessionSnapshot = {
   revision: number

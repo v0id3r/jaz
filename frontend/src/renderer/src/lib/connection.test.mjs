@@ -55,10 +55,11 @@ async function settle() {
   }
 }
 
-async function fixture({ auth, pairing = false, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature, web = false, browserCredentials = new Map(), saveBrowserCredential, loadBrowserCredential } = {}) {
+async function fixture({ auth, pairing = false, pairingToken = 'jaz_device-token', deviceAccessToken, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature, web = false, browserCredentials = new Map(), saveBrowserCredential, loadBrowserCredential } = {}) {
   const stored = new Map(storedValues)
   if (web) stored.set('jaz.deviceIdentity', JSON.stringify({ device_id: 'identity', public_key: 'public' }))
   const configured = []
+  const proofs = []
   const timers = new Map()
   let nextTimer = 0
   let snapshot = initialSnapshot || { revision: 0, phase: 'initial', url: '', session: null, error: null, localPending: false }
@@ -81,8 +82,9 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       return { url: result.url, token: 'jaz_local-device-token', deviceId: 'identity', remembered: false }
     },
   }
+  let reloads = 0
   replace('window', {
-    location: { origin: 'http://localhost', search: '', hash: '' },
+    location: { origin: web ? 'https://jaz.example' : 'http://localhost', search: '', hash: '', reload: () => { reloads += 1 } },
     addEventListener() {},
     jaz: web ? undefined : {
       apiBaseUrl: 'http://127.0.0.1:5299',
@@ -93,6 +95,11 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       startLocalBackend,
       ...(notifications ? { configureNotifications: (config) => configured.push(config) } : {}),
       getDeviceIdentity: async () => ({ device_id: 'identity', public_key: 'public' }),
+      deviceAccessToken,
+      deviceProof: async (method, url, token) => {
+        proofs.push({ method, url, token })
+        return 'proof-jwt'
+      },
       getDeviceMetadata: async () => ({ name: 'Test device' }),
     },
   })
@@ -114,7 +121,7 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       return Response.json({ ok: false })
     }
     if (target.pathname === '/health') {
-      return health ? health() : Response.json({ ok: true, auth_required: true })
+      return health ? health(init) : Response.json({ ok: true, auth_required: true })
     }
     if (target.pathname === '/v1/devices/register') {
       if (registration) {
@@ -126,7 +133,7 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       return Response.json({ pairing: { id: 'pair-1', expires_at: new Date(Date.now() + 60_000).toISOString() }, pairing_secret: 'proof' }, { status: 202 })
     }
     if (target.pathname === '/v1/devices/pairing-requests/pair-1') {
-      return Response.json({ pairing: { status: 'approved' }, token: 'jaz_device-token' })
+      return Response.json({ pairing: { status: 'approved' }, ...(pairingToken ? { token: pairingToken } : {}) })
     }
     if (target.pathname === '/v1/auth/check') {
       return auth(init)
@@ -157,9 +164,11 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
     connection,
     stored,
     configured,
+    proofs,
     timers,
     session,
     browserCredentials,
+    reloads: () => reloads,
     async pollPairing() {
       const timer = [...timers.values()].find((entry) => entry.delay === 2_000)
       await timer.callback()
@@ -359,6 +368,22 @@ test('one missed health poll keeps the session; consecutive misses show reconnec
   expect(await poll(true)).toBe('connected')
 })
 
+test('a web auth proxy login redirect reloads the serving origin and asks to sign in elsewhere', async () => {
+  const redirects = []
+  const { connection, reloads } = await fixture({
+    web: true,
+    health: (init) => {
+      redirects.push(init.redirect)
+      return { type: 'opaqueredirect', ok: false, status: 0, headers: new Headers() }
+    },
+  })
+  expect(await connection.connectRemote('https://jaz.example')).toBeNull()
+  expect(reloads()).toBe(1)
+  expect(await connection.connectRemote('https://other.example')).toBe('Sign in through Teleport again to reach the backend at https://other.example')
+  expect(reloads()).toBe(1)
+  expect(redirects).toEqual(['manual', 'manual'])
+})
+
 test('an unauthenticated health probe does not unlock saved credentials', async () => {
   let unlocks = 0
   const target = 'https://jaz.example'
@@ -446,6 +471,25 @@ test('a late same-origin candidate cannot replace the verified token or ticket',
   expect(connection.apiEmbeddedGetUrl('/v1/sessions/thread/file?raw=1')).toContain('new-ticket')
   expect(connection.connectionPreference()).toBeNull()
   expect(stored.has('jaz.backendAuth.https://jaz.example')).toBe(false)
+})
+
+test('a connected window renews its resource ticket on its own', async () => {
+  let ticket = 'first-ticket'
+  const { connection, timers } = await fixture({
+    auth: () => Response.json({ ok: true, auth_kind: 'device', device_id: 'identity', resource_ticket: { token: ticket, expires_at: '2099-01-01T00:00:00Z' } }),
+  })
+  await connection.connectRemote('https://jaz.example#key=jaz_token')
+  const pinned = connection.apiEmbeddedGetUrl('/fixture/file')
+  expect(pinned).toContain('first-ticket')
+  ticket = 'next-ticket'
+  const [id, renewal] = [...timers.entries()].find(([, timer]) => timer.delay === 30_000)
+  timers.delete(id)
+  await renewal.callback()
+  await settle()
+  expect(connection.apiEmbeddedGetUrl('/fixture/file')).toContain('next-ticket')
+  expect(connection.withCurrentTicket(pinned)).toBe(connection.apiEmbeddedGetUrl('/fixture/file'))
+  expect(connection.embeddedUrlKey(pinned)).toBe('https://jaz.example/fixture/file')
+  expect(connection.withCurrentTicket('https://example.com/a.png')).toBe('https://example.com/a.png')
 })
 
 test('explicit remember failure preserves the verified session and prior ciphertext', async () => {
@@ -700,4 +744,112 @@ test('a late browser storage rejection cannot disconnect a newer verified connec
   expect(connection.useConnection().status).toBe('connected')
   expect(connection.cachedApiAuthToken()).toBe('jaz_new')
   expect(connection.connectionPreference()).toEqual({ mode: 'remote', remoteUrl: 'https://new.example' })
+})
+
+function accessTokens(isApproved = () => true) {
+  const calls = []
+  return {
+    calls,
+    async deviceAccessToken(url, rejected) {
+      calls.push({ url, rejected })
+      return isApproved() ? { token: `access-${calls.length}` } : { error: 'invalid_client' }
+    },
+  }
+}
+
+const proofHealth = () => Response.json({ ok: true, auth_required: true, capabilities: { device_proof: true } })
+
+test('a backend without device proofs gets bearer tokens and never a proof', async () => {
+  const tokens = accessTokens()
+  const presented = []
+  const { connection, proofs } = await fixture({
+    deviceAccessToken: tokens.deviceAccessToken,
+    registration: (init) => {
+      presented.push([init.headers.Authorization, init.headers.DPoP])
+      return Response.json({ token: 'jaz_device-token' })
+    },
+    auth: (init) => {
+      presented.push([init.headers.Authorization, init.headers.DPoP])
+      return Response.json(init.headers.Authorization === 'Bearer root' ? { ok: true, auth_kind: 'root' } : { ok: true, auth_kind: 'device', device_id: 'identity' })
+    },
+    feature: (init) => {
+      presented.push([init.headers.get('Authorization'), init.headers.get('DPoP') ?? undefined])
+      return Response.json({ ok: true })
+    },
+  })
+  expect(await connection.connectRemote('https://jaz.example#key=root')).toBeNull()
+  expect((await connection.apiFetch('/fixture/feature')).status).toBe(200)
+  expect(presented).toEqual([['Bearer root', undefined], ['Bearer root', undefined], ['Bearer jaz_device-token', undefined], ['Bearer jaz_device-token', undefined]])
+  expect([tokens.calls, proofs]).toEqual([[], []])
+})
+
+test('proof mode pairs the key, saves nothing, and renews a token the backend forgot', async () => {
+  let approved = false
+  const tokens = accessTokens(() => approved)
+  const presented = []
+  const { connection, session, stored, proofs, pollPairing } = await fixture({
+    health: proofHealth,
+    pairing: true,
+    pairingToken: '',
+    deviceAccessToken: tokens.deviceAccessToken,
+    auth: (init) => {
+      presented.push(init.headers.get('Authorization'))
+      return presented.length === 1
+        ? Response.json({ error: 'gone', code: 'invalid_token' }, { status: 401 })
+        : Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' })
+    },
+    feature: (init) => {
+      presented.push(init.headers.get('Authorization'))
+      return presented.length === 3
+        ? Response.json({ error: 'gone', code: 'invalid_token' }, { status: 401 })
+        : Response.json({ ok: true })
+    },
+  })
+  expect(await connection.connectRemote('https://jaz.example')).toBeNull()
+  expect(connection.useConnection().status).toBe('pending_approval')
+  expect(proofs[0]).toMatchObject({ method: 'POST', url: 'https://jaz.example/v1/devices/pairing-requests' })
+  approved = true
+  await pollPairing()
+  expect(connection.useConnection().status).toBe('connected')
+  expect(connection.apiUsesDeviceKey()).toBe(true)
+  expect(connection.cachedApiAuthToken()).toBe('')
+  expect(session.read().snapshot.session).toMatchObject({ token: '', deviceId: 'identity', deviceKey: true })
+  expect(connection.rememberConnection()).toBeNull()
+  expect([...stored.keys()].some((key) => key.startsWith('jaz.backendAuth.'))).toBe(false)
+  expect((await connection.apiFetch('/fixture/feature')).status).toBe(200)
+  expect(presented).toEqual(['DPoP access-2', 'DPoP access-3', 'DPoP access-4', 'DPoP access-5'])
+  expect(tokens.calls.slice(1).map((call) => call.rejected)).toEqual([undefined, 'access-2', undefined, 'access-4'])
+  expect(proofs.at(-1)).toMatchObject({ method: 'GET', url: 'https://jaz.example/fixture/feature', token: 'access-5' })
+})
+
+test('proof mode restores with the device key and drops a leftover saved token unopened', async () => {
+  const target = 'https://jaz.example'
+  let unlocks = 0
+  const tokens = accessTokens()
+  const { connection, stored } = await fixture({
+    health: proofHealth,
+    storedValues: [
+      ['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: target })],
+      ['jaz.backendAuth.' + target, 'enc:v1:legacy-token'],
+    ],
+    decryptCredential() {
+      unlocks += 1
+    },
+    deviceAccessToken: tokens.deviceAccessToken,
+    auth: () => Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' }),
+  })
+  expect(connection.useConnection().status).toBe('connected')
+  expect(connection.apiUsesDeviceKey(target)).toBe(true)
+  expect(stored.has('jaz.backendAuth.' + target)).toBe(false)
+  expect(unlocks).toBe(0)
+})
+
+test('proof mode blocks a restored device the backend no longer approves', async () => {
+  const target = 'https://jaz.example'
+  const { connection } = await fixture({
+    health: proofHealth,
+    storedValues: [['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: target })]],
+    deviceAccessToken: accessTokens(() => false).deviceAccessToken,
+  })
+  expect(connection.useConnection()).toMatchObject({ status: 'disconnected', error: 'Connect again with an authorized link or request approval' })
 })

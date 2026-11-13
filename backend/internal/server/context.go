@@ -15,10 +15,6 @@ func serverActionContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), serverActionTimeout)
 }
 
-func serverActionContextFrom(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), serverActionTimeout)
-}
-
 func serverACPBootstrapContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), serverACPBootstrapTimeout)
 }

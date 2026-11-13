@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/storage"
 	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
+	sqlitestore "github.com/wins/jaz/backend/internal/storage/sqlite"
 )
 
 func TestPermissionIDsRemainUniqueAcrossManagerLifetimes(t *testing.T) {
@@ -155,6 +157,47 @@ func TestRecordAndPublishSlimsStoredCopy(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no live event published")
+	}
+}
+
+// A tool call update keeps its seq; only its stream_seq tells live clients
+// it is newer than the copy they hold.
+func TestRecordAndPublishCarriesStreamSeqOfToolUpdates(t *testing.T) {
+	store, err := sqlitestore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(storage.CreateSession{Slug: "tool-updates", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{store: store, Events: sessionevents.New()}
+	live := manager.Events.Subscribe(t.Context(), session.ID)
+	publish := func(status string) sessionevents.Event {
+		manager.recordAndPublishDirect(sessionevents.Event{
+			SessionID: session.ID,
+			Type:      "acp_tool",
+			ACP:       &sessionevents.ACPEvent{ID: session.ID, ToolCalls: []sessionevents.ACPToolCall{{ID: "tool-1", Status: status}}},
+		})
+		select {
+		case event := <-live:
+			return event
+		case <-time.After(time.Second):
+			t.Fatal("no live event published")
+			return sessionevents.Event{}
+		}
+	}
+
+	started := publish("pending")
+	time.Sleep(10 * time.Millisecond)
+	completed := publish("completed")
+	if completed.Seq != started.Seq || completed.StreamSeq <= started.StreamSeq {
+		t.Fatalf("update published as seq %d stream_seq %d after seq %d stream_seq %d", completed.Seq, completed.StreamSeq, started.Seq, started.StreamSeq)
+	}
+	// Live readers interleave messages by time, so the update keeps the start time.
+	if completed.At.UnixMilli() != started.At.UnixMilli() {
+		t.Fatalf("update published at %v, started at %v", completed.At, started.At)
 	}
 }
 
@@ -359,6 +402,125 @@ func TestACPTranscriptTextRunSurvivesToolBarrier(t *testing.T) {
 	}
 	if events[0].ProjectionKey == "" || events[2].ProjectionKey != events[0].ProjectionKey || events[2].ProjectionOp != sessionevents.ProjectionAppend {
 		t.Fatalf("persisted text projection = %#v, %#v", events[0], events[2])
+	}
+}
+
+func TestACPTranscriptEngineTurnKeyGroupsChunks(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.CreateSession(storage.CreateSession{Slug: "main", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{}, nil)
+	manager.Events = sessionevents.New()
+	job := &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPAgent: AgentKimi, ACPSession: "acp-session", State: StateIdle}}
+	manager.jobsByID[session.ID] = job
+
+	chunk := func(turnID int, text string) json.RawMessage {
+		return json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + text + `"},"_meta":{"turnId":` + strconv.Itoa(turnID) + `}}`)
+	}
+	manager.applyJobUpdate(job, chunk(7, "turn seven, "))
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+	manager.applyJobUpdate(job, chunk(7, "same run"))
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+	manager.applyJobUpdate(job, chunk(8, "turn eight"))
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+
+	events, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events = %#v", events)
+	}
+	if events[0].ACP.TextRunID != "engine:7" || events[1].ACP.TextRunID != "engine:7" {
+		t.Fatalf("turn 7 runs = %q, %q", events[0].ACP.TextRunID, events[1].ACP.TextRunID)
+	}
+	if events[2].ACP.TextRunID != "engine:8" {
+		t.Fatalf("turn 8 run = %q", events[2].ACP.TextRunID)
+	}
+	if events[1].ProjectionKey == "" || events[1].ProjectionKey != events[0].ProjectionKey || events[1].ProjectionOp != sessionevents.ProjectionAppend {
+		t.Fatalf("projection = %#v, %#v", events[0], events[1])
+	}
+}
+
+func TestACPTranscriptTurnlessChunksShareOneRun(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.CreateSession(storage.CreateSession{Slug: "main", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{}, nil)
+	manager.Events = sessionevents.New()
+	job := &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPAgent: AgentKimi, ACPSession: "acp-session", State: StateIdle}}
+	manager.jobsByID[session.ID] = job
+
+	// No active turn: chunks of an agent-internal turn must still merge into
+	// one transcript run instead of flushing as one message per chunk.
+	manager.queueACPMessage(job, "internal turn, ")
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+	manager.queueACPMessage(job, "still one message")
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+
+	events, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %#v", events)
+	}
+	run := events[0].ACP.TextRunID
+	if run == "" || events[1].ACP.TextRunID != run {
+		t.Fatalf("text run ids = %q, %q; events=%#v", run, events[1].ACP.TextRunID, events)
+	}
+	if events[0].ProjectionKey == "" || events[1].ProjectionKey != events[0].ProjectionKey || events[1].ProjectionOp != sessionevents.ProjectionAppend {
+		t.Fatalf("persisted text projection = %#v, %#v", events[0], events[1])
+	}
+}
+
+func TestACPTranscriptTurnlessRunSplitsAfterIdleGap(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.CreateSession(storage.CreateSession{Slug: "main", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{}, nil)
+	manager.Events = sessionevents.New()
+	job := &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPAgent: AgentKimi, ACPSession: "acp-session", State: StateIdle}}
+	manager.jobsByID[session.ID] = job
+
+	manager.queueACPMessage(job, "first run")
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+
+	buffer := manager.transcriptBuffers.get(session.ID, false)
+	if buffer == nil {
+		t.Fatal("transcript buffer missing")
+	}
+	buffer.mu.Lock()
+	buffer.turnlessLastChunkAt = time.Now().Add(-time.Minute)
+	buffer.mu.Unlock()
+
+	manager.queueACPMessage(job, "second run")
+	manager.withACPTranscriptBarrier(job.eventView(), nil)
+
+	events, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %#v", events)
+	}
+	if events[0].ACP.TextRunID == "" || events[1].ACP.TextRunID == "" || events[0].ACP.TextRunID == events[1].ACP.TextRunID {
+		t.Fatalf("idle-separated runs must differ: %#v", events)
 	}
 }
 

@@ -33,10 +33,10 @@ func TestEventSearchUpgradeAndMutationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AppendSessionEvents(session.ID, sessionevents.Event{
-		Type: sessionevents.TypeACPMessage, Content: "quartz",
-		ACP: &sessionevents.ACPEvent{ID: session.ID},
-	}); err != nil {
+	if _, err := store.db.Exec(
+		"INSERT INTO session_events (thread_id, seq, type, content, acp, created_at_ms) VALUES (?, 1, ?, 'quartz', json_object('id', ?), 0)",
+		session.ID, sessionevents.TypeACPMessage, session.ID,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := provider.Up(t.Context()); err != nil {

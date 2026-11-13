@@ -47,6 +47,7 @@ type VoiceMessage struct {
 type Event struct {
 	Voice            *VoiceMessage          `json:"voice,omitempty"`
 	Seq              int64                  `json:"seq,omitempty"`
+	StreamSeq        int64                  `json:"stream_seq,omitempty"`
 	SessionID        string                 `json:"session_id"`
 	Type             string                 `json:"type"`
 	Content          string                 `json:"content,omitempty"`

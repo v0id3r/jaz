@@ -85,6 +85,7 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 	var planned bool
 	var attention bool
 	now := time.Now().UTC()
+	engineTurnKey := sessionUpdateEngineTurnKey(raw)
 	update, err := acpschema.DecodeSessionUpdate(raw)
 	if err != nil {
 		return
@@ -249,10 +250,10 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 		}
 	}
 	if messageChunk != "" {
-		m.queueACPMessageWithID(job, messageChunk, messageID)
+		m.queueACPTranscript(job, acpTranscriptRun{eventType: "acp_message", chunks: []string{messageChunk}, upstreamMessageID: messageID, engineTurnKey: engineTurnKey})
 	}
 	if thoughtChunk != "" {
-		m.queueACPThoughtWithID(job, thoughtChunk, thoughtMessageID)
+		m.queueACPTranscript(job, acpTranscriptRun{eventType: "acp_thought", chunks: []string{thoughtChunk}, upstreamMessageID: thoughtMessageID, engineTurnKey: engineTurnKey})
 	}
 	if toolEvent != nil {
 		m.publishACPTool(job.eventView(), *toolEvent)
@@ -267,6 +268,21 @@ func messagePhase(meta map[string]any) string {
 	air, _ := jetbrains["air"].(map[string]any)
 	phase, _ := air["phase"].(string)
 	return phase
+}
+
+// sessionUpdateEngineTurnKey extracts the agent-reported engine turn id
+// (`_meta.turnId` extension on session/update) for transcript run keying.
+// Empty when the agent does not report it.
+func sessionUpdateEngineTurnKey(raw json.RawMessage) string {
+	var meta struct {
+		Meta struct {
+			TurnID json.Number `json:"turnId"`
+		} `json:"_meta"`
+	}
+	if json.Unmarshal(raw, &meta) != nil {
+		return ""
+	}
+	return meta.Meta.TurnID.String()
 }
 
 func contentText(raw acpschema.ContentBlock) string {

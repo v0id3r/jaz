@@ -13,6 +13,12 @@ Set these server configuration values, then restart the server when its active t
 
 Equivalent configuration fields are jaz.push.keyfile, keyid, teamid and bundleid. Empty signing credentials leave push disabled; the iOS settings screen reports this.
 
+### Browser push
+
+Installed PWA clients can use Web Push instead of APNs. Set `JAZ_WEB_PUSH_PUBLIC_KEY` and `JAZ_WEB_PUSH_PRIVATE_KEY` to a persistent VAPID key pair, and optionally `JAZ_WEB_PUSH_SUBJECT` to an operator contact URL (defaults to the server's public HTTPS URL). The equivalent fields are `jaz.webpush.publickey`, `privatekey` and `subject`. Empty keys disable browser push.
+
+Browser subscriptions use `PUT/DELETE /v1/mobile/web-push` and belong to the authenticated paired device. `/v1/mobile/push` exposes the public VAPID key needed to subscribe. The PWA's service worker shows alerts and opens their thread on click. Web Push carries no Live Activity state.
+
 ## Contract
 
 - Device authentication binds registrations to the requesting paired device. Root credentials cannot register a phone.

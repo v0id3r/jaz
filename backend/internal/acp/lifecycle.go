@@ -21,10 +21,12 @@ type agentProcess struct {
 	stderr      *processStderrTail
 	serveErr    error
 	serveDone   chan struct{}
+	sandboxed   bool
 }
 
 func newAgentProcess(ac *agentConn) *agentProcess {
 	return &agentProcess{
+		sandboxed: ac.sandboxed,
 		conn:      ac.promptTracker,
 		peer:      ac.peer,
 		cancel:    ac.cancel,

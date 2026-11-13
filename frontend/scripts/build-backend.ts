@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -17,9 +17,7 @@ const requireTelegramBundle =
   process.env.CI === 'true' || process.env.JAZ_REQUIRE_TELEGRAM_BUNDLE === '1'
 const telegramLDFlags = telegramBackendLDFlags(requireTelegramBundle)
 
-mkdirSync(dirname(output), { recursive: true })
-
-const ldflags = [`-s -w -X main.version=${backendVersion}`]
+const ldflags = [`-s -w -X github.com/wins/jaz/backend/internal/buildinfo.version=${backendVersion}`]
 ldflags.push(...telegramLDFlags)
 
 const args = ['build', '-o', output, '-ldflags', ldflags.join(' ')]

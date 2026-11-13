@@ -7,6 +7,7 @@ import { FileReaderLinkProvider, RenderedMarkdown } from '@/components/session/M
 import { ApiError } from '@/lib/api/client'
 import { healthQuery, sessionFileQuery, sessionFileRawUrl } from '@/lib/api/sessions'
 import type { HealthResponse } from '@/lib/api/types'
+import { usePinnedUrl } from '@/lib/hooks/usePinnedUrl'
 import { markdownDocumentTitle } from '@/lib/markdownDocuments'
 import { isMarkdownPath, isSpreadsheetPath, parseFileReference, type FileReference } from '@shared/fileReader'
 
@@ -194,9 +195,10 @@ function FileTextView({
 }
 
 function PDFFileView({ url }: { url: string }) {
+  const [src] = usePinnedUrl(url)
   return (
     <iframe
-      src={url}
+      src={src}
       title="PDF file preview"
       referrerPolicy="no-referrer"
       className="h-full w-full border-0 bg-bg"

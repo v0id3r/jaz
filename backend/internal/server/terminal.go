@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/wins/jaz/backend/internal/httpapi"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/storage"
 	"github.com/wins/jaz/backend/internal/terminal"
 )
@@ -27,7 +28,7 @@ type terminalClientMessage struct {
 func (s *Server) terminalManager() *terminal.Manager {
 	s.terminalOnce.Do(func() {
 		if s.Terminal == nil {
-			s.Terminal = terminal.New()
+			s.Terminal = terminal.New(sandbox.Local{})
 		}
 	})
 	return s.Terminal

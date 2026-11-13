@@ -2,12 +2,18 @@ import { readAPIResponse } from '@/lib/api/response'
 import { DEFAULT_API_BASE_URL, backendFetch, backendTransportUrl, clientRuntime } from '@/lib/clientRuntime'
 import { isPreviewProxyTargetHostname } from '@shared/preview'
 import type { ResourceTicket } from '@shared/connectionSession'
+import { DeviceTokenError, fetchWithDeviceKey } from '@shared/deviceProof'
+import { deviceAccessToken, deviceProof } from '@/lib/deviceIdentity'
 
 export { ApiError } from '@/lib/api/response'
 
 const AUTH_KEY_PREFIX = 'jaz.backendAuth.'
 const authTokens = new Map<string, string>()
+// Backends in proof mode, where the device key is the credential and each
+// request presents a short-lived access token it obtains.
+const keyCredentials = new Set<string>()
 const resourceTickets = new Map<string, ResourceTicket>()
+let ticketRenewal: ReturnType<typeof setTimeout> | undefined
 let credentialRevision = 0
 const sessionListeners = new Set<() => void>()
 let sessionRequests = new AbortController()
@@ -134,18 +140,30 @@ export function apiWebSocketUrl(path: string): string {
   return url.toString()
 }
 
-export function apiWebSocketProtocols(): string[] {
+// Browsers cannot set headers on a WebSocket handshake, so the token and its
+// proof travel as subprotocols.
+export async function apiWebSocket(path: string): Promise<WebSocket> {
   if (!secureBackendConnection(apiBaseUrl())) {
     throw new Error('Remote connections require HTTPS')
   }
-  const token = cachedApiAuthToken()
-  return token ? ['jaz', `jaz-auth.${token}`] : []
-}
-
-export function apiWebSocket(path: string): WebSocket {
-  const socket = new WebSocket(apiWebSocketUrl(path), apiWebSocketProtocols())
+  const revision = credentialRevision
+  const url = apiWebSocketUrl(path)
+  const keyed = apiUsesDeviceKey()
+  const token = keyed ? await deviceAccessToken(apiBaseUrl()) : cachedApiAuthToken()
+  const proof = keyed ? await deviceProof('GET', url, token) : ''
+  if (revision !== credentialRevision) {
+    throw new Error('The connection changed before the socket opened')
+  }
+  const socket = new WebSocket(url, token ? ['jaz', `jaz-auth.${token}`, ...(proof ? [`jaz-dpop.${proof}`] : [])] : [])
   const unsubscribe = onApiSessionChange(() => socket.close())
   socket.addEventListener('close', unsubscribe, { once: true })
+  if (keyed) {
+    // Browsers hide why a handshake failed. A request replaces the token if
+    // the backend forgot it, so the next handshake can succeed.
+    let opened = false
+    socket.addEventListener('open', () => { opened = true }, { once: true })
+    socket.addEventListener('close', () => { if (!opened) void apiFetch('/v1/auth/check').catch(() => {}) }, { once: true })
+  }
   return socket
 }
 
@@ -168,6 +186,10 @@ function authStorageKey(url: string): string {
 
 export function cachedApiAuthToken(url = apiBaseUrl()): string {
   return authTokens.get(authStorageKey(url)) ?? ''
+}
+
+export function apiUsesDeviceKey(url = apiBaseUrl()): boolean {
+  return keyCredentials.has(authStorageKey(url))
 }
 
 export function restoreApiAuthToken(url: string): string {
@@ -194,12 +216,17 @@ export function rememberApiAuthToken(url: string, current: () => boolean): void 
   localStorage.setItem(authStorageKey(url), 'enc:v1:' + ciphertext)
 }
 
-export function setApiAuthToken(url: string, token?: string | null, ticket?: ResourceTicket): void {
+export function setApiAuthToken(url: string, token?: string | null, ticket?: ResourceTicket, deviceKey = false): void {
   const key = authStorageKey(url)
   if (token) {
     authTokens.set(key, token)
   } else {
     authTokens.delete(key)
+  }
+  if (deviceKey) {
+    keyCredentials.add(key)
+  } else {
+    keyCredentials.delete(key)
   }
   setResourceTicket(url, ticket)
   if (normalizeBaseUrl(url) === baseUrl) {
@@ -209,7 +236,9 @@ export function setApiAuthToken(url: string, token?: string | null, ticket?: Res
 
 export function clearApiSession(): void {
   authTokens.clear()
+  keyCredentials.clear()
   resourceTickets.clear()
+  clearTimeout(ticketRenewal)
   notifySessionChange()
 }
 
@@ -269,24 +298,39 @@ function appendAuthQuery(rawUrl: string, url = apiBaseUrl()): string {
   return parsed.toString()
 }
 
-export function apiFetch(path: string, init?: RequestInit, url = apiBaseUrl()): Promise<Response> {
+export async function apiFetch(path: string, init?: RequestInit, url = apiBaseUrl()): Promise<Response> {
   assertBackendRelativePath(path, 'apiFetch')
   const signal = init?.signal ? AbortSignal.any([init.signal, sessionRequests.signal]) : sessionRequests.signal
   const revision = credentialRevision
   const options = withAPIHeaders({ ...init, signal }, url)
   const bearer = new Headers(options.headers).get('Authorization')
-  return backendFetch(`${url}${path}`, options).then(async (response) => {
-    if ((response.status === 401 || response.status === 403) && bearer === `Bearer ${cachedApiAuthToken(url)}`) {
-      const body = await response.clone().json().catch(() => null) as { code?: string } | null
-      if (revision === credentialRevision && url === apiBaseUrl() &&
-        (body?.code === 'unauthorized' || body?.code === 'device_approval_required')) {
-        for (const handler of rejectionListeners) {
-          handler()
-        }
-      }
+  // The device key authenticates requests that bring no credential of their own.
+  const keyed = apiUsesDeviceKey(url) && !bearer
+  let response: Response
+  try {
+    response = keyed ? await fetchWithDeviceKey(deviceAccessToken, deviceProof, `${url}${path}`, options) : await backendFetch(`${url}${path}`, options)
+  } catch (error) {
+    if (keyed && error instanceof DeviceTokenError && error.code === 'invalid_client') {
+      notifyAuthRejected(revision, url)
     }
-    return response
-  })
+    throw error
+  }
+  if ((response.status === 401 || response.status === 403) && (keyed || bearer === `Bearer ${cachedApiAuthToken(url)}`)) {
+    const body = await response.clone().json().catch(() => null) as { code?: string } | null
+    if (body?.code === 'unauthorized' || body?.code === 'device_approval_required') {
+      notifyAuthRejected(revision, url)
+    }
+  }
+  return response
+}
+
+function notifyAuthRejected(revision: number, url: string): void {
+  if (revision !== credentialRevision || url !== apiBaseUrl()) {
+    return
+  }
+  for (const handler of rejectionListeners) {
+    handler()
+  }
 }
 
 export function apiEventSourceUrl(path: string): string {
@@ -337,11 +381,60 @@ function assertBackendRelativePath(path: string, helper: string): void {
 }
 
 export function setResourceTicket(url: string, ticket?: { token: string; expires_at: string }): void {
+  const key = normalizeBaseUrl(url)
   if (ticket) {
-    resourceTickets.set(normalizeBaseUrl(url), ticket)
+    resourceTickets.set(key, ticket)
   } else {
-    resourceTickets.delete(normalizeBaseUrl(url))
+    resourceTickets.delete(key)
   }
+  if (key !== baseUrl) return
+  clearTimeout(ticketRenewal)
+  if (ticket) {
+    const halfLife = (Date.parse(ticket.expires_at) - Date.now()) / 2 || 0
+    ticketRenewal = setTimeout(() => void renewResourceTicket(key), Math.min(30_000, Math.max(5_000, halfLife)))
+  }
+}
+
+// Tickets live about a minute. Every window renews its own at half life, so
+// embedded media never waits on an event stream or the main window's poll.
+async function renewResourceTicket(url: string): Promise<void> {
+  const revision = credentialRevision
+  const auth = await apiFetch('/v1/auth/check', undefined, url)
+    .then((response) => response.ok ? response.json() as Promise<{ resource_ticket?: ResourceTicket }> : null)
+    .catch(() => null)
+  if (revision !== credentialRevision || url !== baseUrl) return
+  if (auth) {
+    setResourceTicket(url, auth.resource_ticket)
+  } else {
+    ticketRenewal = setTimeout(() => void renewResourceTicket(url), 5_000)
+  }
+}
+
+// The ticket is the only part of an embedded URL that changes while the
+// resource stays the same.
+export function embeddedUrlKey(url: string): string {
+  return replaceTicket(url, '')
+}
+
+export function withCurrentTicket(url: string): string {
+  return replaceTicket(url, resourceTickets.get(baseUrl)?.token ?? '')
+}
+
+// The desktop renderer (app://jaz) is another origin than the API, and an auth
+// proxy in between may only admit cross-origin media that announces its Origin.
+export function apiMediaCrossOrigin(url: string): 'anonymous' | undefined {
+  return URL.canParse(url) && new URL(url).origin === baseUrl ? 'anonymous' : undefined
+}
+
+function replaceTicket(url: string, token: string): string {
+  if (!URL.canParse(url) || !new URL(url).searchParams.has('ticket')) return url
+  const parsed = new URL(url)
+  if (token) {
+    parsed.searchParams.set('ticket', token)
+  } else {
+    parsed.searchParams.delete('ticket')
+  }
+  return parsed.toString()
 }
 
 function defaultConnectionScheme(value: string): string {

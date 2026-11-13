@@ -129,12 +129,12 @@ func telegramPasswordNeeded(err error) bool {
 
 func telegramFirstQRCodeError(status connections.QRStatus) error {
 	if status.Error != "" {
-		return fmt.Errorf("Telegram QR sign-in failed: %s", status.Error)
+		return fmt.Errorf("telegram QR sign-in failed: %s", status.Error)
 	}
 	if status.Status == "expired" {
-		return fmt.Errorf("Telegram QR code expired before it was shown")
+		return fmt.Errorf("telegram QR code expired before it was shown")
 	}
-	return fmt.Errorf("Telegram did not return a QR code")
+	return fmt.Errorf("telegram did not return a QR code")
 }
 
 func (p *Provider) QRStatus(ctx context.Context, id string) (connections.QRStatus, error) {

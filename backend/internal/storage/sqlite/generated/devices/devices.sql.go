@@ -32,6 +32,26 @@ func (q *Queries) ApprovePairingRequest(ctx context.Context, arg ApprovePairingR
 	return result.RowsAffected()
 }
 
+const bindDeviceUser = `-- name: BindDeviceUser :execrows
+UPDATE devices
+SET user_identity = ?1
+WHERE id = ?2
+  AND user_identity IN ('', ?1)
+`
+
+type BindDeviceUserParams struct {
+	UserIdentity string `json:"user_identity"`
+	ID           string `json:"id"`
+}
+
+func (q *Queries) BindDeviceUser(ctx context.Context, arg BindDeviceUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, bindDeviceUser, arg.UserIdentity, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const claimPairingRequest = `-- name: ClaimPairingRequest :execrows
 UPDATE device_pairing_requests
 SET secret_hash = ''
@@ -115,7 +135,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 WHERE id = ?1
 LIMIT 1
@@ -138,6 +159,7 @@ type GetDeviceRow struct {
 	LastSeenIp      string `json:"last_seen_ip"`
 	UserAgent       string `json:"user_agent"`
 	AppVersion      string `json:"app_version"`
+	UserIdentity    string `json:"user_identity"`
 }
 
 func (q *Queries) GetDevice(ctx context.Context, id string) (GetDeviceRow, error) {
@@ -160,6 +182,7 @@ func (q *Queries) GetDevice(ctx context.Context, id string) (GetDeviceRow, error
 		&i.LastSeenIp,
 		&i.UserAgent,
 		&i.AppVersion,
+		&i.UserIdentity,
 	)
 	return i, err
 }
@@ -181,7 +204,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 WHERE token_hash = ?1
 LIMIT 1
@@ -204,6 +228,7 @@ type GetDeviceByTokenHashRow struct {
 	LastSeenIp      string `json:"last_seen_ip"`
 	UserAgent       string `json:"user_agent"`
 	AppVersion      string `json:"app_version"`
+	UserIdentity    string `json:"user_identity"`
 }
 
 func (q *Queries) GetDeviceByTokenHash(ctx context.Context, tokenHash string) (GetDeviceByTokenHashRow, error) {
@@ -226,6 +251,7 @@ func (q *Queries) GetDeviceByTokenHash(ctx context.Context, tokenHash string) (G
 		&i.LastSeenIp,
 		&i.UserAgent,
 		&i.AppVersion,
+		&i.UserIdentity,
 	)
 	return i, err
 }
@@ -284,7 +310,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 ORDER BY
   CASE status
@@ -313,6 +340,7 @@ type ListDevicesRow struct {
 	LastSeenIp      string `json:"last_seen_ip"`
 	UserAgent       string `json:"user_agent"`
 	AppVersion      string `json:"app_version"`
+	UserIdentity    string `json:"user_identity"`
 }
 
 func (q *Queries) ListDevices(ctx context.Context) ([]ListDevicesRow, error) {
@@ -341,6 +369,7 @@ func (q *Queries) ListDevices(ctx context.Context) ([]ListDevicesRow, error) {
 			&i.LastSeenIp,
 			&i.UserAgent,
 			&i.AppVersion,
+			&i.UserIdentity,
 		); err != nil {
 			return nil, err
 		}
@@ -532,7 +561,8 @@ ON CONFLICT(id) DO UPDATE SET
   last_seen_at_ms = excluded.last_seen_at_ms,
   last_seen_ip = excluded.last_seen_ip,
   user_agent = excluded.user_agent,
-  app_version = excluded.app_version
+  app_version = excluded.app_version,
+  user_identity = ''
 `
 
 type SaveApprovedDeviceParams struct {

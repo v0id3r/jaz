@@ -364,3 +364,25 @@ func requireRoute(t *testing.T, routes server.Routes, pattern string) {
 	}
 	t.Fatalf("missing route %q in %#v", pattern, routes)
 }
+
+func TestDeviceAuthConfigNeedsOriginsForProofMode(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		devices DevicesConfig
+		proof   bool
+		wantErr bool
+	}{
+		{"token mode", DevicesConfig{Origins: []string{"jaz.example"}}, false, false},
+		{"proof mode", DevicesConfig{RequireProof: true, Origins: []string{"https://jaz.example"}}, true, false},
+		{"proof mode without origins", DevicesConfig{RequireProof: true}, false, true},
+		{"proof mode with a bad origin", DevicesConfig{RequireProof: true, Origins: []string{"jaz.example"}}, false, true},
+		{"proxy without proof mode", DevicesConfig{Proxy: deviceauth.ProxyConfig{Header: "Teleport-Jwt-Assertion"}}, false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			devices, err := NewDeviceAuth(nil, Config{Devices: test.devices})
+			if (err != nil) != test.wantErr || err == nil && devices.RequireProof() != test.proof {
+				t.Fatalf("NewDeviceAuth() = %v, error %v; want proof %v, error %v", devices, err, test.proof, test.wantErr)
+			}
+		})
+	}
+}

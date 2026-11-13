@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	mcpconfig "github.com/wins/jaz/backend/internal/mcpconfig"
@@ -324,5 +325,33 @@ func TestEnabledHTTPMCPServersEmitsEmptyHeadersArray(t *testing.T) {
 	}
 	if string(raw["headers"]) != "[]" {
 		t.Fatalf("raw headers = %s, want []", raw["headers"])
+	}
+}
+
+func TestSandboxedAgentsGetNoBackendKeyWhenJazAdmitsTheirSessions(t *testing.T) {
+	store := staticMCPServerStore{servers: []mcpconfig.Server{{
+		Name: "jaz_mcp", URL: "http://10.216.92.10:5299/mcp/proxy", Enabled: true, Transport: mcpconfig.TransportStreamableHTTP,
+		Headers: []mcpconfig.Header{{Name: "Authorization", Value: "Bearer root-key"}, {Name: mcpsession.HeaderName, Value: mcpsession.HeaderPlaceholder}},
+	}}}
+	for _, tc := range []struct {
+		withoutKey, sandboxed, wantKey bool
+	}{
+		{withoutKey: true, sandboxed: true, wantKey: false},
+		{withoutKey: true, sandboxed: false, wantKey: true},
+		{withoutKey: false, sandboxed: true, wantKey: true},
+	} {
+		m := &Manager{cfg: Config{SandboxMCPWithoutKey: tc.withoutKey}}
+		ctx := m.mcpAuthContext(mcpsession.With(context.Background(), "s1"), tc.sandboxed)
+		servers, err := enabledHTTPMCPServers(ctx, store, MCPServerPolicyAll)
+		if err != nil || len(servers) != 1 {
+			t.Fatalf("servers %d, err %v", len(servers), err)
+		}
+		payload := string(servers[0])
+		if got := strings.Contains(payload, "root-key"); got != tc.wantKey {
+			t.Fatalf("%+v: key in payload = %t: %s", tc, got, payload)
+		}
+		if !strings.Contains(payload, `"s1"`) {
+			t.Fatalf("%+v: session header missing: %s", tc, payload)
+		}
 	}
 }

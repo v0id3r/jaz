@@ -98,14 +98,14 @@ func extractAntigravityTarballWithLimit(body []byte, dst string, limit int64) er
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
-			return fmt.Errorf("Antigravity CLI archive did not contain antigravity")
+			return fmt.Errorf("antigravity CLI archive did not contain antigravity")
 		}
 		if err != nil {
 			return err
 		}
 		name := path.Clean(header.Name)
 		if name == "." || strings.HasPrefix(name, "../") || path.IsAbs(name) {
-			return fmt.Errorf("Antigravity CLI archive contains unsafe path %q", header.Name)
+			return fmt.Errorf("antigravity CLI archive contains unsafe path %q", header.Name)
 		}
 		if header.Typeflag != tar.TypeReg || path.Base(name) != "antigravity" {
 			continue

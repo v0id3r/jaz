@@ -71,7 +71,7 @@ func (m *Manager) refreshMCPBeforeTurn(ctx context.Context, job *jobState) error
 	}
 	params := map[string]any{"sessionId": job.ACPSession}
 	if process.mcpRefresh == grokMCPUpdateMethod {
-		servers, err := m.grokMCPServers(ctx, job, process.mcpPolicy, revision)
+		servers, err := m.grokMCPServers(m.mcpAuthContext(ctx, process.sandboxed), job, process.mcpPolicy, revision)
 		if err != nil {
 			return err
 		}

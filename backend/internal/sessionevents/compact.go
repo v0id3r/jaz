@@ -208,6 +208,7 @@ func mergeACPTextEvent(previous Event, previousSeq int64, next Event) (Event, bo
 	merged := previous
 	if next.Seq != 0 {
 		merged.Seq = next.Seq
+		merged.StreamSeq = next.StreamSeq
 	}
 	if !next.At.IsZero() {
 		merged.At = next.At
@@ -250,6 +251,9 @@ func isProjectableACPTextEvent(event Event) bool {
 func keepsACPTextStreamOpen(text Event, event Event) bool {
 	if text.ACP == nil || event.SessionID != text.SessionID {
 		return false
+	}
+	if event.Type == TypeAgentSession || event.Type == TypeAgentTask {
+		return true
 	}
 	if event.ACP != nil && event.ACP.ID == text.ACP.ID {
 		if event.Type == "acp_tool" {

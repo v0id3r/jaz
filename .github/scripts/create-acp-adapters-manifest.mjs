@@ -5,16 +5,16 @@ import { dirname } from "node:path";
 const out = process.argv[2] || "backend/internal/acpadapter/acp-adapters.json";
 const specPath = process.argv[3] || ".github/acp-adapter-assets.json";
 const spec = JSON.parse(readFileSync(specPath, "utf8"));
+const releaseAssets = new Map();
 
 const manifest = {
   adapters: {},
 };
 
 for (const [name, adapter] of Object.entries(spec.adapters)) {
-  const adapterAssets = releaseAssetMap(adapter.repo, adapter.tag);
   manifest.adapters[name] = { version: adapter.tag.replace(/^v/, ""), assets: {} };
   for (const [platform, wanted] of Object.entries(adapter.assets)) {
-    const asset = adapterAssets.get(wanted.name);
+    const asset = releaseAssetMap(wanted.repo ?? adapter.repo, wanted.tag ?? adapter.tag).get(wanted.name);
     if (!asset) {
       throw new Error(`${adapter.repo}@${adapter.tag} is missing ${wanted.name}`);
     }
@@ -37,11 +37,15 @@ mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, `${JSON.stringify(manifest, null, 2)}\n`);
 
 function releaseAssetMap(repo, tag) {
-  const raw = execFileSync("gh", ["release", "view", tag, "--repo", repo, "--json", "assets"], {
-    encoding: "utf8",
-  });
-  const release = JSON.parse(raw);
-  return new Map(release.assets.map((asset) => [asset.name, asset]));
+  const key = `${repo}@${tag}`;
+  if (!releaseAssets.has(key)) {
+    const raw = execFileSync("gh", ["release", "view", tag, "--repo", repo, "--json", "assets"], {
+      encoding: "utf8",
+    });
+    const release = JSON.parse(raw);
+    releaseAssets.set(key, new Map(release.assets.map((asset) => [asset.name, asset])));
+  }
+  return releaseAssets.get(key);
 }
 
 function digestSHA256(asset) {

@@ -179,7 +179,7 @@ func ftsMatchQuery(query string) string {
 		if len([]rune(token)) < 2 {
 			continue
 		}
-		terms = append(terms, token+"*")
+		terms = append(terms, "("+token+"* OR "+token+")")
 	}
 	return strings.Join(terms, " AND ")
 }

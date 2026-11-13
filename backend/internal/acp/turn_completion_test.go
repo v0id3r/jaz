@@ -148,6 +148,46 @@ func (e *blockedTurnError) Error() string {
 	return "connection lost"
 }
 
+func TestSteerIntoTurnStorageEndedWaitsForNextTurn(t *testing.T) {
+	for _, status := range []string{storage.StatusInterrupted, storage.StatusIdle} {
+		t.Run(status, func(t *testing.T) {
+			store, err := sqlitestore.New(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			session, err := store.CreateSession(storage.CreateSession{Slug: "diverged", Runtime: storage.RuntimeACP})
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn := storage.Turn{StartedAt: time.Now().UTC()}
+			if err := store.StartSessionTurn(session.ID, turn); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.UpdateSessionStatus(session.ID, status, "", time.Time{}); err != nil {
+				t.Fatal(err)
+			}
+			manager := NewManager(store, Config{}, log.New(io.Discard))
+			job := newIdleJob(session, AgentClaude, "native-session", "", ModeState{})
+			job.steerMethod = steerNative
+			manager.addJob(job, nil)
+			job.startStoredTurn(CompletionInline, turn)
+			job.turn.closeFirstPromptSent()
+
+			_, err = manager.reserveSteer(job, SteerRequest{Message: "follow-up", transcript: sendTranscriptUserMessage}, nil, "follow-up")
+			if !errors.Is(err, ErrSteeringUnsupported) || errors.Is(err, errTurnEnded) {
+				t.Fatalf("steer error = %v, want one that queues the message without retrying the send", err)
+			}
+			if messages, err := store.LoadMessageRecords(session.ID); err != nil || len(messages) != 0 {
+				t.Fatalf("message persisted into a turn storage ended: %+v, %v", messages, err)
+			}
+			if job.turn.promptCalls != 1 {
+				t.Fatalf("prompt calls = %d, want the steer unreserved", job.turn.promptCalls)
+			}
+		})
+	}
+}
+
 func TestSteerCannotJoinFailingTurn(t *testing.T) {
 	store, err := sqlitestore.New(t.TempDir())
 	if err != nil {

@@ -30,7 +30,7 @@ func TestStreamSendsAlertsWithoutApplePush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := mobilepush.NewService(store, sender, func(string) bool {
+	service := mobilepush.NewService(store, sender, nil, func(string) bool {
 		return false
 	})
 	bus := sessionevents.New()

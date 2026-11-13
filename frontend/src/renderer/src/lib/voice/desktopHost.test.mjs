@@ -80,7 +80,10 @@ function fixture() {
   const module = { exports: {} }
   compiled(module, module.exports)
   stop = module.exports.connectClaudeVoiceHost(api)
-  const command = async (socket, id, value) => socket.onmessage({ data: JSON.stringify({ id, method: 'Claude.voice', params: value }) })
+  const command = async (socket, id, value) => {
+    await delay(0)
+    return socket.onmessage({ data: JSON.stringify({ id, method: 'Claude.voice', params: value }) })
+  }
   const start = (socket, id) => command(socket, id, { type: 'start', id, options: { sdp: 'v=0\r\noffer', context: 'Canonical instructions', voice: 'buttery' } })
   return { api, sockets, active, closed, results, command, start, emit: (id, data) => listener?.(id, data) }
 }
@@ -150,6 +153,7 @@ test('disconnect while Claude setup is pending closes its owned call once', asyn
     await pending
   }
   const request = f.start(f.sockets[0], 'pending-mobile-call')
+  await delay(0)
   f.sockets[0].close()
   reject(new Error('Setup cancelled'))
   await request

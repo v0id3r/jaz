@@ -38,16 +38,6 @@ func (p *jazProcess) commitment(id int64) storage.Commitment {
 	return commitment
 }
 
-// lastPrompt is the last prompt bot's agent was sent.
-func (p *jazProcess) lastPrompt() string {
-	p.t.Helper()
-	prompts := p.prompts()
-	if len(prompts) == 0 {
-		p.t.Fatal("no prompts")
-	}
-	return prompts[len(prompts)-1]
-}
-
 // promptWith is the last prompt an agent was sent that contains text, if any.
 func (p *jazProcess) promptWith(text string) string {
 	p.t.Helper()

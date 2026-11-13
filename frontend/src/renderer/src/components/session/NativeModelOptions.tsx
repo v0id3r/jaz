@@ -4,6 +4,12 @@ import { SwitchRow } from '@/components/ui/Switch'
 import { fastModeOption, type FastModeControl } from '@/lib/agentConfig'
 import type { AgentSessionConfigOption } from '@/lib/api/types'
 
+const shownCategories = ['model_config', 'model', 'thought_level']
+
+export function shownConfigOption(option: AgentSessionConfigOption): boolean {
+  return option.category !== undefined && shownCategories.includes(option.category)
+}
+
 export function FastModeOption({ checked, disabled, onChange }: FastModeControl) {
   return <SwitchRow icon={<Zap size={13} className="shrink-0" />} label="Fast Mode" checked={checked} disabled={disabled} onChange={onChange} />
 }
@@ -15,7 +21,7 @@ export function NativeModelOptions({ options, running, pending, onChange }: {
   onChange: (id: string, value: string) => void
 }) {
   const fastMode = fastModeOption(options)
-  return options?.filter((option) => option.category === 'model_config').map((option) => (
+  return options?.filter(shownConfigOption).map((option) => (
     option === fastMode ? <FastModeOption
       key={option.id}
       checked={option.current_value === 'on'}

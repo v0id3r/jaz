@@ -16,6 +16,7 @@ import (
 	"github.com/wins/jaz/backend/internal/promptmodule"
 	"github.com/wins/jaz/backend/internal/provider"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/sessioncontext"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/sessionlock"
@@ -240,6 +241,9 @@ func NewManager(store Store, cfg Config, logger *log.Logger) *Manager {
 	if logger == nil {
 		logger = log.Default()
 	}
+	if cfg.Launcher == nil {
+		cfg.Launcher = sandbox.Local{}
+	}
 	launchCtx, stopLaunches := context.WithCancel(context.Background())
 	return &Manager{
 		launchCtx:         launchCtx,
@@ -283,6 +287,8 @@ type agentConn struct {
 	initRaw       json.RawMessage
 	stderr        *processStderrTail
 	promptTracker *promptTrackingConn
+	// sandboxed agents run in the sandbox, outside Jaz's network namespace.
+	sandboxed bool
 }
 
 func (c *agentConn) close() {
@@ -333,7 +339,8 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 			return nil, err
 		}
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
+	// The process outlives ctx but keeps its session, which decides its identity.
+	runCtx, cancel := context.WithCancel(mcpsession.With(context.Background(), mcpsession.ID(ctx)))
 	conn, stderr, err := m.openConn(runCtx, name, cfg, env, cwd, launchPrompt)
 	if err != nil {
 		cancel()
@@ -342,7 +349,8 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 	promptTracker := newPromptTrackingConn(conn)
 	state := newConnectionState()
 	peer := jsonrpc.NewPeer(promptTracker, state.handler(m, handler))
-	ac := &agentConn{state: state, conn: promptTracker, peer: peer, cancel: cancel, closed: runCtx.Done(), stderr: stderr, promptTracker: promptTracker}
+	ac := &agentConn{state: state, conn: promptTracker, peer: peer, cancel: cancel, closed: runCtx.Done(), stderr: stderr, promptTracker: promptTracker,
+		sandboxed: sandbox.Sandboxes(m.cfg.Launcher, cwd)}
 	defer func() {
 		if err != nil {
 			ac.close()
@@ -350,8 +358,7 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 	}()
 	go func() {
 		defer cancel()
-		err := peer.Serve(runCtx)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err := peer.Serve(runCtx); !errors.Is(err, context.Canceled) {
 			m.setServeErr(peer, err)
 		}
 	}()
@@ -471,7 +478,7 @@ func (m *Manager) newACPSession(ctx context.Context, ac *agentConn, agent string
 	return m.newACPProtocolSession(ctx, ac, "agent", newSessionRequest{
 		Meta:       meta,
 		Cwd:        cwd,
-		MCPServers: m.mcpServersForAgent(ctx, ac.initRaw, mcpServerPolicy, agent),
+		MCPServers: m.mcpServersForAgent(m.mcpAuthContext(ctx, ac.sandboxed), ac.initRaw, mcpServerPolicy, agent),
 	})
 }
 

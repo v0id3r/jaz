@@ -24,6 +24,7 @@ type Layout struct {
 	ACPClaudeConfig   string
 	ACPKimiHome       string
 	ACPOpenCodeConfig string
+	ACPLaunch         string
 }
 
 func New(root string) Layout {
@@ -44,6 +45,7 @@ func New(root string) Layout {
 		ACPClaudeConfig:   filepath.Join(root, "acp", "claude"),
 		ACPKimiHome:       filepath.Join(root, "acp", "kimi"),
 		ACPOpenCodeConfig: filepath.Join(root, "acp", "opencode"),
+		ACPLaunch:         filepath.Join(root, "acp", "launch"),
 	}
 }
 

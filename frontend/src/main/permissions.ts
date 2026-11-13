@@ -5,13 +5,19 @@ interface PermissionDetails {
   requestingUrl?: string
 }
 
+// The packaged renderer is served from its own origin so servers and
+// proxies can tell it apart from the opaque "null" origin of file:// pages.
+export const RENDERER_SCHEME = 'app'
+export const RENDERER_HOST = 'jaz'
+export const RENDERER_DOCUMENT = `${RENDERER_SCHEME}://${RENDERER_HOST}/index.html`
+
 export function isTrustedRendererURL(value: string | undefined): boolean {
   if (!value) return false
   try {
     const url = new URL(value)
     const devURL = process.env['ELECTRON_RENDERER_URL']
     if (devURL) return url.origin === new URL(devURL).origin
-    return url.protocol === 'file:' && url.pathname.endsWith('/renderer/index.html')
+    return url.protocol === `${RENDERER_SCHEME}:` && url.host === RENDERER_HOST && url.pathname === '/index.html'
   } catch {
     return false
   }

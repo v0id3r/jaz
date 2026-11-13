@@ -96,7 +96,7 @@ func (m *Manager) installMuse(ctx context.Context, dir string) error {
 		return fmt.Errorf("install Muse Code: %w: %s", err, strings.TrimSpace(output.String()))
 	}
 	if !fileExists(filepath.Join(staging, ExecutableName(MuseCLI))) {
-		return fmt.Errorf("Muse installer finished without installing %s", ExecutableName(MuseCLI))
+		return fmt.Errorf("muse installer finished without installing %s", ExecutableName(MuseCLI))
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return err

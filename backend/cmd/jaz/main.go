@@ -5,6 +5,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	_ "time/tzdata"
+
+	"github.com/wins/jaz/backend/internal/mesh"
+	"github.com/wins/jaz/backend/internal/sandbox"
 )
 
 func main() {
@@ -31,6 +35,14 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	case mainSandboxAttach:
+		os.Exit(sandbox.Attach(args, os.Stdin, os.Stdout, os.Stderr))
+	case mainRunner:
+		os.Exit(sandbox.ServeRunner(args))
+	case mainMeshGateway:
+		os.Exit(mesh.ServeGateway(args))
+	case mainMeshHook:
+		os.Exit(mesh.Hook(args, os.Stdin, os.Stderr))
 	}
 	if err := runServe(args); err != nil {
 		fmt.Fprintln(os.Stderr, "serve:", err)
@@ -47,6 +59,10 @@ const (
 	mainInvalid
 	mainDevices
 	mainUpdate
+	mainSandboxAttach
+	mainRunner
+	mainMeshGateway
+	mainMeshHook
 )
 
 func commandArgs(args []string) ([]string, mainAction) {
@@ -63,6 +79,14 @@ func commandArgs(args []string) ([]string, mainAction) {
 		return args[1:], mainDevices
 	case "update":
 		return args[1:], mainUpdate
+	case "sandbox-attach":
+		return args[1:], mainSandboxAttach
+	case "runner":
+		return args[1:], mainRunner
+	case "mesh-gateway":
+		return args[1:], mainMeshGateway
+	case "mesh-hook":
+		return args[1:], mainMeshHook
 	case "help":
 		return nil, mainHelp
 	}
@@ -83,5 +107,5 @@ func isHelp(arg string) bool {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: jaz [--addr addr] [--public-url url] [--preview-url-template url]\n       jaz --version\n       jaz update [--latest|--version vX.Y.Z]\n       jaz serve [flags]\n       jaz server [flags]\n       jaz devices [--root path]\n       jaz devices [--root path] approve <pairing-or-device-id>\n\nRun and administer Jaz.")
+	fmt.Fprintln(w, "usage: jaz [--addr addr] [--public-url url] [--preview-url-template url]\n       jaz --version\n       jaz update [--latest|--version vX.Y.Z]\n       jaz serve [flags]\n       jaz server [flags]\n       jaz devices [--root path]\n       jaz devices [--root path] approve <pairing-or-device-id>\n       jaz runner [--config path]\n\nRun and administer Jaz.")
 }

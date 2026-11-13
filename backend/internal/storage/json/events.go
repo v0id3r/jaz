@@ -48,7 +48,7 @@ func (s *Store) LoadSessionEventsAfter(id string, afterSeq int64) ([]sessioneven
 	}
 	filtered := events[:0]
 	for _, event := range events {
-		if event.Seq > afterSeq {
+		if event.StreamSeq > afterSeq {
 			filtered = append(filtered, event)
 		}
 	}
@@ -141,6 +141,7 @@ func (s *Store) appendSessionEvents(id string, events ...sessionevents.Event) er
 			expanded[i].Seq = nextSeq
 			nextSeq++
 		}
+		expanded[i].StreamSeq = expanded[i].Seq
 		expanded[i] = sessionevents.EnsureStatelessProjection(expanded[i])
 		if sessionevents.NeedsProviderSubagentSnapshot(expanded[i]) {
 			for j := len(existing) - 1; j >= 0; j-- {
@@ -170,6 +171,7 @@ func (s *Store) appendSessionEvents(id string, events ...sessionevents.Event) er
 	for i := range events {
 		stored := expanded[last[i]]
 		events[i].Seq = stored.Seq
+		events[i].StreamSeq = stored.StreamSeq
 		events[i].At = stored.At
 		events[i].SessionID = stored.SessionID
 		events[i].ProjectionKey = stored.ProjectionKey

@@ -1,6 +1,5 @@
-import { fileURLToPath } from 'node:url'
 import { ipcMain, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent, type WebFrameMain } from 'electron'
-import { trustedWindow } from '@main/permissions'
+import { isTrustedRendererURL, trustedWindow } from '@main/permissions'
 import {
   CONNECTION_SESSION_CHANNEL,
   LOCAL_SESSION_CHANNEL,
@@ -16,9 +15,9 @@ import { LOCAL_BACKEND_URL as LOCAL_URL } from '@shared/localBackend'
 
 type WindowDocument = { window: BrowserWindow; document: number; frame?: WebFrameMain; active: boolean }
 type Dependencies = {
-  rendererPath: string
   startLocal: () => Promise<{ ok: boolean; url?: string; key?: string; error?: string }>
   profile: () => DeviceIdentity & DeviceMetadata
+  fetchWithKey: (url: string, init: RequestInit) => Promise<Response>
   stopConsumers: () => void
 }
 
@@ -30,20 +29,10 @@ export function createConnectionSession(deps: Dependencies) {
   let localGeneration = 0
   let localFlight: { generation: number; promise: Promise<LocalSession>; settled: boolean } | null = null
 
-  function expectedDocument(value: string): boolean {
-    try {
-      const url = new URL(value)
-      const dev = process.env.ELECTRON_RENDERER_URL
-      return dev ? url.origin === new URL(dev).origin : url.protocol === 'file:' && fileURLToPath(url) === deps.rendererPath
-    } catch {
-      return false
-    }
-  }
-
   function authorize(event: IpcMainEvent | IpcMainInvokeEvent, document?: number): WindowDocument {
     trustedWindow(event)
     const record = windows.get(event.sender.id)
-    if (!record || !record.active || event.senderFrame !== event.sender.mainFrame || !expectedDocument(event.senderFrame.url) ||
+    if (!record || !record.active || event.senderFrame !== event.sender.mainFrame || !isTrustedRendererURL(event.senderFrame.url) ||
       (document !== undefined && record.document !== document)) {
       throw new Error('Connection session requires the current app document')
     }
@@ -60,7 +49,7 @@ export function createConnectionSession(deps: Dependencies) {
 
   function deliver(record: WindowDocument): void {
     const contents = record.window.webContents
-    if (!record.window.isDestroyed() && !contents.isDestroyed() && record.active && record.frame === contents.mainFrame && expectedDocument(record.frame.url)) {
+    if (!record.window.isDestroyed() && !contents.isDestroyed() && record.active && record.frame === contents.mainFrame && isTrustedRendererURL(record.frame.url)) {
       record.frame.send(CONNECTION_SESSION_CHANNEL, { document: record.document, snapshot })
     }
   }
@@ -147,14 +136,15 @@ export function createConnectionSession(deps: Dependencies) {
     const session = request.session
     if (request.revision !== snapshot.revision || (snapshot.phase !== 'pending' && snapshot.phase !== 'connected') ||
       session.url !== snapshot.url || !validBackendOrigin(session.url) || typeof session.token !== 'string' || typeof session.deviceId !== 'string' || typeof session.remembered !== 'boolean' ||
-      (session.token && (!session.token.startsWith('jaz_') || !session.deviceId))) {
+      (session.token && (!session.token.startsWith('jaz_') || !session.deviceId)) ||
+      (session.deviceKey !== undefined && (typeof session.deviceKey !== 'boolean' || session.deviceKey && (session.token || !session.deviceId)))) {
       throw new Error('Connection session was replaced')
     }
     if (localFlight?.settled) {
       localFlight = null
     }
     return change({ phase: 'connected', url: session.url,
-      session: { url: session.url, token: session.token, deviceId: session.deviceId, remembered: session.remembered },
+      session: { url: session.url, token: session.token, deviceId: session.deviceId, ...(session.deviceKey && { deviceKey: true }), remembered: session.remembered },
       error: null, localPending: false }, record.window)
   }
 
@@ -170,7 +160,7 @@ export function createConnectionSession(deps: Dependencies) {
       throw new Error('Local bootstrap returned the wrong backend')
     }
     const health = await fetch(LOCAL_URL + '/health', { redirect: 'error', signal: AbortSignal.timeout(3000) })
-    const healthBody = await health.json() as { ok?: boolean; auth_required?: boolean }
+    const healthBody = await health.json() as { ok?: boolean; auth_required?: boolean; capabilities?: { device_proof?: boolean } }
     if (generation !== localGeneration) {
       throw new Error('Local startup was cancelled')
     }
@@ -190,17 +180,20 @@ export function createConnectionSession(deps: Dependencies) {
       body: JSON.stringify({ ...profile, kind: 'desktop' }), signal: AbortSignal.timeout(5000),
     })
     const body = await response.json() as { token?: string; error?: string }
-    if (!response.ok || !body.token?.startsWith('jaz_')) {
+    // In proof mode registration only approves the device key, the credential.
+    const keyed = healthBody.capabilities?.device_proof === true
+    if (!response.ok || !(keyed || body.token?.startsWith('jaz_'))) {
       throw new Error(body.error || 'Local device registration failed')
     }
-    const check = await fetch(LOCAL_URL + '/v1/auth/check', {
-      redirect: 'error', headers: { Authorization: `Bearer ${body.token}`, 'X-Jaz-Client-Platform': 'desktop' }, signal: AbortSignal.timeout(3000),
-    })
+    const checkInit = { redirect: 'error', signal: AbortSignal.timeout(3000), headers: { 'X-Jaz-Client-Platform': 'desktop' } } satisfies RequestInit
+    const check = keyed
+      ? await deps.fetchWithKey(LOCAL_URL + '/v1/auth/check', checkInit)
+      : await fetch(LOCAL_URL + '/v1/auth/check', { ...checkInit, headers: { ...checkInit.headers, Authorization: `Bearer ${body.token}` } })
     if (!check.ok) {
       throw new Error('Local device verification failed')
     }
     const access = deviceAccess(await check.json(), profile.device_id)
-    return { url: LOCAL_URL, token: body.token, deviceId: access.deviceId, ticket: access.ticket, remembered: false }
+    return { url: LOCAL_URL, token: body.token ?? '', deviceId: access.deviceId, ...(keyed && { deviceKey: true }), ticket: access.ticket, remembered: false }
   }
 
   async function local(event: IpcMainInvokeEvent, document: number, revision: number): Promise<LocalSession> {

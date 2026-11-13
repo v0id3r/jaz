@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildTimeline, classifyTurnItems, stableEventKey } from './timeline'
+import { buildTimeline, classifyTurnItems, itemEnd, stableEventKey } from './timeline'
 
 test('batch lookup apps stay off the timeline while explicit opens and tool history remain', () => {
   const at = (second) => new Date(second * 1000).toISOString()
@@ -152,6 +152,17 @@ test('only readable assistant text can collapse a spoken answer', () => {
 })
 
 describe('ACP activity timeline', () => {
+  test('a long tool ends its activity when it stops running, not when it appeared', () => {
+    const tool = (id, at, elapsed) => acpEvent('thread', 'acp_tool', at, {
+      tool_calls: [{ id, tool_name: 'exec_command', runtime: { elapsed_time_seconds: elapsed } }],
+    })
+    const { turns } = buildTimeline([], [tool('long', 10, 90), tool('short', 20, 1)], 'thread', true)
+    const [activity] = turns[0].items
+
+    expect(activity.at).toBe(20_000)
+    expect(itemEnd(activity)).toBe(100_000)
+  })
+
   test('groups alternating reasoning and tools without moving commentary', () => {
     const events = [
       acpEvent('thread', 'acp_thought', 1, { thought: 'inspect files' }),

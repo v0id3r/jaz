@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/wins/jaz/backend/internal/acp"
+	"github.com/wins/jaz/backend/internal/httpapi"
 	"github.com/wins/jaz/backend/internal/provider"
 	"github.com/wins/jaz/backend/internal/runtimeenv"
 )
@@ -121,7 +122,7 @@ func (s *Server) saveRuntimeKeyUpdates(updates map[string]string) error {
 }
 
 func (s *Server) providerKeySetupAllowed(r *http.Request) bool {
-	return strings.TrimSpace(s.AuthKey) != "" || loopbackRequest(r)
+	return strings.TrimSpace(s.AuthKey) != "" || httpapi.LoopbackRequest(r)
 }
 
 func (s *Server) providerKeyConfigured(id string) bool {
@@ -137,20 +138,6 @@ func (s *Server) providerKeyConfigured(id string) bool {
 	}
 	_, ok = runtimeenv.Lookup(s.runtimeKeyEnvPath(), meta.APIKeyEnv)
 	return ok
-}
-
-func (s *Server) validateModelProviderRunnable(id string) error {
-	if s.ModelProviderRuntime == nil {
-		return nil
-	}
-	meta, ok := provider.RunnableModelProviderByID(id)
-	if !ok {
-		return fmt.Errorf("unknown model provider %q", id)
-	}
-	if strings.TrimSpace(meta.APIKeyEnv) == "" || s.providerKeyConfigured(id) {
-		return nil
-	}
-	return fmt.Errorf("model provider %q cannot run without %s; add the key in Settings > Agents", id, meta.APIKeyEnv)
 }
 
 func (s *Server) runtimeKeyEnvPath() string {

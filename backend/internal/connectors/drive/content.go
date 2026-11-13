@@ -166,7 +166,7 @@ func (c APIClient) comments(ctx context.Context, id string) ([]CommentThread, er
 			return out, nil
 		}
 		if page.NextPageToken == q.Get("pageToken") {
-			return nil, fmt.Errorf("Google Drive repeated a comments page token")
+			return nil, fmt.Errorf("google Drive repeated a comments page token")
 		}
 		q.Set("pageToken", page.NextPageToken)
 	}

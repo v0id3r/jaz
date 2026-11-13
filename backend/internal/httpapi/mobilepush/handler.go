@@ -15,7 +15,10 @@ type Handler struct {
 }
 
 func (h Handler) Status(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"configured": h.Service.Enabled()})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
+		"configured":          h.Service.Enabled(),
+		"web_push_public_key": h.Service.WebPushPublicKey(),
+	})
 }
 
 func (h Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +31,26 @@ func (h Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeResult(w, h.Service.Register(deviceID, input))
+}
+
+func (h Handler) RegisterWebPush(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := authenticatedDevice(w, r)
+	if !ok {
+		return
+	}
+	var input mobilepush.WebPushSubscription
+	if !decode(w, r, &input) {
+		return
+	}
+	writeResult(w, h.Service.RegisterWebPush(deviceID, input))
+}
+
+func (h Handler) UnregisterWebPush(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := authenticatedDevice(w, r)
+	if !ok {
+		return
+	}
+	writeResult(w, h.Service.UnregisterWebPush(deviceID))
 }
 
 func (h Handler) RegisterActivity(w http.ResponseWriter, r *http.Request) {

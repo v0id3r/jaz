@@ -12,7 +12,7 @@ import (
 	"github.com/wins/jaz/backend/internal/runtimefiles"
 )
 
-var errKimiModelNotConfigured = errors.New("Kimi sign-in did not finish configuring a model; sign in again")
+var errKimiModelNotConfigured = errors.New("kimi sign-in did not finish configuring a model; sign in again")
 
 type kimiConfig struct {
 	DefaultModel    string                    `toml:"default_model"`
@@ -123,6 +123,11 @@ func (m *Manager) prepareKimiProcessEnv(root string, cfg AgentConfig, env map[st
 	)
 	auth := resolveAgentAuthWithProviders(AgentKimi, cfg, root, env, m.providers())
 	env["KIMI_CODE_HOME"] = auth.Config.Path
+	// Jaztools calls (memory search workers, thread waits) legitimately outrun
+	// Kimi's 60s default MCP tool timeout; keep the raise overridable via env.
+	if env["KIMI_MCP_TOOL_TIMEOUT_MS"] == "" {
+		env["KIMI_MCP_TOOL_TIMEOUT_MS"] = "300000"
+	}
 	if prepare && auth.Authenticated {
 		return kimiModelConfigReady(auth.Config.Path)
 	}

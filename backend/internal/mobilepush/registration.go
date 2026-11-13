@@ -1,10 +1,12 @@
 package mobilepush
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -46,12 +48,14 @@ type Activity struct {
 
 type deviceRegistration struct {
 	Registration
-	Activities []Activity `json:"activities,omitempty"`
+	WebPush    *WebPushSubscription `json:"web_push,omitempty"`
+	Activities []Activity           `json:"activities,omitempty"`
 }
 
 type Service struct {
 	store        Store
 	sender       Sender
+	webPush      WebPushSender
 	awaitsAnswer func(string) bool
 	changed      chan struct{}
 	mu           sync.Mutex
@@ -59,12 +63,19 @@ type Service struct {
 	listeners    map[chan Alert]struct{}
 }
 
-func NewService(store Store, sender Sender, awaitsAnswer func(string) bool) *Service {
-	return &Service{store: store, sender: sender, awaitsAnswer: awaitsAnswer, changed: make(chan struct{}, 1), listeners: map[chan Alert]struct{}{}}
+func NewService(store Store, sender Sender, webPush WebPushSender, awaitsAnswer func(string) bool) *Service {
+	return &Service{store: store, sender: sender, webPush: webPush, awaitsAnswer: awaitsAnswer, changed: make(chan struct{}, 1), listeners: map[chan Alert]struct{}{}}
 }
 
 func (s *Service) Enabled() bool {
-	return s.sender.Enabled()
+	return s.sender.Enabled() || s.webPush != nil && s.webPush.Enabled()
+}
+
+func (s *Service) WebPushPublicKey() string {
+	if s.webPush == nil || !s.webPush.Enabled() {
+		return ""
+	}
+	return s.webPush.PublicKey()
 }
 
 func validate(input Registration) error {
@@ -95,6 +106,34 @@ func (s *Service) Register(deviceID string, input Registration) error {
 	}
 	return s.update(deviceID, func(device *deviceRegistration) {
 		device.Registration = input
+	})
+}
+
+func (s *Service) RegisterWebPush(deviceID string, input WebPushSubscription) error {
+	input.Endpoint = strings.TrimSpace(input.Endpoint)
+	input.Keys.P256DH = strings.TrimSpace(input.Keys.P256DH)
+	input.Keys.Auth = strings.TrimSpace(input.Keys.Auth)
+	endpoint, err := url.Parse(input.Endpoint)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || len(input.Endpoint) > 4096 {
+		return fmt.Errorf("%w: invalid web push endpoint", ErrInvalidRegistration)
+	}
+	for _, key := range []struct {
+		value string
+		size  int
+	}{{input.Keys.P256DH, 65}, {input.Keys.Auth, 16}} {
+		decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(key.value, "="))
+		if err != nil || len(decoded) != key.size {
+			return fmt.Errorf("%w: invalid web push key", ErrInvalidRegistration)
+		}
+	}
+	return s.update(deviceID, func(device *deviceRegistration) {
+		device.WebPush = &input
+	})
+}
+
+func (s *Service) UnregisterWebPush(deviceID string) error {
+	return s.update(deviceID, func(device *deviceRegistration) {
+		device.WebPush = nil
 	})
 }
 

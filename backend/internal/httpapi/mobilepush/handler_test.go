@@ -25,7 +25,7 @@ func TestRegistrationUsesAuthenticatedDeviceAndRejectsInvalidUpdates(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := Handler{Service: mobilepush.NewService(store, sender, func(string) bool {
+	handler := Handler{Service: mobilepush.NewService(store, sender, nil, func(string) bool {
 		return false
 	})}
 	body := `{"token":"` + strings.Repeat("ab", 32) + `","environment":"development","installation_id":"one","device_id":"victim"}`

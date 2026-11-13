@@ -171,7 +171,7 @@ func TestDesktopRejectsOverlapWithoutInterruptingActiveAction(t *testing.T) {
 	}()
 	select {
 	case err := <-overlap:
-		if err == nil || !strings.Contains(err.Error(), "Another browser action") {
+		if err == nil || !strings.Contains(err.Error(), "another browser action") {
 			t.Fatalf("overlap error=%v", err)
 		}
 	case <-time.After(200 * time.Millisecond):

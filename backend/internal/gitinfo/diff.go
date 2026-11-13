@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/wins/jaz/backend/internal/gitjail"
 )
 
 // FileChange is one changed path in a session's working tree relative to the
@@ -185,11 +187,14 @@ func FileDiff(ctx context.Context, dir string, spec FileDiffSpec) (FilePatch, er
 // hunk. Exit status 1 is success here: the diff family uses it for "files
 // differ" (--no-index always does).
 func gitDiff(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd, err := command(ctx, dir, gitjail.Policy{}, nil, args...)
+	if err != nil {
+		return "", fmt.Errorf("git diff: %w", err)
+	}
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	var exit *exec.ExitError
 	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
 		if detail := strings.TrimSpace(stderr.String()); detail != "" {

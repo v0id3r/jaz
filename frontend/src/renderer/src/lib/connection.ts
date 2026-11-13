@@ -3,14 +3,14 @@ import {
   apiBaseUrl, cachedApiAuthToken, clearApiSession, CLIENT_PLATFORM, CLIENT_PLATFORM_HEADER,
   consumeStartupConnectUrl, isLocalBackendUrl, localBaseUrl, normalizeBaseUrl,
   parseBackendConnectUrl, rememberApiAuthToken, restoreApiAuthToken, secureBackendConnection,
-  setApiAuthToken, setApiBaseUrl, onApiAuthRejected,
+  setApiAuthToken, setApiBaseUrl, onApiAuthRejected, forgetApiAuthToken, apiUsesDeviceKey,
 } from '@/lib/api/client'
 import { rememberBackend, removeKnownBackend } from '@/lib/backends'
 import { backendFetch, clientRuntime } from '@/lib/clientRuntime'
 import { loadBrowserCredential, saveBrowserCredential, forgetBrowserCredential } from '@/lib/browserCredentials'
-import { getDeviceProfile } from '@/lib/deviceIdentity'
+import { deviceProof, getDeviceIdentity, getDeviceProfile } from '@/lib/deviceIdentity'
 import { queryClient } from '@/lib/query/queryClient'
-import { readAccess, readHealth, readJSON } from '@/lib/connectionProbe'
+import { readAccess, readHealth, readJSON, readKeyAccess, type Access } from '@/lib/connectionProbe'
 import type { ResourceTicket, SessionSnapshot, VerifiedSession } from '@shared/connectionSession'
 import { LOCAL_BACKEND_URL as LOCAL_URL } from '@shared/localBackend'
 
@@ -142,10 +142,10 @@ function activate(value: Attempt, candidate: Candidate): void {
   }
   if (ownsConnection && bridge && desktop) {
     authoritative = bridge.update({ operation: 'commit', document: desktop.document, revision: value.revision,
-      session: { url: candidate.url, token: candidate.token, deviceId: candidate.deviceId, remembered: candidate.remembered } })
+      session: { url: candidate.url, token: candidate.token, deviceId: candidate.deviceId, deviceKey: candidate.deviceKey, remembered: candidate.remembered } })
     value.revision = authoritative.revision
   }
-  setApiAuthToken(candidate.url, candidate.token, candidate.ticket)
+  setApiAuthToken(candidate.url, candidate.token, candidate.ticket, candidate.deviceKey)
   setState({ status: 'connected', url: candidate.url, pairing: null, error: null })
   if (ownsConnection) {
     if (candidate.url === LOCAL_URL && clientRuntime.kind === 'electron') {
@@ -167,8 +167,25 @@ function activate(value: Attempt, candidate: Candidate): void {
   }
 }
 
+function readCandidateAccess(value: Attempt, candidate: Candidate): Promise<Access> {
+  return candidate.deviceKey
+    ? readKeyAccess(value.url, candidate.deviceId, value.controller.signal)
+    : readAccess(value.url, candidate.token, value.controller.signal, candidate.deviceId || undefined)
+}
+
+// In proof mode the device key is the credential, so nothing is saved and a
+// token kept from token mode is dropped.
+async function connectWithKey(value: Attempt, remembered: boolean): Promise<Access> {
+  const access = await readKeyAccess(value.url, (await getDeviceIdentity(true)).device_id, value.controller.signal)
+  if (access.ok && current(value)) {
+    forgetApiAuthToken(value.url)
+    activate(value, { url: value.url, token: '', deviceId: access.deviceId, deviceKey: true, ticket: access.ticket, remembered })
+  }
+  return access
+}
+
 async function verify(value: Attempt, candidate: Candidate): Promise<string | null> {
-  const access = await readAccess(value.url, candidate.token, value.controller.signal, candidate.deviceId || undefined)
+  const access = await readCandidateAccess(value, candidate)
   if (!current(value)) {
     return null
   }
@@ -197,7 +214,7 @@ function schedulePoll(value: Attempt, candidate: Candidate, missed = false): voi
     if (!current(value)) {
       return
     }
-    const access = health.ok && candidate.token ? await readAccess(value.url, candidate.token, value.controller.signal, candidate.deviceId) : health
+    const access = health.ok && (candidate.token || candidate.deviceKey) ? await readCandidateAccess(value, candidate) : health
     if (!current(value)) {
       return
     }
@@ -229,28 +246,34 @@ async function savedCredential(url: string): Promise<SavedCredential> {
   return { token: restoreApiAuthToken(url) }
 }
 
-async function register(value: Attempt, credential: string): Promise<string | null> {
-  const profile = await getDeviceProfile()
+// In proof mode registration proves the device holds the key it registers.
+async function keyProof(url: string, proofRequired: boolean): Promise<Record<string, string>> {
+  return proofRequired ? { DPoP: await deviceProof('POST', url) } : {}
+}
+
+async function register(value: Attempt, credential: string, proofRequired: boolean): Promise<string | null> {
+  const profile = await getDeviceProfile(proofRequired)
   if (!current(value)) {
     return null
   }
+  const proof = await keyProof(value.url + '/v1/devices/register', proofRequired)
   const response = await serialized(value, () => backendFetch(value.url + '/v1/devices/register', {
     method: 'POST', redirect: 'error',
-    headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
+    headers: { Authorization: `Bearer ${credential}`, ...proof, 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
     body: JSON.stringify({ ...profile, kind: clientRuntime.deviceKind }), signal: AbortSignal.timeout(5000),
   }))
   if (!response || !current(value)) {
     return null
   }
-  const body = await readJSON<{ token?: string; error?: string; pairing?: { id: string; expires_at: string }; pairing_secret?: string }>(response)
+  const body = await readJSON<{ token?: string; device?: unknown; error?: string; pairing?: { id: string; expires_at: string }; pairing_secret?: string }>(response)
   if (!current(value)) {
     return null
   }
-  if (response.ok && body?.token) {
-    return verify(value, { url: value.url, token: body.token, deviceId: profile.device_id, remembered: false })
+  if (response.status === 200 && (proofRequired ? body?.device : body?.token)) {
+    return verify(value, { url: value.url, token: body?.token ?? '', deviceId: profile.device_id, deviceKey: proofRequired, remembered: false })
   }
   if (response.status === 202 && body?.pairing && body.pairing_secret) {
-    pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id)
+    pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id, proofRequired)
     return null
   }
   const error = body?.error || 'Device registration failed'
@@ -258,7 +281,7 @@ async function register(value: Attempt, credential: string): Promise<string | nu
   return error
 }
 
-function pending(value: Attempt, pairing: PendingPairing, deviceId: string): void {
+function pending(value: Attempt, pairing: PendingPairing, deviceId: string, proofRequired: boolean): void {
   if (!current(value)) {
     return
   }
@@ -276,8 +299,8 @@ function pending(value: Attempt, pairing: PendingPairing, deviceId: string): voi
       if (!current(value)) {
         return
       }
-      if (response.ok && body?.pairing?.status === 'approved' && body.token) {
-        await verify(value, { url: value.url, token: body.token, deviceId, remembered: false })
+      if (response.ok && body?.pairing?.status === 'approved' && (proofRequired || body.token)) {
+        await verify(value, { url: value.url, token: body.token ?? '', deviceId, deviceKey: proofRequired, remembered: false })
         return
       }
       if (!response.ok || body?.pairing?.status === 'rejected' || body?.pairing?.status === 'expired') {
@@ -294,13 +317,17 @@ function pending(value: Attempt, pairing: PendingPairing, deviceId: string): voi
   pairingTimer = setTimeout(() => void poll(), 2000)
 }
 
-async function pair(value: Attempt): Promise<string | null> {
-  const profile = await getDeviceProfile()
+async function pair(value: Attempt, proofRequired: boolean): Promise<string | null> {
+  const profile = await getDeviceProfile(proofRequired)
+  if (!current(value)) {
+    return null
+  }
+  const proof = await keyProof(value.url + '/v1/devices/pairing-requests', proofRequired)
   if (!current(value)) {
     return null
   }
   const response = await backendFetch(value.url + '/v1/devices/pairing-requests', {
-    method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
+    method: 'POST', redirect: 'error', headers: { ...proof, 'Content-Type': 'application/json', [CLIENT_PLATFORM_HEADER]: CLIENT_PLATFORM },
     body: JSON.stringify({ ...profile, kind: clientRuntime.deviceKind }), signal: AbortSignal.any([value.controller.signal, AbortSignal.timeout(5000)]),
   })
   const body = await readJSON<{ pairing?: { id: string; expires_at: string }; pairing_secret?: string; error?: string }>(response)
@@ -312,8 +339,19 @@ async function pair(value: Attempt): Promise<string | null> {
     block(error)
     return error
   }
-  pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id)
+  pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id, proofRequired)
   return null
+}
+
+// A web app served by the backend's own origin regains the proxy session only
+// through a top-level navigation, which the proxy turns into its login page.
+// reload() revalidates the document, so a cached app shell cannot short-circuit it.
+function signInThroughBrowser(url: string): boolean {
+  if (clientRuntime.kind !== 'web' || url !== window.location.origin) {
+    return false
+  }
+  window.location.reload()
+  return true
 }
 
 export async function connectRemote(input: string): Promise<string | null> {
@@ -327,16 +365,30 @@ export async function connectRemote(input: string): Promise<string | null> {
   const value = begin(url)
   clearConnectionPreference()
   try {
-    if (parsed.key.startsWith('invite_')) {
-      return await register(value, parsed.key)
-    }
     const health = await readHealth(url, value.controller.signal)
     if (!current(value)) {
       return null
     }
     if (!health.ok) {
+      if (health.code === 'browser_session_required' && signInThroughBrowser(url)) {
+        return null
+      }
       block(health.error)
       return health.error
+    }
+    if (health.proofRequired) {
+      const access = await connectWithKey(value, remembered)
+      if (!current(value) || access.ok) {
+        return null
+      }
+      if (access.code === 'invalid_client') {
+        return parsed.key ? await register(value, parsed.key, true) : await pair(value, true)
+      }
+      block(access.error)
+      return access.error
+    }
+    if (parsed.key.startsWith('invite_')) {
+      return await register(value, parsed.key, false)
     }
     if (!health.authRequired) {
       activate(value, { url, token: '', deviceId: '', remembered: false })
@@ -355,18 +407,18 @@ export async function connectRemote(input: string): Promise<string | null> {
     }
     if (!current(value)) return null
     if (!token) {
-      return await pair(value)
+      return await pair(value, false)
     }
     const access = await readAccess(url, token, value.controller.signal, deviceId)
     if (!current(value)) {
       return null
     }
     if (access.ok && access.kind === 'root') {
-      return await register(value, token)
+      return await register(value, token, false)
     }
     if (!access.ok) {
       if (access.code === 'device_approval_required' && parsed.key) {
-        return await register(value, token)
+        return await register(value, token, false)
       }
       block(access.error)
       return access.error
@@ -446,7 +498,8 @@ export function rememberConnection(): string | null {
   const value = attempt
   const token = cachedApiAuthToken(state.url)
   try {
-    rememberApiAuthToken(state.url, () => {
+    // A device key needs nothing saved; remembering only keeps the preference.
+    if (!apiUsesDeviceKey(state.url)) rememberApiAuthToken(state.url, () => {
       if (!value || !current(value)) {
         return false
       }
@@ -458,7 +511,7 @@ export function rememberConnection(): string | null {
     }
     if (bridge && desktop) {
       authoritative = bridge.update({ operation: 'commit', document: desktop.document, revision: value.revision,
-        session: { url: state.url, token, deviceId: authoritative?.session?.deviceId || '', remembered: true } })
+        session: { url: state.url, token, deviceId: authoritative?.session?.deviceId || '', deviceKey: apiUsesDeviceKey(state.url), remembered: true } })
       value.revision = authoritative.revision
     }
     savePreference({ mode: 'remote', remoteUrl: state.url })
@@ -486,7 +539,7 @@ async function hydrate(snapshot: SessionSnapshot): Promise<void> {
   invalidate()
   if (snapshot.phase === 'connected' && snapshot.session) {
     const value = begin(snapshot.url, false)
-    if (snapshot.session.token) {
+    if (snapshot.session.token || snapshot.session.deviceKey) {
       await verify(value, snapshot.session)
     } else {
       activate(value, snapshot.session)
@@ -558,6 +611,19 @@ async function restore(url: string): Promise<void> {
     }
     if (!health.authRequired) {
       activate(value, { url, token: '', deviceId: '', remembered: false })
+      return
+    }
+    if (health.proofRequired) {
+      const access = await connectWithKey(value, true)
+      if (!current(value) || access.ok) {
+        return
+      }
+      if (access.recoverable) {
+        pollTimer = setTimeout(() => void retry(), 5000)
+      }
+      else {
+        block(access.code === 'invalid_client' ? 'Connect again with an authorized link or request approval' : access.error)
+      }
       return
     }
     try {

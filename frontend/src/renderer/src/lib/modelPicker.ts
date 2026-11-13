@@ -9,12 +9,29 @@ export interface ModelSelection {
   fastMode?: boolean
 }
 
+const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode']
+
 export function pickerEffortOptions(options: ReasoningEffortOption[]): ReasoningEffortOption[] {
-  return ['low', 'medium', 'high', 'xhigh', 'ultracode'].flatMap((value) => {
-    const option = options.find((option) => option.value === value)
-      ?? (value === 'ultracode' ? options.find((option) => option.value === 'ultra') : undefined)
-    return option ? [{ ...option, label: value === 'xhigh' ? 'Xhigh' : value === 'ultracode' ? 'Ultracode' : option.label }] : []
-  })
+  return options
+    .filter((option) => option.value !== '')
+    .map((option) => ({ ...option, label: pickerEffortLabel(option) }))
+    .sort((a, b) => {
+      const ia = EFFORT_ORDER.indexOf(a.value)
+      const ib = EFFORT_ORDER.indexOf(b.value)
+      return (ia === -1 ? EFFORT_ORDER.length : ia) - (ib === -1 ? EFFORT_ORDER.length : ib)
+    })
+}
+
+function pickerEffortLabel(option: ReasoningEffortOption): string {
+  switch (option.value) {
+    case 'xhigh':
+      return 'Xhigh'
+    case 'ultra':
+    case 'ultracode':
+      return 'Ultracode'
+    default:
+      return option.label
+  }
 }
 
 export function parseModelSelections(raw: string | null): Record<string, ModelSelection> {

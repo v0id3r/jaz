@@ -77,7 +77,7 @@ func (s *qrSession) submitPassword(password string) error {
 		s.err = ""
 		return nil
 	default:
-		return errors.New("Telegram password check is already in progress")
+		return errors.New("telegram password check is already in progress")
 	}
 }
 

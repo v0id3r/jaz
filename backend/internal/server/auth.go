@@ -5,13 +5,15 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
+	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/wins/jaz/backend/internal/deviceauth"
 	"github.com/wins/jaz/backend/internal/httpapi"
+	devicesapi "github.com/wins/jaz/backend/internal/httpapi/devices"
+	"github.com/wins/jaz/backend/internal/mesh"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 	"github.com/wins/jaz/backend/internal/sessioncontext"
 )
@@ -32,26 +34,51 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			s.serveDevice(w, r, principal, next)
 			return
 		}
+		if session := mesh.Session(r.Context()); session != "" {
+			// A tunnel's certificate names its session, and that admits it to
+			// the internal MCP endpoints in place of the backend key.
+			if !internalMCPPath(r.URL.Path) {
+				writeAuthError(w, http.StatusForbidden, "forbidden", fmt.Errorf("mesh sessions reach only the internal MCP endpoints"))
+				return
+			}
+			principal := deviceauth.Principal{Kind: deviceauth.PrincipalRoot}
+			next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
+			return
+		}
 		token := requestAuthKey(r)
 		if s.Devices != nil && r.Method == http.MethodPost && r.URL.Path == "/v1/devices/register" && strings.HasPrefix(token, "invite_") {
 			principal := deviceauth.Principal{Kind: deviceauth.PrincipalEnrollment, EnrollmentToken: token}
 			next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 			return
 		}
+		var deviceErr error
+		var deviceToken string
 		if s.Devices != nil {
+			deviceToken = s.deviceToken(r)
 			info := httpapi.RequestInfoFrom(r)
-			principal, err := s.Devices.Authenticate(token, deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
+			principal, err := s.Devices.Authenticate(deviceToken, devicesapi.RequestProof(r), deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent})
 			if err == nil {
 				s.serveDevice(w, r, principal, next)
+				return
+			}
+			// Distinct from unauthorized so clients keep a token whose proof was
+			// merely stale or replayed instead of discarding it and re-pairing.
+			if errors.Is(err, deviceauth.ErrProofInvalid) {
+				s.writeUnauthorized(w, "invalid_dpop_proof", "invalid_dpop_proof", err)
 				return
 			}
 			if errors.Is(err, deviceauth.ErrApprovalRequired) {
 				writeAuthError(w, http.StatusForbidden, "device_approval_required", err)
 				return
 			}
+			deviceErr = err
 		}
 		if subtle.ConstantTimeCompare([]byte(token), []byte(key)) == 1 {
-			if s.Devices == nil || (trustedLocalRequest(r) && (rootKeyAllowed(r) || s.rootKeyHasFullAccess())) {
+			if meshRequired(r, s.ServerConfig.MeshNetworks) {
+				writeAuthError(w, http.StatusForbidden, "mesh_required", fmt.Errorf("agents of this network reach Jaz only through the mesh"))
+				return
+			}
+			if s.Devices == nil || (httpapi.TrustedLocalRequest(r) && (rootKeyAllowed(r) || s.rootKeyHasFullAccess())) || agentMCPRequest(r, s.ServerConfig.AgentNetworks) {
 				principal := deviceauth.Principal{Kind: deviceauth.PrincipalRoot}
 				next.ServeHTTP(w, r.WithContext(contextWithClientInfo(r, principal)))
 				return
@@ -59,8 +86,41 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeAuthError(w, http.StatusForbidden, "device_approval_required", deviceauth.ErrApprovalRequired)
 			return
 		}
-		writeAuthError(w, http.StatusUnauthorized, "unauthorized", fmt.Errorf("missing or invalid backend API key"))
+		// An expired access token only needs a new one from the token endpoint.
+		if errors.Is(deviceErr, deviceauth.ErrTokenInvalid) {
+			s.writeUnauthorized(w, "invalid_token", "invalid_token", deviceErr)
+			return
+		}
+		challengeError := ""
+		if token != "" || deviceToken != "" {
+			challengeError = "invalid_token"
+		}
+		s.writeUnauthorized(w, "unauthorized", challengeError, fmt.Errorf("missing or invalid backend API key"))
 	})
+}
+
+// deviceToken is the credential offered for device auth. In proof mode it is
+// a DPoP-bound access token, which must not be accepted as a bearer token
+// (RFC 9449 §7.2), nor a bearer token as one.
+func (s *Server) deviceToken(r *http.Request) string {
+	if s.Devices.RequireProof() {
+		return requestCredential(r, "DPoP")
+	}
+	return requestAuthKey(r)
+}
+
+// writeUnauthorized adds the DPoP challenge of RFC 9449 §7.1 in proof mode,
+// with challengeError unless the request presented no credential; the code in
+// the body stays what Jaz clients branch on.
+func (s *Server) writeUnauthorized(w http.ResponseWriter, code, challengeError string, err error) {
+	if s.Devices != nil && s.Devices.RequireProof() {
+		challenge := `DPoP algs="` + deviceauth.ProofAlgs + `"`
+		if challengeError != "" {
+			challenge += `, error="` + challengeError + `"`
+		}
+		w.Header().Set("WWW-Authenticate", challenge)
+	}
+	writeAuthError(w, http.StatusUnauthorized, code, err)
 }
 
 const clientPlatformHeader = "X-Jaz-Client-Platform"
@@ -95,22 +155,6 @@ func rootKeyAllowed(r *http.Request) bool {
 	return r.URL.Path == "/v1/devices" || strings.HasPrefix(r.URL.Path, "/v1/devices/") || internalMCPRequest(r)
 }
 
-func trustedLocalRequest(r *http.Request) bool {
-	if !loopbackRequest(r) {
-		return false
-	}
-	host := (&url.URL{Host: r.Host}).Hostname()
-	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
-		return false
-	}
-	for _, name := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "CF-Connecting-IP"} {
-		if r.Header.Get(name) != "" {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *Server) serveDevice(w http.ResponseWriter, r *http.Request, principal deviceauth.Principal, next http.Handler) {
 	ctx, release, err := s.Devices.Track(contextWithClientInfo(r, principal), principal)
 	if err != nil {
@@ -122,7 +166,7 @@ func (s *Server) serveDevice(w http.ResponseWriter, r *http.Request, principal d
 }
 
 func publicDeviceRequest(r *http.Request) bool {
-	if r.Method == http.MethodPost && r.URL.Path == "/v1/devices/pairing-requests" {
+	if r.Method == http.MethodPost && (r.URL.Path == "/v1/devices/pairing-requests" || r.URL.Path == "/v1/devices/token") {
 		return true
 	}
 	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/devices/pairing-requests/") {
@@ -148,7 +192,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 		"device_id": principal.DeviceID,
 	}
 	if principal.Kind == deviceauth.PrincipalDevice {
-		ticket, err := s.Devices.IssueResourceTicket(requestAuthKey(r))
+		ticket, err := s.Devices.IssueResourceTicket(s.deviceToken(r))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -159,18 +203,16 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func requestAuthKey(r *http.Request) string {
-	if token := bearerToken(r.Header.Get("Authorization")); token != "" {
-		return token
+	return requestCredential(r, "Bearer")
+}
+
+// requestCredential reads a credential presented under scheme, or as the
+// subprotocol a browser WebSocket handshake carries it in.
+func requestCredential(r *http.Request, scheme string) string {
+	if fields := strings.Fields(r.Header.Get("Authorization")); len(fields) == 2 && strings.EqualFold(fields[0], scheme) {
+		return fields[1]
 	}
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		for _, protocol := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
-			protocol = strings.TrimSpace(protocol)
-			if strings.HasPrefix(protocol, "jaz-auth.") {
-				return strings.TrimPrefix(protocol, "jaz-auth.")
-			}
-		}
-	}
-	return ""
+	return httpapi.WebSocketProtocol(r, "jaz-auth.")
 }
 
 func queryAuthAllowed(r *http.Request) bool {
@@ -193,28 +235,43 @@ func queryAuthAllowed(r *http.Request) bool {
 		(action == "file" && rawSessionFileRequested(r))
 }
 
-func bearerToken(header string) string {
-	fields := strings.Fields(header)
-	if len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
-		return fields[1]
-	}
-	return ""
+func internalMCPRequest(r *http.Request) bool {
+	return internalMCPPath(r.URL.Path) && httpapi.LoopbackRequest(r)
 }
 
-func internalMCPRequest(r *http.Request) bool {
-	switch r.URL.Path {
+func internalMCPPath(path string) bool {
+	switch path {
 	case serverconfig.JazToolsMCPPath, serverconfig.JazToolsMCPCompatPath, serverconfig.JazmemMCPPath, serverconfig.MCPProxyPath:
-		return loopbackRequest(r)
+		return true
 	default:
 		return false
 	}
 }
 
-func loopbackRequest(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
+// meshRequired reports a request from a network whose agents must come
+// through the mesh; the backend key alone does not admit them.
+func meshRequired(r *http.Request, networks []netip.Prefix) bool {
+	if len(networks) == 0 {
+		return false
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	addr, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := addr.Addr().Unmap()
+	return slices.ContainsFunc(networks, func(network netip.Prefix) bool { return network.Contains(ip) })
+}
+
+// agentMCPRequest reports an internal MCP request from sandboxed agents, which
+// reach Jaz over the network instead of loopback.
+func agentMCPRequest(r *http.Request, networks []netip.Prefix) bool {
+	if len(networks) == 0 || !internalMCPPath(r.URL.Path) || httpapi.ForwardedRequest(r) {
+		return false
+	}
+	addr, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := addr.Addr().Unmap()
+	return slices.ContainsFunc(networks, func(network netip.Prefix) bool { return network.Contains(ip) })
 }

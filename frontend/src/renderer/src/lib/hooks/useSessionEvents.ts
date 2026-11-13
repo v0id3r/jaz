@@ -1,31 +1,38 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { getSession } from '@/lib/api/sessions'
 import { openSessionEvents } from '@/lib/api/sse'
-import type { SessionEvent } from '@/lib/api/types'
+import type { SessionEvent, SessionMessages } from '@/lib/api/types'
 import { keys } from '@/lib/query/keys'
-import { mergeSessionEvent } from '@/lib/sessionEvents'
+import { liveAfterCursor, mergeSessionEvent } from '@/lib/sessionEvents'
 
 // Subscribes to a session's SSE stream while mounted; events accumulate in
 // the query cache. Cache writes are batched and sidebar invalidations
 // debounced so a busy turn costs one render per flush, not one per event.
+// Returns whether the stream is connected.
 export function useSessionEvents(
   sessionId: string,
   latestEventSeq: number | undefined,
   onEvent?: (event: SessionEvent) => void,
-): void {
+): boolean {
   const queryClient = useQueryClient()
+  const [connected, setConnected] = useState(true)
   const afterSeq = latestEventSeq
+  // The stream opens once per loaded history from its cursor; later history
+  // refetches only trim the live cache, the open stream already covers them.
+  // History disappears when the connection resets, and the stream restarts with it.
+  const [stream, setStream] = useState<{ sessionId: string, afterSeq: number }>()
+  const loadedSessionId = afterSeq === undefined ? undefined : sessionId
+  if (stream?.sessionId !== loadedSessionId) setStream(afterSeq === undefined ? undefined : { sessionId, afterSeq })
+  const streamAfterSeq = stream?.sessionId === sessionId ? stream.afterSeq : undefined
 
   useEffect(() => {
     if (!afterSeq) return
-    queryClient.setQueryData<SessionEvent[]>(keys.sessionEvents(sessionId), (prev = []) => {
-      const next = prev.filter((event) => !event.seq || event.seq > afterSeq)
-      return next.length === prev.length ? prev : next
-    })
+    queryClient.setQueryData<SessionEvent[]>(keys.sessionEvents(sessionId), (prev = []) => liveAfterCursor(prev, afterSeq))
   }, [sessionId, afterSeq, queryClient])
 
   useEffect(() => {
-    if (afterSeq === undefined) return
+    if (streamAfterSeq === undefined) return
     const refetchMessages = () => {
       queryClient.invalidateQueries({ queryKey: keys.usage })
       queryClient.invalidateQueries({ queryKey: keys.sessionMessages(sessionId) })
@@ -39,6 +46,7 @@ export function useSessionEvents(
     let flushTimer: ReturnType<typeof setTimeout> | null = null
     let listsTimer: ReturnType<typeof setTimeout> | null = null
     let overviewChanged = false
+    let sessionChanged = false
     const flush = () => {
       flushTimer = null
       const batch = pending
@@ -54,15 +62,23 @@ export function useSessionEvents(
         overviewChanged = false
         queryClient.invalidateQueries({ queryKey: keys.sessionOverview(sessionId) })
       }
+      if (sessionChanged) {
+        sessionChanged = false
+        void getSession(sessionId).then((session) => queryClient.setQueryData<SessionMessages>(
+          keys.sessionMessages(sessionId),
+          (prev) => prev && { ...prev, session },
+        ), () => {})
+      }
     }
-    const stop = openSessionEvents(sessionId, afterSeq, (event: SessionEvent) => {
+    const stop = openSessionEvents(sessionId, streamAfterSeq, (event: SessionEvent) => {
       onEvent?.(event)
       overviewChanged ||= ['agent_session', 'agent_task', 'provider_subagent'].includes(event.type)
       // 'assistant' events are refresh signals, not transcript items.
       if (event.type === 'assistant') {
         refetchMessages()
       } else if (event.type === 'session') {
-        queryClient.invalidateQueries({ queryKey: keys.sessionMessages(sessionId) })
+        // The session record changed (usage, status, queue); messages arrive as events.
+        sessionChanged = true
       } else {
         pending.push(event)
         flushTimer ??= setTimeout(flush, 50)
@@ -73,7 +89,7 @@ export function useSessionEvents(
         }
       }
       listsTimer ??= setTimeout(invalidateLists, 500)
-    })
+    }, setConnected)
     return () => {
       stop()
       if (flushTimer !== null) clearTimeout(flushTimer)
@@ -81,5 +97,7 @@ export function useSessionEvents(
       if (pending.length) flush()
       if (listsTimer !== null) clearTimeout(listsTimer)
     }
-  }, [sessionId, afterSeq, queryClient, onEvent])
+  }, [sessionId, streamAfterSeq, queryClient, onEvent])
+
+  return connected
 }

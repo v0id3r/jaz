@@ -70,7 +70,6 @@ class Window extends EventEmitter {
   }
   setAlwaysOnTop() {}
   setVisibleOnAllWorkspaces() {}
-  loadFile() {}
   loadURL() {}
 }
 
@@ -83,6 +82,7 @@ mock.module('electron', () => ({
     getDisplayMatching: () => ({ workArea: { x: 0, y: 25, width: 1280, height: 775 } }),
   },
 }))
+mock.module('@main/rendererScheme', () => ({ rendererURL: () => 'app://jaz/index.html' }))
 const { attachVoiceOverlay } = await import('./voiceOverlay')
 afterAll(() => mock.restore())
 const sender = (window) => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame })

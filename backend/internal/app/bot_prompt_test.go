@@ -61,7 +61,7 @@ func TestBotDelegationPromptsAndIdentityRefresh(t *testing.T) {
 	}
 	threads := []storage.Session{bot, seat, create("Ordinary", "", "", ""), create("Implementation", storage.SourceBotWorker, bot.ID, seat.ID), create("Routine", storage.SourceLoopRun, "", bot.ID)}
 	builder := coordinator.NewBuilder(root, "", "", nil)
-	cfg, err := NewACPConfig(Config{}, store, "", builder, nil, nil, nil, nil, nil, nil, nil)
+	cfg, err := NewACPConfig(Config{}, store, "", builder, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

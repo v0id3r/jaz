@@ -180,7 +180,7 @@ func (c APIClient) Permissions(ctx context.Context, input IDInput) (Permissions,
 			return out, nil
 		}
 		if page.NextPageToken == q.Get("pageToken") {
-			return Permissions{}, fmt.Errorf("Google Drive repeated a permissions page token")
+			return Permissions{}, fmt.Errorf("google Drive repeated a permissions page token")
 		}
 		q.Set("pageToken", page.NextPageToken)
 	}

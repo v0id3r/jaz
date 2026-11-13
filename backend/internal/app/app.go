@@ -17,6 +17,7 @@ import (
 	"github.com/wins/jaz/backend/internal/bots"
 	"github.com/wins/jaz/backend/internal/connections"
 	"github.com/wins/jaz/backend/internal/coordinator"
+	"github.com/wins/jaz/backend/internal/deviceauth"
 	"github.com/wins/jaz/backend/internal/jazagent"
 	"github.com/wins/jaz/backend/internal/loops"
 	"github.com/wins/jaz/backend/internal/managedtool"
@@ -32,6 +33,7 @@ import (
 	"github.com/wins/jaz/backend/internal/providerstore"
 	"github.com/wins/jaz/backend/internal/runtimeenv"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/sessioncontext"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/sessionlock"
@@ -60,10 +62,13 @@ type Config struct {
 	Skills         SkillsConfig
 	Voice          VoiceConfig
 	ACP            acp.Config
+	Sandbox        sandbox.Config
+	Identity       IdentityConfig
 	Memory         MemoryConfig
 	Connections    ConnectionsConfig
 	Devices        DevicesConfig
 	Push           mobilepush.Config
+	WebPush        mobilepush.WebPushConfig
 	Bots           []bots.Config
 	// MCPServers declares MCP servers as a JSON array of server inputs
 	// (JAZ_MCP_SERVERS), which each start applies.
@@ -72,6 +77,15 @@ type Config struct {
 
 type DevicesConfig struct {
 	DisablePairing bool
+	RequireProof   bool
+	// Origins are the origins clients reach this server on, e.g. behind a
+	// proxy; proof mode requires them, and clients may only sign for these or
+	// the origin of a direct loopback request.
+	Origins []string
+	// Proxy trusts the users an auth proxy vouches for; a proof-mode device
+	// then gets access tokens only for the user it first got them for, and
+	// the users and roles it lists as owners manage devices.
+	Proxy deviceauth.ProxyConfig
 }
 
 type SkillsConfig struct {
@@ -340,7 +354,7 @@ func StartModelCatalogWarmup(lc fx.Lifecycle, catalog *modelcatalog.Service, log
 	})
 }
 
-func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, prompts *coordinator.Builder, catalog acp.AgentCatalog, source acp.AgentConfigSource, adapters *acpadapter.Manager, mcpServers mcpconfig.ServerReader, providerSource provider.Source, modelCatalog *modelcatalog.Service, widgetService *widgets.Service) (acp.Config, error) {
+func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, prompts *coordinator.Builder, catalog acp.AgentCatalog, source acp.AgentConfigSource, adapters *acpadapter.Manager, mcpServers mcpconfig.ServerReader, providerSource provider.Source, modelCatalog *modelcatalog.Service, widgetService *widgets.Service, launch sandbox.Launcher) (acp.Config, error) {
 	if err := bots.MigrateHomes(store); err != nil {
 		return acp.Config{}, err
 	}
@@ -354,6 +368,9 @@ func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, pro
 	cfg.ACP.ModelCatalog = modelCatalog
 	cfg.ACP.SystemPrompt = prompts
 	cfg.ACP.MCPStore = mcpServers
+	cfg.ACP.Launcher = launch
+	// Agents of mesh-only networks are admitted by their session certificate.
+	cfg.ACP.SandboxMCPWithoutKey = len(cfg.Identity.Mesh.Require) > 0
 	promptBuilder := loops.RuntimePromptBuilder{Repo: store, PromptExtras: []func(loops.Loop, loops.Run) string{bots.RoutineInstructions(store)}}
 	if widgetService != nil {
 		promptBuilder.PromptExtras = append(promptBuilder.PromptExtras, widgetService.LoopPromptExtra)
