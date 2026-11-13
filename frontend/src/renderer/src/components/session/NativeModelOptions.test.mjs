@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { NativeModelOptions } from '@/components/session/NativeModelOptions'
+import { NativeModelOptions, shownConfigOption } from '@/components/session/NativeModelOptions'
 
 const options = [
   {
@@ -34,4 +34,17 @@ test('Fast Mode waits for acknowledgement and disappears when the provider withd
   }))
   expect(withdrawn).not.toContain('Fast Mode')
   expect(withdrawn).not.toContain('role="switch"')
+})
+
+const selectableOption = (fields) => ({ name: 'Option', current_value: 'value', options: [], ...fields })
+
+test('kimi model and thinking options show while the mode option stays hidden', () => {
+  expect(shownConfigOption(selectableOption({ id: 'model', category: 'model' }))).toBe(true)
+  expect(shownConfigOption(selectableOption({ id: 'thinking', category: 'thought_level' }))).toBe(true)
+  expect(shownConfigOption(selectableOption({ id: 'mode', category: 'mode' }))).toBe(false)
+})
+
+test('model_config category keeps showing and uncategorized options stay hidden', () => {
+  expect(shownConfigOption(selectableOption({ id: 'model', category: 'model_config' }))).toBe(true)
+  expect(shownConfigOption(selectableOption({ id: 'other' }))).toBe(false)
 })
