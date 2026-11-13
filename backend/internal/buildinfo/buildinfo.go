@@ -3,22 +3,16 @@ package buildinfo
 import "runtime/debug"
 
 // version is set via -ldflags at build time (frontend/scripts/build-backend.ts).
-// Native VCS stamping covers plain `go build` in regular clones; git worktrees
-// carry no stamp, so the ldflag stays the primary source there.
+// Go stamps vcs.revision natively for builds from a VCS checkout (see -buildvcs).
 var (
-	version      = "dev"
-	ldflagCommit string
-
-	commit = resolveCommit()
+	version = "dev"
+	commit  = vcsRevision()
 )
 
 func Version() string { return version }
 func Commit() string  { return commit }
 
-func resolveCommit() string {
-	if ldflagCommit != "" {
-		return ldflagCommit
-	}
+func vcsRevision() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, setting := range info.Settings {
 			if setting.Key == "vcs.revision" {
