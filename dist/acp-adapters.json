@@ -140,7 +140,7 @@
       }
     },
     "kimi": {
-      "version": "2.6.1-jaz.3",
+      "version": "2.6.1-jaz.4",
       "assets": {
         "darwin-arm64": {
           "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.3/kimi-code-darwin-arm64.zip",
@@ -158,8 +158,8 @@
           "binary": "kimi"
         },
         "linux-x64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.3/kimi-code-linux-x64.zip",
-          "sha256": "3f277d0cb497430db188916a31c82a0707ef2fefe47310cc1c8cc0a0d2ce426d",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.4/kimi-code-linux-x64.zip",
+          "sha256": "3eb7c3f162a9f88469d9425adbcbbb9d8a0b26f0036ba10094a4020cc4734aaa",
           "binary": "kimi"
         },
         "win32-arm64": {
