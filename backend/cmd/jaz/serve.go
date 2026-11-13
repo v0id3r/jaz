@@ -19,6 +19,7 @@ import (
 	"github.com/wins/jaz/backend/internal/acpadapter"
 	"github.com/wins/jaz/backend/internal/agent"
 	"github.com/wins/jaz/backend/internal/app"
+	"github.com/wins/jaz/backend/internal/buildinfo"
 	"github.com/wins/jaz/backend/internal/bots"
 	"github.com/wins/jaz/backend/internal/browsercontrol"
 	"github.com/wins/jaz/backend/internal/computercontrol"
@@ -78,7 +79,7 @@ func serveOptions(args []string) []fx.Option {
 		fx.WithLogger(func() fxevent.Logger { return fxevent.NopLogger }),
 		fx.Supply(
 			serveArgs{Args: args},
-			app.Release{Version: version},
+			app.Release{Version: buildinfo.Version()},
 		),
 		fx.Provide(
 			newLogger,

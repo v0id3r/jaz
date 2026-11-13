@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 	"io"
+
+	"github.com/wins/jaz/backend/internal/buildinfo"
 )
 
-var version = "dev"
-
 func printVersion(w io.Writer) {
-	fmt.Fprintf(w, "jaz %s\n", version)
+	fmt.Fprintf(w, "jaz %s (commit %s)\n", buildinfo.Version(), buildinfo.Commit())
 }

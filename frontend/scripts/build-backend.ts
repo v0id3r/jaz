@@ -17,9 +17,11 @@ const requireTelegramBundle =
   process.env.CI === 'true' || process.env.JAZ_REQUIRE_TELEGRAM_BUNDLE === '1'
 const telegramLDFlags = telegramBackendLDFlags(requireTelegramBundle)
 
-mkdirSync(dirname(output), { recursive: true })
-
-const ldflags = [`-s -w -X main.version=${backendVersion}`]
+const commit = gitCommit()
+const ldflags = [
+  `-s -w -X github.com/wins/jaz/backend/internal/buildinfo.version=${backendVersion}`,
+  `-X github.com/wins/jaz/backend/internal/buildinfo.ldflagCommit=${commit}`,
+]
 ldflags.push(...telegramLDFlags)
 
 const args = ['build', '-o', output, '-ldflags', ldflags.join(' ')]
@@ -32,6 +34,12 @@ const result = spawnSync('go', args, {
 
 if (result.error) throw result.error
 process.exit(result.status ?? 1)
+
+function gitCommit(): string {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: backendDir, encoding: 'utf8' })
+  const commit = result.stdout?.trim()
+  return result.status === 0 && commit ? commit : 'unknown'
+}
 
 function telegramBackendLDFlags(requireBundle: boolean): string[] {
   const id = process.env.JAZ_BUNDLED_TELEGRAM_APP_ID?.trim() ?? ''

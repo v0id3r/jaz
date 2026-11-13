@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/wins/jaz/backend/internal/api"
+	"github.com/wins/jaz/backend/internal/buildinfo"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 )
 
@@ -85,6 +86,8 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{
 		OK:           true,
+		Version:      buildinfo.Version(),
+		Commit:       buildinfo.Commit(),
 		AuthRequired: s.AuthKey != "",
 		Capabilities: healthCapabilities{
 			SessionFileRead: true,
@@ -95,6 +98,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 type healthResponse struct {
 	OK           bool               `json:"ok"`
+	Version      string             `json:"version"`
+	Commit       string             `json:"commit"`
 	AuthRequired bool               `json:"auth_required"`
 	Capabilities healthCapabilities `json:"capabilities"`
 }
