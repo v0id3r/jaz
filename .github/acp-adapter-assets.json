@@ -127,20 +127,17 @@
     },
     "kimi": {
       "repo": "v0id3r/kimi-code",
-      "tag": "v2.6.1-jaz.4",
+      "tag": "v2.6.1-jaz.5",
       "assets": {
         "darwin-arm64": {
-          "tag": "v2.6.1-jaz.3",
           "name": "kimi-code-darwin-arm64.zip",
           "binary": "kimi"
         },
         "darwin-x64": {
-          "tag": "v2.6.1-jaz.3",
           "name": "kimi-code-darwin-x64.zip",
           "binary": "kimi"
         },
         "linux-arm64": {
-          "tag": "v2.6.1-jaz.3",
           "name": "kimi-code-linux-arm64.zip",
           "binary": "kimi"
         },
@@ -149,12 +146,10 @@
           "binary": "kimi"
         },
         "win32-arm64": {
-          "tag": "v2.6.1-jaz.3",
           "name": "kimi-code-win32-arm64.zip",
           "binary": "kimi.exe"
         },
         "win32-x64": {
-          "tag": "v2.6.1-jaz.3",
           "name": "kimi-code-win32-x64.zip",
           "binary": "kimi.exe"
         }
