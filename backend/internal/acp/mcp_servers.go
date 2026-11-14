@@ -57,7 +57,7 @@ func (m *Manager) mcpServersForAgent(ctx context.Context, initRaw json.RawMessag
 	if servers == nil {
 		return []json.RawMessage{}
 	}
-	if agentAcceptsDeferredTools(agent) && policy == MCPServerPolicyBot {
+	if agentAcceptsDeferredTools(agent, policy) {
 		for i, raw := range servers {
 			var server httpMCPServer
 			if json.Unmarshal(raw, &server) != nil {
@@ -130,11 +130,14 @@ func mcpServerAllowed(policy string, server mcpconfig.Server) bool {
 }
 
 // agentAcceptsDeferredTools reports whether an agent receives the deferred
-// tool catalogue on Jaz-owned MCP connections under the bot policy.
-func agentAcceptsDeferredTools(agent string) bool {
+// tool catalogue on Jaz-owned MCP connections for the session's policy.
+// Restricted worker policies keep their inline surface.
+func agentAcceptsDeferredTools(agent, policy string) bool {
 	switch CanonicalAgentName(agent) {
-	case AgentOpenCode, AgentKimi:
-		return true
+	case AgentKimi:
+		return fullMCPPolicy(policy)
+	case AgentOpenCode:
+		return policy == MCPServerPolicyBot
 	}
 	return false
 }

@@ -108,7 +108,7 @@ func TestMCPServersForJaztoolsOnlyPolicyOnlyExposesJaztools(t *testing.T) {
 
 }
 
-func TestBotPolicyDefersOnlyJazOwnedMCPConnections(t *testing.T) {
+func TestDeferredToolsGateOnlyJazOwnedMCPConnections(t *testing.T) {
 	m := &Manager{cfg: Config{MCPStore: staticMCPServerStore{servers: []mcpconfig.Server{
 		{ID: "jaztools", Name: "jaztools", Transport: mcpconfig.TransportStreamableHTTP, URL: "http://127.0.0.1:5299/mcp/jaztools", Enabled: true},
 		{ID: "jaz_mcp", Name: "jaz_mcp", Transport: mcpconfig.TransportStreamableHTTP, URL: "http://127.0.0.1:5299/mcp/proxy", Enabled: true},
@@ -121,9 +121,11 @@ func TestBotPolicyDefersOnlyJazOwnedMCPConnections(t *testing.T) {
 	}{
 		{AgentOpenCode, MCPServerPolicyBot, true},
 		{AgentOpenCode, MCPServerPolicyAll, false},
+		{AgentOpenCode, MCPServerPolicyWidget, false},
 		{AgentOpenCode, MCPServerPolicyMemorySearchWorker, false},
 		{AgentKimi, MCPServerPolicyBot, true},
-		{AgentKimi, MCPServerPolicyAll, false},
+		{AgentKimi, MCPServerPolicyAll, true},
+		{AgentKimi, MCPServerPolicyWidget, true},
 		{AgentKimi, MCPServerPolicyMemorySearchWorker, false},
 		{AgentCodex, MCPServerPolicyBot, false},
 		{AgentClaude, MCPServerPolicyBot, false},
