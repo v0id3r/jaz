@@ -57,7 +57,7 @@ func (m *Manager) mcpServersForAgent(ctx context.Context, initRaw json.RawMessag
 	if servers == nil {
 		return []json.RawMessage{}
 	}
-	if CanonicalAgentName(agent) == AgentOpenCode && policy == MCPServerPolicyBot {
+	if agentAcceptsDeferredTools(agent) && policy == MCPServerPolicyBot {
 		for i, raw := range servers {
 			var server httpMCPServer
 			if json.Unmarshal(raw, &server) != nil {
@@ -127,6 +127,16 @@ func mcpServerAllowed(policy string, server mcpconfig.Server) bool {
 		return isJaztoolsServer(server)
 	}
 	return fullMCPPolicy(policy)
+}
+
+// agentAcceptsDeferredTools reports whether an agent receives the deferred
+// tool catalogue on Jaz-owned MCP connections under the bot policy.
+func agentAcceptsDeferredTools(agent string) bool {
+	switch CanonicalAgentName(agent) {
+	case AgentOpenCode, AgentKimi:
+		return true
+	}
+	return false
 }
 
 // mcpServerURL routes the jaztools server to the tool surface named by the

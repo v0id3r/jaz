@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+
+	"github.com/wins/jaz/backend/internal/toolsearch"
 )
 
 const QueryParam = "jaz_deferred_tools"
 
-var gatewayTools = json.RawMessage(`{"tools":[{"name":"search_tools","description":"Find available tools by English keywords (for example: command, memory, thread, browser, email). Returns the original tool names, descriptions and complete input schemas. Use an empty query to browse; follow next_offset for more results. Discover a tool before calling it with call_tool. All tools remain available through this catalogue.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10}},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"call_tool","description":"Execute an available tool discovered with search_tools. Pass its exact name and arguments matching its input schema. The original permissions, session context, validation, results and errors apply. This does not bypass user approval or access restrictions.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"arguments":{"type":"object","additionalProperties":true}},"required":["name","arguments"],"additionalProperties":false}}]}`)
+var gatewayTools = json.RawMessage(`{"tools":[{"name":"search_tools","description":"Find available tools by English keywords (for example: command, memory, thread, browser, email). Returns the original tool names, descriptions and complete input schemas, ranked by relevance. Use an empty query to browse; follow next_offset for more results. Discover a tool before calling it with call_tool. All tools remain available through this catalogue.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10}},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"call_tool","description":"Execute an available tool discovered with search_tools. Pass its exact name and arguments matching its input schema. The original permissions, session context, validation, results and errors apply. This does not bypass user approval or access restrictions.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"arguments":{"type":"object","additionalProperties":true}},"required":["name","arguments"],"additionalProperties":false}}]}`)
 
 type message struct {
 	JSONRPC string                     `json:"jsonrpc"`
@@ -157,7 +159,7 @@ func search(next http.Handler, w http.ResponseWriter, r *http.Request, request m
 		invalid(w, request.ID, "search_tools requires offset >= 0 and limit between 1 and 10")
 		return
 	}
-	matches := make([]json.RawMessage, 0)
+	catalogue := make([]json.RawMessage, 0)
 	var last *response
 	cursor := ""
 	seen := map[string]bool{}
@@ -177,14 +179,7 @@ func search(next http.Handler, w http.ResponseWriter, r *http.Request, request m
 			invalid(w, request.ID, "invalid tool catalogue")
 			return
 		}
-		for _, tool := range page.Tools {
-			var spec struct{ Name, Description string }
-			_ = json.Unmarshal(tool, &spec)
-			text := strings.ToLower(spec.Name + " " + spec.Description)
-			if slices.ContainsFunc(strings.Fields(strings.ToLower(input.Query)), func(word string) bool { return strings.Contains(text, word) }) || strings.TrimSpace(input.Query) == "" {
-				matches = append(matches, tool)
-			}
-		}
+		catalogue = append(catalogue, page.Tools...)
 		cursor = page.NextCursor
 		if cursor == "" {
 			break
@@ -194,6 +189,10 @@ func search(next http.Handler, w http.ResponseWriter, r *http.Request, request m
 			return
 		}
 		seen[cursor] = true
+	}
+	matches := catalogue
+	if strings.TrimSpace(input.Query) != "" {
+		matches = rankTools(input.Query, catalogue)
 	}
 	start := min(input.Offset, len(matches))
 	end := min(start+input.Limit, len(matches))
@@ -205,4 +204,35 @@ func search(next http.Handler, w http.ResponseWriter, r *http.Request, request m
 	payload, _ := json.Marshal(map[string]any{"content": []map[string]string{{"type": "text", "text": string(text)}}, "structuredContent": result})
 	last.replaceResult(request.ID, payload)
 	last.write(w)
+}
+
+// rankTools orders the full catalogue by BM25 relevance against the query and
+// drops tools that share no term with it. Every returned message is the
+// original list entry with its complete schema.
+func rankTools(query string, catalogue []json.RawMessage) []json.RawMessage {
+	byName := make(map[string]json.RawMessage, len(catalogue))
+	entries := make([]toolsearch.Entry, 0, len(catalogue))
+	for _, raw := range catalogue {
+		var spec struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			InputSchema json.RawMessage `json:"inputSchema"`
+		}
+		_ = json.Unmarshal(raw, &spec)
+		parts := []string{spec.Description}
+		var schema any
+		if json.Unmarshal(spec.InputSchema, &schema) == nil {
+			toolsearch.AppendSchemaText(schema, &parts)
+		}
+		entries = append(entries, toolsearch.NewEntry(spec.Name, parts...))
+		byName[spec.Name] = raw
+	}
+	corpus := &toolsearch.Corpus{}
+	corpus.Add(entries...)
+	ranked := corpus.Score(query)
+	matches := make([]json.RawMessage, 0, len(ranked))
+	for _, result := range ranked {
+		matches = append(matches, byName[result.Entry.Name()])
+	}
+	return matches
 }
