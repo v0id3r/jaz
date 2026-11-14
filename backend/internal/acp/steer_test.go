@@ -112,6 +112,7 @@ func TestManagerNativeSteerStreamsBeforeSteerCompletes(t *testing.T) {
 	if _, err := manager.Input(ctx, acp.SteerRequest{Session: spawned.SessionID, Message: "native follow-up"}); err != nil {
 		t.Fatal(err)
 	}
+	waitForSteerEventType(t, sub, "assistant")
 	waitForSteerEventType(t, sub, "acp_message")
 	if err := os.Remove(hold); err != nil {
 		t.Fatal(err)
