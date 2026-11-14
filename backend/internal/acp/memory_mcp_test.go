@@ -136,7 +136,7 @@ func TestDeferredToolsGateOnlyJazOwnedMCPConnections(t *testing.T) {
 				t.Fatal(err)
 			}
 			u, _ := url.Parse(server.URL)
-			want := tc.deferred && server.Name != "external"
+			want := tc.deferred && server.Name == "jaz_mcp"
 			if got := u.Query().Get("jaz_deferred_tools") == "1"; got != want {
 				t.Fatalf("%s/%s %s deferred=%v, want %v", tc.agent, tc.policy, server.Name, got, want)
 			}
