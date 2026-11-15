@@ -325,7 +325,7 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 	if err != nil {
 		return nil, err
 	}
-	env, err := m.processEnvPrepared(name, cfg)
+	env, err := m.processEnvPreparedForCwd(name, cfg, cwd)
 	if err != nil {
 		return nil, err
 	}

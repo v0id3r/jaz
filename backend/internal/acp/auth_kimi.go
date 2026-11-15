@@ -3,13 +3,17 @@ package acp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/wins/jaz/backend/internal/processenv"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
+	"github.com/wins/jaz/backend/internal/skills"
 )
 
 var errKimiModelNotConfigured = errors.New("kimi sign-in did not finish configuring a model; sign in again")
@@ -17,6 +21,7 @@ var errKimiModelNotConfigured = errors.New("kimi sign-in did not finish configur
 type kimiConfig struct {
 	DefaultModel    string                    `toml:"default_model"`
 	DefaultProvider string                    `toml:"default_provider"`
+	ExtraSkillDirs  []string                  `toml:"extra_skill_dirs"`
 	Providers       map[string]kimiProvider   `toml:"providers"`
 	Models          map[string]kimiModelAlias `toml:"models"`
 }
@@ -108,7 +113,7 @@ func kimiModelConfigReady(home string) error {
 	return nil
 }
 
-func (m *Manager) prepareKimiProcessEnv(root string, cfg AgentConfig, env map[string]string, prepare bool) error {
+func (m *Manager) prepareKimiProcessEnv(root string, cfg AgentConfig, env map[string]string, cwd string, prepare bool) error {
 	processenv.PreserveHost(env,
 		"HTTP_PROXY",
 		"HTTPS_PROXY",
@@ -128,8 +133,84 @@ func (m *Manager) prepareKimiProcessEnv(root string, cfg AgentConfig, env map[st
 	if env["KIMI_MCP_TOOL_TIMEOUT_MS"] == "" {
 		env["KIMI_MCP_TOOL_TIMEOUT_MS"] = "300000"
 	}
-	if prepare && auth.Authenticated {
-		return kimiModelConfigReady(auth.Config.Path)
+	if !prepare {
+		return nil
+	}
+	if auth.Authenticated {
+		if err := kimiModelConfigReady(auth.Config.Path); err != nil {
+			return err
+		}
+	}
+	catalog, err := skills.LoadForWorkspace(root, cwd)
+	if err != nil || len(catalog.Skills) == 0 {
+		return err
+	}
+	return ensureKimiSkillDirs(auth.Config.Path, skills.RootsForWorkspace(root, cwd))
+}
+
+func ensureKimiSkillDirs(home string, dirs []string) error {
+	path := filepath.Join(home, "config.toml")
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read kimi config %s: %w", path, err)
+	}
+	var cfg kimiConfig
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse kimi config %s: %w", path, err)
+	}
+	merged := append([]string(nil), cfg.ExtraSkillDirs...)
+	for _, dir := range dirs {
+		if !slices.Contains(merged, dir) {
+			merged = append(merged, dir)
+		}
+	}
+	if slices.Equal(merged, cfg.ExtraSkillDirs) {
+		return nil
+	}
+	updated, err := setTopLevelTOMLStringArray(data, "extra_skill_dirs", merged)
+	if err != nil {
+		return fmt.Errorf("update kimi config %s: %w", path, err)
+	}
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return fmt.Errorf("prepare kimi profile %s: %w", home, err)
+	}
+	if err := os.WriteFile(path, updated, 0o600); err != nil {
+		return fmt.Errorf("write kimi config %s: %w", path, err)
 	}
 	return nil
+}
+
+func setTopLevelTOMLStringArray(data []byte, key string, values []string) ([]byte, error) {
+	quoted := make([]string, len(values))
+	for i, value := range values {
+		quoted[i] = strconv.Quote(value)
+	}
+	replacement := key + " = [" + strings.Join(quoted, ", ") + "]"
+	lines := strings.SplitAfter(string(data), "\n")
+	for i, existing := range lines {
+		trimmed := strings.TrimSpace(existing)
+		if strings.HasPrefix(trimmed, "[") {
+			break
+		}
+		if topLevelTOMLKey(existing) != key {
+			continue
+		}
+		for end := i + 1; end <= len(lines); end++ {
+			var decoded map[string][]string
+			if err := toml.Unmarshal([]byte(strings.Join(lines[i:end], "")), &decoded); err != nil {
+				continue
+			}
+			ending := ""
+			if strings.HasSuffix(lines[end-1], "\n") {
+				ending = "\n"
+			}
+			lines[i] = replacement + ending
+			return []byte(strings.Join(append(lines[:i+1], lines[end:]...), "")), nil
+		}
+		return nil, fmt.Errorf("invalid %s value", key)
+	}
+	if len(data) == 0 {
+		return []byte(replacement + "\n"), nil
+	}
+	return []byte(replacement + "\n\n" + string(data)), nil
 }

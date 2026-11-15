@@ -307,20 +307,24 @@ func pathHasDir(pathList, dir string) bool {
 }
 
 func (m *Manager) processEnv(name string, agent AgentConfig) map[string]string {
-	env, _ := m.buildProcessEnv(name, agent, true)
+	env, _ := m.buildProcessEnv(name, agent, agent.Cwd, true)
 	return env
 }
 
 func (m *Manager) processEnvPrepared(name string, agent AgentConfig) (map[string]string, error) {
-	return m.buildProcessEnv(name, agent, true)
+	return m.buildProcessEnv(name, agent, agent.Cwd, true)
+}
+
+func (m *Manager) processEnvPreparedForCwd(name string, agent AgentConfig, cwd string) (map[string]string, error) {
+	return m.buildProcessEnv(name, agent, cwd, true)
 }
 
 func (m *Manager) probeEnv(name string, agent AgentConfig) map[string]string {
-	env, _ := m.buildProcessEnv(name, agent, false)
+	env, _ := m.buildProcessEnv(name, agent, agent.Cwd, false)
 	return env
 }
 
-func (m *Manager) buildProcessEnv(name string, agent AgentConfig, prepare bool) (map[string]string, error) {
+func (m *Manager) buildProcessEnv(name string, agent AgentConfig, cwd string, prepare bool) (map[string]string, error) {
 	name = CanonicalAgentName(name)
 	env := processenv.Base()
 	var prepareErr error
@@ -412,7 +416,7 @@ func (m *Manager) buildProcessEnv(name string, agent AgentConfig, prepare bool) 
 		auth.BindAPIKeyEnv(env)
 	}
 	if name == AgentKimi {
-		prepareErr = firstError(prepareErr, m.prepareKimiProcessEnv(root, agent, env, prepare))
+		prepareErr = firstError(prepareErr, m.prepareKimiProcessEnv(root, agent, env, cwd, prepare))
 	}
 	if name == AgentGrok {
 		processenv.PreserveHost(env,

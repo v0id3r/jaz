@@ -46,18 +46,26 @@ func LoadForWorkspace(root, workspace string) (Catalog, error) {
 	if err != nil {
 		return Catalog{}, err
 	}
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return catalog, nil
-	}
-	for _, dir := range workspaceSkillDirs {
-		local, err := loadDir(filepath.Join(workspace, dir, userSkillsDir))
+	for _, root := range RootsForWorkspace(root, workspace)[1:] {
+		local, err := loadDir(root)
 		if err != nil {
 			return Catalog{}, err
 		}
 		catalog.Skills = mergeSkills(catalog.Skills, local)
 	}
 	return catalog, nil
+}
+
+func RootsForWorkspace(root, workspace string) []string {
+	roots := []string{UserRoot(root)}
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return roots
+	}
+	for _, dir := range workspaceSkillDirs {
+		roots = append(roots, filepath.Join(workspace, dir, userSkillsDir))
+	}
+	return roots
 }
 
 func loadDir(skillsRoot string) ([]Skill, error) {
