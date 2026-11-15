@@ -68,7 +68,7 @@ func (m *Manager) writeTextFile(raw json.RawMessage) (json.RawMessage, *jsonrpc.
 func (m *Manager) resolveFilesystemPath(job *jobState, name string) (string, error) {
 	roots := []string{job.Cwd}
 	if filepath.IsAbs(name) {
-		roots = append(roots, job.projectPath)
+		roots = append(roots, job.projectPath, m.cfg.MemoryRoot)
 		if m.cfg.Root != "" {
 			roots = append(roots, skills.UserRoot(m.cfg.Root))
 		}

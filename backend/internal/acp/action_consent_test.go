@@ -12,6 +12,8 @@ import (
 	"github.com/wins/jaz/backend/internal/app"
 	"github.com/wins/jaz/backend/internal/bots"
 	"github.com/wins/jaz/backend/internal/coordinator"
+	"github.com/wins/jaz/backend/internal/memoryservice"
+	"github.com/wins/jaz/backend/internal/runtimefiles"
 	"github.com/wins/jaz/backend/internal/storage"
 	sqlitestore "github.com/wins/jaz/backend/internal/storage/sqlite"
 )
@@ -25,9 +27,14 @@ func TestCodexBotPoliciesReachLaunchAndRetainedRefresh(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = store.Close() })
+			memory, err := app.NewMemory(app.Config{}, runtimefiles.New(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = memory.Close() })
 			requestLog := filepath.Join(root, "requests.jsonl")
 			capture := filepath.Join(root, "launch-prompt")
-			wiring, err := app.NewACPConfig(app.Config{}, store, "", coordinator.NewBuilder(root, "", "", nil), nil, nil, nil, nil, nil, nil, nil, nil)
+			wiring, err := app.NewACPConfig(app.Config{}, store, "", memoryservice.New(memory, store, nil, ""), coordinator.NewBuilder(root, "", "", nil), nil, nil, nil, nil, nil, nil, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

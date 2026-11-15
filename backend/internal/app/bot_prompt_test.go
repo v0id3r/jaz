@@ -10,6 +10,8 @@ import (
 	"github.com/wins/jaz/backend/internal/acp"
 	"github.com/wins/jaz/backend/internal/bots"
 	"github.com/wins/jaz/backend/internal/coordinator"
+	"github.com/wins/jaz/backend/internal/memoryservice"
+	"github.com/wins/jaz/backend/internal/runtimefiles"
 	"github.com/wins/jaz/backend/internal/sessioncontext"
 	"github.com/wins/jaz/backend/internal/storage"
 	sqlitestore "github.com/wins/jaz/backend/internal/storage/sqlite"
@@ -61,9 +63,17 @@ func TestBotDelegationPromptsAndIdentityRefresh(t *testing.T) {
 	}
 	threads := []storage.Session{bot, seat, create("Ordinary", "", "", ""), create("Implementation", storage.SourceBotWorker, bot.ID, seat.ID), create("Routine", storage.SourceLoopRun, "", bot.ID)}
 	builder := coordinator.NewBuilder(root, "", "", nil)
-	cfg, err := NewACPConfig(Config{}, store, "", builder, nil, nil, nil, nil, nil, nil, nil, nil)
+	memory, err := NewMemory(Config{}, runtimefiles.New(store.RootDir()))
 	if err != nil {
 		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = memory.Close() })
+	cfg, err := NewACPConfig(Config{}, store, "", memoryservice.New(memory, store, nil, ""), builder, nil, nil, nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MemoryRoot != memory.Root() {
+		t.Fatalf("memory root = %q, want %q", cfg.MemoryRoot, memory.Root())
 	}
 	for _, name := range []string{"Scout", "Reviewer"} {
 		bot.Title = name

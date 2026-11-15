@@ -64,9 +64,10 @@ func TestReadTextFileLineContract(t *testing.T) {
 func TestFilesystemSessionRoots(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "jaz")
+	memory := filepath.Join(base, "memory")
 	cwd := filepath.Join(base, "worktree")
 	project := filepath.Join(base, "project")
-	manager := NewManager(nil, Config{Root: root}, nil)
+	manager := NewManager(nil, Config{Root: root, MemoryRoot: memory}, nil)
 	job := newIdleJob(storage.Session{
 		ID: "test",
 		RuntimeRef: &storage.RuntimeRef{
@@ -85,6 +86,7 @@ func TestFilesystemSessionRoots(t *testing.T) {
 		{"absolute working directory path", filepath.Join(cwd, "absolute.txt"), filepath.Join(cwd, "absolute.txt")},
 		{"worktree source repository", filepath.Join(project, "file.txt"), filepath.Join(project, "file.txt")},
 		{"global skill", filepath.Join(root, "skills", "jazmem", "SKILL.md"), filepath.Join(root, "skills", "jazmem", "SKILL.md")},
+		{"memory page", filepath.Join(memory, "daily", "2026-11-15.md"), filepath.Join(memory, "daily", "2026-11-15.md")},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(tt.disk), 0o755); err != nil {
