@@ -110,6 +110,7 @@ type StreamView struct {
 type jobState struct {
 	Job
 
+	projectPath            string
 	mu                     sync.RWMutex
 	sendMu                 sync.Mutex
 	turnMu                 sync.Mutex
@@ -217,6 +218,9 @@ func jobFromSession(session storage.Session, agentName, acpSessionID, cwd, state
 
 func newIdleJob(session storage.Session, agentName, acpSessionID, cwd string, modes ModeState) *jobState {
 	job := &jobState{Job: jobFromSession(session, agentName, acpSessionID, cwd, StateIdle)}
+	if session.RuntimeRef != nil {
+		job.projectPath = session.RuntimeRef.ProjectPath
+	}
 	now := time.Now().UTC()
 	job.Modes = modes
 	job.UpdatedAt = now

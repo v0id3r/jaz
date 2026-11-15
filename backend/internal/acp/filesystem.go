@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	acpschema "github.com/gluonfield/acp-transport/acp"
 	"github.com/gluonfield/acp-transport/jsonrpc"
 	"github.com/wins/jaz/backend/internal/pathsafe"
+	"github.com/wins/jaz/backend/internal/skills"
 )
 
 func (m *Manager) readTextFile(raw json.RawMessage) (json.RawMessage, *jsonrpc.Error) {
@@ -23,7 +25,7 @@ func (m *Manager) readTextFile(raw json.RawMessage) (json.RawMessage, *jsonrpc.E
 	if job == nil {
 		return nil, jsonrpc.InvalidParams("unknown acp session", nil)
 	}
-	path, err := pathsafe.Resolve(job.Cwd, req.Path)
+	path, err := m.resolveFilesystemPath(job, req.Path)
 	if err != nil {
 		return nil, jsonrpc.InvalidParams(err.Error(), nil)
 	}
@@ -50,7 +52,7 @@ func (m *Manager) writeTextFile(raw json.RawMessage) (json.RawMessage, *jsonrpc.
 	if job == nil {
 		return nil, jsonrpc.InvalidParams("unknown acp session", nil)
 	}
-	path, err := pathsafe.Resolve(job.Cwd, req.Path)
+	path, err := m.resolveFilesystemPath(job, req.Path)
 	if err != nil {
 		return nil, jsonrpc.InvalidParams(err.Error(), nil)
 	}
@@ -61,4 +63,23 @@ func (m *Manager) writeTextFile(raw json.RawMessage) (json.RawMessage, *jsonrpc.
 		return nil, jsonrpc.InternalError(err.Error(), nil)
 	}
 	return jsonrpc.EncodeResult(acpschema.WriteTextFileResponse{})
+}
+
+func (m *Manager) resolveFilesystemPath(job *jobState, name string) (string, error) {
+	roots := []string{job.Cwd}
+	if filepath.IsAbs(name) {
+		roots = append(roots, job.projectPath)
+		if m.cfg.Root != "" {
+			roots = append(roots, skills.UserRoot(m.cfg.Root))
+		}
+	}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if path, err := pathsafe.Resolve(root, name); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("path escapes the allowed directory: %s", name)
 }
