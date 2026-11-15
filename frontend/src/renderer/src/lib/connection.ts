@@ -578,6 +578,10 @@ async function init(): Promise<void> {
     return
   }
   const url = normalizeBaseUrl(localBaseUrl())
+  if (clientRuntime.kind === 'web') {
+    await restore(url)
+    return
+  }
   const value = begin(url)
   const health = await readHealth(url, value.controller.signal)
   if (!current(value)) {

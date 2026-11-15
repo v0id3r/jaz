@@ -10,7 +10,6 @@ import { clientRuntime } from '@/lib/clientRuntime'
 import { useBackendChange, useConnection } from '@/lib/connection'
 import { devPreview } from '@/lib/devPreview'
 import { useBotEvents } from '@/lib/hooks/useBotEvents'
-import { consumeNotificationTarget } from '@/lib/notificationNavigation'
 
 // The app renders while connected — and stays mounted through transient
 // losses ('reconnecting', banner over live UI) so drafts and streams survive
@@ -19,21 +18,14 @@ export function App({ router }: { router: AnyRouter }) {
   const { status } = useConnection()
   useBotEvents()
   useEffect(() => {
-    const open = async () => {
-      const path = await consumeNotificationTarget().catch(() => null)
-      if (path) router.history.push(path)
+    if (!('serviceWorker' in navigator)) return
+    const open = (event: MessageEvent) => {
+      const path = event.data?.path
+      if (event.data?.type !== 'jaz:open' || typeof path !== 'string' || !/^\/(?:sessions|bots)\/[^/]+$/.test(path)) return
+      router.history.push(path)
     }
-    void open()
-    const retry = window.setTimeout(open, 1000)
-    document.addEventListener('visibilitychange', open)
-    window.addEventListener('focus', open)
-    navigator.serviceWorker?.addEventListener('message', open)
-    return () => {
-      window.clearTimeout(retry)
-      document.removeEventListener('visibilitychange', open)
-      window.removeEventListener('focus', open)
-      navigator.serviceWorker?.removeEventListener('message', open)
-    }
+    navigator.serviceWorker.addEventListener('message', open)
+    return () => navigator.serviceWorker.removeEventListener('message', open)
   }, [router])
   // Reset to home whenever the backend changes — done here, above the router and
   // the onboarding gate, so it also covers landing after a fresh backend's

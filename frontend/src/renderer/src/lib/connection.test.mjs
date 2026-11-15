@@ -8,7 +8,7 @@ const bundle = await build({
   target: 'browser',
   format: 'cjs',
   external: ['react', '@/lib/browserCredentials'],
-  define: { 'import.meta.env': '{}' },
+  define: { 'import.meta.env': '{"VITE_JAZ_API_URL":"origin"}' },
   plugins: [{
     name: 'connection-fixture',
     setup(builder) {
@@ -373,11 +373,13 @@ test('a web auth proxy login redirect reloads the serving origin and asks to sig
   const redirects = []
   const { connection, reloads } = await fixture({
     web: true,
+    storedValues: [['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: 'https://startup.example' })]],
     health: (init) => {
       redirects.push(init.redirect)
       return { type: 'opaqueredirect', ok: false, status: 0, headers: new Headers() }
     },
   })
+  redirects.length = 0
   expect(await connection.connectRemote('https://jaz.example')).toBeNull()
   expect(reloads()).toBe(1)
   expect(await connection.connectRemote('https://other.example')).toBe('Sign in through Teleport again to reach the backend at https://other.example')
@@ -393,6 +395,17 @@ test('web startup signs in through the serving origin instead of showing server 
     health: () => ({ type: 'opaqueredirect', ok: false, status: 0, headers: new Headers() }),
   })
   expect(reloads()).toBe(1)
+})
+
+test('web startup restores a saved same-origin login without a connection preference', async () => {
+  const target = 'https://jaz.example'
+  const { connection } = await fixture({
+    web: true,
+    browserCredentials: new Map([[target, { token: 'jaz_saved', deviceId: 'identity' }]]),
+    auth: () => Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' }),
+  })
+  expect(connection.useConnection().status).toBe('connected')
+  expect(connection.cachedApiAuthToken(target)).toBe('jaz_saved')
 })
 
 test('an unauthenticated health probe does not unlock saved credentials', async () => {
