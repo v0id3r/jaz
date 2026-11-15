@@ -602,7 +602,7 @@ async function restore(url: string): Promise<void> {
     }
     if (!health.ok) {
       if (health.recoverable) {
-        setState({ status: 'disconnected', error: health.error })
+        setState({ status: 'checking', error: health.error })
         pollTimer = setTimeout(() => void retry(), 5000)
       } else {
         block(health.error)

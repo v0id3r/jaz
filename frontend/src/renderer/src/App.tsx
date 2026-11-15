@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { RouterProvider, type AnyRouter } from '@tanstack/react-router'
 import { BrowserWorkspace } from '@/components/browser/BrowserWorkspace'
 import { BackendTransition } from '@/components/connection/BackendTransition'
@@ -16,6 +17,16 @@ import { useBotEvents } from '@/lib/hooks/useBotEvents'
 export function App({ router }: { router: AnyRouter }) {
   const { status } = useConnection()
   useBotEvents()
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const open = (event: MessageEvent) => {
+      const path = event.data?.path
+      if (event.data?.type !== 'jaz:open' || typeof path !== 'string' || !/^\/(?:sessions|bots)\/[^/]+$/.test(path)) return
+      router.history.push(path)
+    }
+    navigator.serviceWorker.addEventListener('message', open)
+    return () => navigator.serviceWorker.removeEventListener('message', open)
+  }, [router])
   // Reset to home whenever the backend changes — done here, above the router and
   // the onboarding gate, so it also covers landing after a fresh backend's
   // onboarding finishes (the router mounts onto this location). The persisted

@@ -319,6 +319,7 @@ test('remote startup waits for health before unlocking, stops on denial, and rec
   }
   const first = await fixture(options)
   expect(events).toEqual(['health'])
+  expect(first.connection.useConnection().status).toBe('checking')
   online = true
   const pending = [...first.timers.entries()].find(([, timer]) => timer.delay === 5_000)
   first.timers.delete(pending[0])

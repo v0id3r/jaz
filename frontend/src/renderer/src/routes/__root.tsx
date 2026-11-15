@@ -113,16 +113,6 @@ function RootLayout() {
   useEffect(() => {
     return clientRuntime.onOpenRoute?.((path) => router.history.push(path))
   }, [router])
-  useEffect(() => {
-    if (!('serviceWorker' in navigator)) return
-    const open = (event: MessageEvent) => {
-      const path = event.data?.path
-      if (event.data?.type !== 'jaz:open' || typeof path !== 'string' || !/^\/(?:sessions|bots)\/[^/]+$/.test(path)) return
-      router.history.push(path)
-    }
-    navigator.serviceWorker.addEventListener('message', open)
-    return () => navigator.serviceWorker.removeEventListener('message', open)
-  }, [router])
   // Phones start with the full-screen drawer closed so the thread shows first;
   // the stored preference only governs the desktop column.
   const [sidebarOpen, setSidebarOpen] = useState(
