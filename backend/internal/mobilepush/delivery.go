@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/wins/jaz/backend/internal/bots"
@@ -319,8 +320,20 @@ func (s *Service) sendWebPush(ctx context.Context, deviceID string, subscription
 	if err != nil && !errors.Is(err, storage.ErrSettingNotFound) {
 		return err
 	}
+	title := cmp.Or(alert.Title, alert.Name, "Jaz")
+	kind := "bots"
+	if alert.Kind == "chat" {
+		kind = "sessions"
+	}
+	path := "/" + kind + "/" + alert.SessionID
 	payload := map[string]any{
-		"title":      cmp.Or(alert.Title, alert.Name, "Jaz"),
+		"web_push": 8030,
+		"notification": map[string]any{
+			"title":    title,
+			"body":     alert.Body,
+			"navigate": strings.TrimRight(s.webPush.PublicURL(), "/") + path,
+		},
+		"title":      title,
 		"body":       alert.Body,
 		"session_id": alert.SessionID,
 		"kind":       alert.Kind,

@@ -17,6 +17,7 @@ type WebPushConfig struct {
 	PublicKey  string
 	PrivateKey string
 	Subject    string
+	PublicURL  string
 }
 
 type WebPushSubscription struct {
@@ -30,6 +31,7 @@ type WebPushSubscription struct {
 type WebPushSender interface {
 	Enabled() bool
 	PublicKey() string
+	PublicURL() string
 	Send(context.Context, WebPushSubscription, any) error
 }
 
@@ -41,6 +43,9 @@ type WebPush struct {
 func NewWebPush(config WebPushConfig) (*WebPush, error) {
 	if config.Subject == "" {
 		config.Subject = "https://jaz.chat"
+	}
+	if config.PublicURL == "" {
+		config.PublicURL = "https://jaz.chat"
 	}
 	if config.PublicKey == "" && config.PrivateKey == "" {
 		return &WebPush{config: config, client: &http.Client{Timeout: 10 * time.Second}}, nil
@@ -57,6 +62,10 @@ func (w *WebPush) Enabled() bool {
 
 func (w *WebPush) PublicKey() string {
 	return w.config.PublicKey
+}
+
+func (w *WebPush) PublicURL() string {
+	return w.config.PublicURL
 }
 
 func (w *WebPush) Send(ctx context.Context, subscription WebPushSubscription, payload any) error {

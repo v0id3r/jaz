@@ -14,10 +14,12 @@ import (
 )
 
 func NewMobilePush(config Config, store *sqlitestore.Store, manager *acp.Manager, serverConfig serverconfig.Config) (*mobilepush.Service, error) {
-	if config.WebPush.Subject == "" {
-		if publicURL := serverconfig.ClientBaseURL(serverConfig); strings.HasPrefix(publicURL, "https://") {
-			config.WebPush.Subject = publicURL
-		}
+	publicURL := serverconfig.ClientBaseURL(serverConfig)
+	if config.WebPush.PublicURL == "" {
+		config.WebPush.PublicURL = publicURL
+	}
+	if config.WebPush.Subject == "" && strings.HasPrefix(publicURL, "https://") {
+		config.WebPush.Subject = publicURL
 	}
 	sender, err := mobilepush.NewApple(config.Push)
 	if err != nil {
