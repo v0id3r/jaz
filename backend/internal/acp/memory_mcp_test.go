@@ -108,7 +108,7 @@ func TestMCPServersForJaztoolsOnlyPolicyOnlyExposesJaztools(t *testing.T) {
 
 }
 
-func TestOpenCodeBotDefersOnlyJazOwnedMCPConnections(t *testing.T) {
+func TestDeferredToolsGateOnlyJazOwnedMCPConnections(t *testing.T) {
 	m := &Manager{cfg: Config{MCPStore: staticMCPServerStore{servers: []mcpconfig.Server{
 		{ID: "jaztools", Name: "jaztools", Transport: mcpconfig.TransportStreamableHTTP, URL: "http://127.0.0.1:5299/mcp/jaztools", Enabled: true},
 		{ID: "jaz_mcp", Name: "jaz_mcp", Transport: mcpconfig.TransportStreamableHTTP, URL: "http://127.0.0.1:5299/mcp/proxy", Enabled: true},
@@ -121,8 +121,14 @@ func TestOpenCodeBotDefersOnlyJazOwnedMCPConnections(t *testing.T) {
 	}{
 		{AgentOpenCode, MCPServerPolicyBot, true},
 		{AgentOpenCode, MCPServerPolicyAll, false},
-		{AgentCodex, MCPServerPolicyBot, false},
+		{AgentOpenCode, MCPServerPolicyWidget, false},
 		{AgentOpenCode, MCPServerPolicyMemorySearchWorker, false},
+		{AgentKimi, MCPServerPolicyBot, true},
+		{AgentKimi, MCPServerPolicyAll, true},
+		{AgentKimi, MCPServerPolicyWidget, true},
+		{AgentKimi, MCPServerPolicyMemorySearchWorker, false},
+		{AgentCodex, MCPServerPolicyBot, false},
+		{AgentClaude, MCPServerPolicyBot, false},
 	} {
 		for _, raw := range m.mcpServersForAgent(t.Context(), capable, tc.policy, tc.agent) {
 			var server httpMCPServer
@@ -130,7 +136,7 @@ func TestOpenCodeBotDefersOnlyJazOwnedMCPConnections(t *testing.T) {
 				t.Fatal(err)
 			}
 			u, _ := url.Parse(server.URL)
-			want := tc.deferred && server.Name != "external"
+			want := tc.deferred && server.Name == "jaz_mcp"
 			if got := u.Query().Get("jaz_deferred_tools") == "1"; got != want {
 				t.Fatalf("%s/%s %s deferred=%v, want %v", tc.agent, tc.policy, server.Name, got, want)
 			}

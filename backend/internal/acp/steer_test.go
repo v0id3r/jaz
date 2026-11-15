@@ -79,6 +79,53 @@ func TestManagerInputStartsAndNativelySteersWithoutQueueing(t *testing.T) {
 	}
 }
 
+func TestManagerNativeSteerStreamsBeforeSteerCompletes(t *testing.T) {
+	store, err := sqlitestore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	root := t.TempDir()
+	hold := filepath.Join(root, "steer-hold")
+	if err := os.WriteFile(hold, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(hold) })
+	manager := newFakeAgentManager(t, store, root, map[string]string{
+		"JAZ_FAKE_ACP_NATIVE_STEERING":     "1",
+		"JAZ_FAKE_ACP_NATIVE_STEER_STREAM": "1",
+		"JAZ_FAKE_ACP_NATIVE_STEER_HOLD":   hold,
+	})
+	t.Cleanup(manager.Close)
+	manager.Events = sessionevents.New()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	spawned, err := manager.Spawn(ctx, acp.SpawnRequest{ACPAgent: "fake", Slug: "fake-native-steer-stream"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := manager.Events.Subscribe(ctx, spawned.SessionID)
+	if _, err := manager.Input(ctx, acp.SteerRequest{Session: spawned.SessionID, Message: "block until cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Input(ctx, acp.SteerRequest{Session: spawned.SessionID, Message: "native follow-up"}); err != nil {
+		t.Fatal(err)
+	}
+	waitForSteerEventType(t, sub, "assistant")
+	waitForSteerEventType(t, sub, "acp_message")
+	if err := os.Remove(hold); err != nil {
+		t.Fatal(err)
+	}
+	job, err := manager.Wait(ctx, acp.WaitRequest{Session: spawned.SessionID, Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != acp.StateIdle || job.Assistant != "hello from native steer" {
+		t.Fatalf("native steer state=%s assistant=%q error=%q", job.State, job.Assistant, job.Error)
+	}
+}
+
 func TestManagerSteerInternalReachesTheTurnWithoutAUserMessage(t *testing.T) {
 	store, err := sqlitestore.New(t.TempDir())
 	if err != nil {

@@ -354,7 +354,7 @@ func StartModelCatalogWarmup(lc fx.Lifecycle, catalog *modelcatalog.Service, log
 	})
 }
 
-func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, prompts *coordinator.Builder, catalog acp.AgentCatalog, source acp.AgentConfigSource, adapters *acpadapter.Manager, mcpServers mcpconfig.ServerReader, providerSource provider.Source, modelCatalog *modelcatalog.Service, widgetService *widgets.Service, launch sandbox.Launcher) (acp.Config, error) {
+func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, memory *memoryservice.Service, prompts *coordinator.Builder, catalog acp.AgentCatalog, source acp.AgentConfigSource, adapters *acpadapter.Manager, mcpServers mcpconfig.ServerReader, providerSource provider.Source, modelCatalog *modelcatalog.Service, widgetService *widgets.Service, launch sandbox.Launcher) (acp.Config, error) {
 	if err := bots.MigrateHomes(store); err != nil {
 		return acp.Config{}, err
 	}
@@ -362,6 +362,7 @@ func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, pro
 	cfg.ACP.AgentSource = source
 	cfg.ACP.Adapters = adapters
 	cfg.ACP.Root = store.RootDir()
+	cfg.ACP.MemoryRoot = memory.Root()
 	cfg.ACP.Workspace = string(workspace)
 	cfg.ACP.Providers = cfg.ModelProviders
 	cfg.ACP.ProviderSource = providerSource

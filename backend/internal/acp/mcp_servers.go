@@ -57,14 +57,14 @@ func (m *Manager) mcpServersForAgent(ctx context.Context, initRaw json.RawMessag
 	if servers == nil {
 		return []json.RawMessage{}
 	}
-	if CanonicalAgentName(agent) == AgentOpenCode && policy == MCPServerPolicyBot {
+	if agentAcceptsDeferredTools(agent, policy) {
 		for i, raw := range servers {
 			var server httpMCPServer
 			if json.Unmarshal(raw, &server) != nil {
 				continue
 			}
 			u, err := url.Parse(server.URL)
-			if err != nil || (u.Path != serverconfig.JazToolsMCPPath && u.Path != serverconfig.MCPProxyPath) {
+			if err != nil || u.Path != serverconfig.MCPProxyPath {
 				continue
 			}
 			query := u.Query()
@@ -127,6 +127,20 @@ func mcpServerAllowed(policy string, server mcpconfig.Server) bool {
 		return isJaztoolsServer(server)
 	}
 	return fullMCPPolicy(policy)
+}
+
+// agentAcceptsDeferredTools reports whether an agent receives the deferred
+// search_tools/call_tool catalogue on the MCP proxy connection for the
+// session's policy. The JazTools server stays inline; restricted worker
+// policies keep their inline surface everywhere.
+func agentAcceptsDeferredTools(agent, policy string) bool {
+	switch CanonicalAgentName(agent) {
+	case AgentKimi:
+		return fullMCPPolicy(policy)
+	case AgentOpenCode:
+		return policy == MCPServerPolicyBot
+	}
+	return false
 }
 
 // mcpServerURL routes the jaztools server to the tool surface named by the

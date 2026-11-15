@@ -1,6 +1,7 @@
 package mcpdeferred
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -144,6 +145,109 @@ func TestDeferredDiscoveryDispatchAndValidation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("underlying tool did not receive cancellation")
 	}
+}
+
+func TestDeferredSearchRanksCatalogueByBM25(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "ranked", Version: "1"}, nil)
+	entries := []struct {
+		name        string
+		description string
+		schema      json.RawMessage
+	}{
+		{"send_email_message", "Compose and send an email.", json.RawMessage(`{"type":"object","properties":{"recipient":{"type":"string","description":"Email recipient address."}},"required":["recipient"]}`)},
+		{"search_memory_pages", "Search durable memory pages by keyword.", json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`)},
+		{"memory_page_read", "Read a single memory page by path from the store.", json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)},
+		{"capture_browser_screenshot", "Capture a screenshot of the active browser tab.", json.RawMessage(`{"type":"object","properties":{"quality":{"type":"string"}}}`)},
+	}
+	for _, entry := range entries {
+		server.AddTool(&mcp.Tool{Name: entry.name, Description: entry.description, InputSchema: entry.schema}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "done"}}}, nil
+		})
+	}
+	for i := range 12 {
+		server.AddTool(&mcp.Tool{Name: fmt.Sprintf("note_%02d", i), Description: "Shared notebook note.", InputSchema: json.RawMessage(`{"type":"object"}`)}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "noted"}}}, nil
+		})
+	}
+	host := httptest.NewServer(Wrap(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{JSONResponse: true})))
+	t.Cleanup(host.Close)
+	client := mcp.NewClient(&mcp.Implementation{Name: "client", Version: "1"}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: host.URL + "?" + QueryParam + "=1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	search := func(arguments map[string]any) (struct {
+		Tools []mcp.Tool `json:"tools"`
+		Total int        `json:"total_matches"`
+		Next  int        `json:"next_offset"`
+	}, []byte) {
+		t.Helper()
+		result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "search_tools", Arguments: arguments})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := json.Marshal(result.StructuredContent)
+		var page struct {
+			Tools []mcp.Tool `json:"tools"`
+			Total int        `json:"total_matches"`
+			Next  int        `json:"next_offset"`
+		}
+		if err := json.Unmarshal(data, &page); err != nil {
+			t.Fatal(err)
+		}
+		return page, data
+	}
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"email", []string{"send_email_message"}},
+		{"recipient", []string{"send_email_message"}},
+		{"memory", []string{"search_memory_pages", "memory_page_read"}},
+		{"read memory", []string{"memory_page_read", "search_memory_pages"}},
+		{"pages", []string{"search_memory_pages", "memory_page_read"}},
+		{"browser", []string{"capture_browser_screenshot"}},
+		{"the", nil},
+	} {
+		page, data := search(map[string]any{"query": tc.query})
+		if len(page.Tools) != len(tc.want) {
+			t.Fatalf("query %q: %s", tc.query, data)
+		}
+		for i, name := range tc.want {
+			if page.Tools[i].Name != name {
+				t.Fatalf("query %q ranked %v, want %v", tc.query, toolNames(page.Tools), tc.want)
+			}
+		}
+	}
+	if _, raw := search(map[string]any{"query": "recipient"}); !bytes.Contains(raw, []byte(`"recipient"`)) || !bytes.Contains(raw, []byte("Email recipient address.")) {
+		t.Fatalf("ranked result lost the original schema: %s", raw)
+	}
+	page, _ := search(map[string]any{"query": "note", "limit": 10})
+	if page.Total != 12 || len(page.Tools) != 10 || page.Next != 10 {
+		t.Fatalf("ranked pagination first page: %+v", page)
+	}
+	for i, tool := range page.Tools {
+		if want := fmt.Sprintf("note_%02d", i); tool.Name != want {
+			t.Fatalf("ranked page tool %d = %q, want %q", i, tool.Name, want)
+		}
+	}
+	page, _ = search(map[string]any{"query": "note", "offset": 10, "limit": 10})
+	if page.Total != 12 || len(page.Tools) != 2 || page.Next != 0 || page.Tools[0].Name != "note_10" || page.Tools[1].Name != "note_11" {
+		t.Fatalf("ranked pagination second page: %+v", page)
+	}
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "call_tool", Arguments: map[string]any{"name": "note_03", "arguments": map[string]any{}}})
+	if err != nil || result.IsError || result.Content[0].(*mcp.TextContent).Text != "noted" {
+		t.Fatalf("ranked tool is not callable: %#v %v", result, err)
+	}
+}
+
+func toolNames(tools []mcp.Tool) []string {
+	out := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, tool.Name)
+	}
+	return out
 }
 
 func TestDeferredDoesNotEscapeRestrictedSurface(t *testing.T) {

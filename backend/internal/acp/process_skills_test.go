@@ -3,6 +3,7 @@ package acp
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -83,6 +84,12 @@ func TestProcessEnvPreservesProfileSkills(t *testing.T) {
 				}
 				if _, err := os.Stat(filepath.Join(profile, "skills", "beta")); !os.IsNotExist(err) {
 					t.Fatalf("Jaz skill copied to profile: %v", err)
+				}
+				if agent.name == AgentKimi {
+					cfg, ok := readKimiConfig(profile)
+					if !ok || !slices.Contains(cfg.ExtraSkillDirs, filepath.Join(root, "skills")) {
+						t.Fatalf("Kimi native catalog does not include Jaz skills: %#v", cfg.ExtraSkillDirs)
+					}
 				}
 			})
 		}

@@ -9,6 +9,7 @@ import (
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
 	"github.com/wins/jaz/backend/internal/goal"
+	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/sessiongoal"
 	"github.com/wins/jaz/backend/internal/storage"
 )
@@ -347,6 +348,9 @@ func (m *Manager) Steer(ctx context.Context, req SteerRequest) (Job, error) {
 	slot, err := m.reserveSteer(job, req, contexts, prepared)
 	if err != nil {
 		return Job{}, err
+	}
+	if req.transcript == sendTranscriptUserMessage && m.Events != nil {
+		m.Events.Publish(sessionevents.Event{SessionID: job.ID, Type: "assistant"})
 	}
 	var handoff <-chan struct{}
 	if req.transcript == sendTranscriptUserMessage {

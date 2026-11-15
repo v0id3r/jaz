@@ -4,7 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/wins/jaz/backend/internal/skills"
 )
 
 func TestKimiBuiltinAgentUsesManagedACP(t *testing.T) {
@@ -209,6 +212,55 @@ func TestProcessEnvUsesExistingKimiProfile(t *testing.T) {
 	}
 	if env["KIMI_CODE_HOME"] != existing {
 		t.Fatalf("KIMI_CODE_HOME = %q, want %q", env["KIMI_CODE_HOME"], existing)
+	}
+}
+
+func TestProcessEnvExposesJazSkillsToKimi(t *testing.T) {
+	clearHostEnv(t)
+	root, existing, workspace := t.TempDir(), t.TempDir(), t.TempDir()
+	writeKimiCredential(t, existing, `{"access_token":"token"}`)
+	config := `# preserved
+extra_skill_dirs = [
+  "/custom",
+]
+
+` + `default_model = "kimi-code/kimi-for-coding"
+[providers."managed:kimi-code"]
+[models."kimi-code/kimi-for-coding"]
+provider = "managed:kimi-code"
+`
+	if err := os.WriteFile(filepath.Join(existing, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeACPTestSkill(t, root, "alpha")
+	writeACPTestSkill(t, filepath.Join(workspace, ".jaz"), "beta")
+
+	agent := AgentConfig{Auth: AgentAuthConfig{Mode: AuthModeExistingCLI, Path: existing}, Cwd: workspace}
+	if _, err := NewManager(nil, Config{Root: root}, nil).processEnvPrepared(AgentKimi, agent); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(existing, "config.toml")
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(first), "# preserved") || !strings.Contains(string(first), `[providers."managed:kimi-code"]`) {
+		t.Fatalf("unrelated Kimi config changed:\n%s", first)
+	}
+	cfg, ok := readKimiConfig(existing)
+	want := append([]string{"/custom"}, skills.RootsForWorkspace(root, workspace)...)
+	if !ok || !reflect.DeepEqual(cfg.ExtraSkillDirs, want) {
+		t.Fatalf("Kimi skill dirs = %#v, want %#v", cfg.ExtraSkillDirs, want)
+	}
+	if _, err := NewManager(nil, Config{Root: root}, nil).processEnvPrepared(AgentKimi, agent); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil || string(second) != string(first) {
+		t.Fatalf("second preparation rewrote Kimi config: %v\n%s", err, second)
+	}
+	if _, err := os.Stat(filepath.Join(existing, "skills", "alpha")); !os.IsNotExist(err) {
+		t.Fatalf("Jaz skill copied to Kimi profile: %v", err)
 	}
 }
 
