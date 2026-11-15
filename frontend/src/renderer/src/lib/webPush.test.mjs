@@ -72,12 +72,15 @@ test('service worker shows a push and opens its thread on click', async () => {
   const listeners = {}
   const shown = []
   const opened = []
+  const activated = []
   const self = {
     registration: { showNotification: async (title, options) => shown.push({ title, ...options }) },
     clients: {
       matchAll: async () => [],
       openWindow: async (url) => opened.push(url),
+      claim: async () => { activated.push('claim') },
     },
+    skipWaiting: async () => { activated.push('skip') },
     location: { origin: 'https://jaz.example' },
     caches: { open: async () => ({ put: async () => {} }) },
     addEventListener: (type, handler) => { listeners[type] = handler },
@@ -85,6 +88,9 @@ test('service worker shows a push and opens its thread on click', async () => {
   globalThis.caches = self.caches
   new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
   const waiting = []
+  listeners.install()
+  listeners.activate({ waitUntil: (promise) => waiting.push(promise) })
+  expect(activated).toEqual(['skip', 'claim'])
   listeners.push({ data: { json: () => ({ title: 'Done', body: 'Ready', session_id: 'thread one', kind: 'chat' }) }, waitUntil: (promise) => waiting.push(promise) })
   await Promise.all(waiting)
   expect(shown[0]).toMatchObject({ title: 'Done', body: 'Ready', tag: 'jaz:thread one:chat' })
