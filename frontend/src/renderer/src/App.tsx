@@ -24,10 +24,12 @@ export function App({ router }: { router: AnyRouter }) {
       if (path) router.history.push(path)
     }
     void open()
+    const retry = window.setTimeout(open, 1000)
     document.addEventListener('visibilitychange', open)
     window.addEventListener('focus', open)
     navigator.serviceWorker?.addEventListener('message', open)
     return () => {
+      window.clearTimeout(retry)
       document.removeEventListener('visibilitychange', open)
       window.removeEventListener('focus', open)
       navigator.serviceWorker?.removeEventListener('message', open)

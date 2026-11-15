@@ -26,6 +26,11 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open('jaz-notification-target')
     await cache.put('/', new Response(path))
+    const url = new URL(path, self.location.origin).href
+    if (/iPhone|iPad/.test(self.navigator?.userAgent || '')) {
+      await self.clients.openWindow(url)
+      return
+    }
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     for (const client of windows) {
       if ('focus' in client) {
@@ -34,6 +39,6 @@ self.addEventListener('notificationclick', (event) => {
         return
       }
     }
-    await self.clients.openWindow(new URL(path, self.location.origin).href)
+    await self.clients.openWindow(url)
   })())
 })

@@ -129,6 +129,31 @@ test('notification click saves a bot target and focuses the existing client', as
   expect(focused).toBe(1)
 })
 
+test('iOS notification click opens a fresh client for the bot target', async () => {
+  const listeners = {}
+  const opened = []
+  const stored = []
+  const self = {
+    navigator: { userAgent: 'iPhone' },
+    registration: { showNotification: async () => {} },
+    clients: {
+      matchAll: async () => { throw new Error('must not reuse the inert client') },
+      openWindow: async (url) => { opened.push(url) },
+    },
+    location: { origin: 'https://jaz.example' },
+    caches: { open: async () => ({ put: async (_key, response) => { stored.push(await response.text()) } }) },
+    addEventListener: (type, handler) => { listeners[type] = handler },
+  }
+  globalThis.caches = self.caches
+  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
+  const waiting = []
+  const notification = { data: { session: 'bot one', kind: 'bot' }, close: () => {} }
+  listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  expect(opened).toEqual(['https://jaz.example/bots/bot%20one'])
+  expect(stored).toEqual(['/bots/bot%20one'])
+})
+
 function fixture({ publicKey = Buffer.alloc(65, 1).toString('base64url'), existing = false, putStatus = 204 } = {}) {
   const calls = []
   const state = {
