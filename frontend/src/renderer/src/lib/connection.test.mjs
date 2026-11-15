@@ -385,6 +385,16 @@ test('a web auth proxy login redirect reloads the serving origin and asks to sig
   expect(redirects).toEqual(['manual', 'manual'])
 })
 
+test('web startup signs in through the serving origin instead of showing server options', async () => {
+  const target = 'https://jaz.example'
+  const { reloads } = await fixture({
+    web: true,
+    storedValues: [['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: target })]],
+    health: () => ({ type: 'opaqueredirect', ok: false, status: 0, headers: new Headers() }),
+  })
+  expect(reloads()).toBe(1)
+})
+
 test('an unauthenticated health probe does not unlock saved credentials', async () => {
   let unlocks = 0
   const target = 'https://jaz.example'

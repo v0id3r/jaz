@@ -601,6 +601,9 @@ async function restore(url: string): Promise<void> {
       return
     }
     if (!health.ok) {
+      if (health.code === 'browser_session_required' && signInThroughBrowser(url)) {
+        return
+      }
       if (health.recoverable) {
         setState({ status: 'checking', error: health.error })
         pollTimer = setTimeout(() => void retry(), 5000)
