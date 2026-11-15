@@ -20,6 +20,9 @@ self.addEventListener('notificationclick', (event) => {
     for (const client of windows) {
       if ('focus' in client) {
         client.postMessage({ type: 'jaz:open', path })
+        try {
+          await client.navigate(new URL(path, self.location.origin).href)
+        } catch {}
         await client.focus()
         return
       }

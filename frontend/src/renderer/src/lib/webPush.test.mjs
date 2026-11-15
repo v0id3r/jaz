@@ -92,14 +92,15 @@ test('service worker shows a push and opens its thread on click', async () => {
   expect(opened).toEqual(['https://jaz.example/sessions/thread%20one'])
 })
 
-test('notification click routes a bot to the existing client without reloading it', async () => {
+test('notification click routes a bot to the existing client and navigates to it', async () => {
   const listeners = {}
   const messages = []
+  const navigated = []
   let focused = 0
   const client = {
     postMessage: (message) => messages.push(message),
     focus: async () => { focused += 1 },
-    navigate: async () => { throw new Error('unexpected full navigation') },
+    navigate: async (url) => { navigated.push(url) },
   }
   const self = {
     registration: { showNotification: async () => {} },
@@ -115,6 +116,7 @@ test('notification click routes a bot to the existing client without reloading i
   listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
   await Promise.all(waiting)
   expect(messages).toEqual([{ type: 'jaz:open', path: '/bots/bot%20one' }])
+  expect(navigated).toEqual(['https://jaz.example/bots/bot%20one'])
   expect(focused).toBe(1)
 })
 
