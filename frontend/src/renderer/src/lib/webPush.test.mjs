@@ -92,6 +92,32 @@ test('service worker shows a push and opens its thread on click', async () => {
   expect(opened).toEqual(['https://jaz.example/sessions/thread%20one'])
 })
 
+test('notification click routes a bot to the existing client without reloading it', async () => {
+  const listeners = {}
+  const messages = []
+  let focused = 0
+  const client = {
+    postMessage: (message) => messages.push(message),
+    focus: async () => { focused += 1 },
+    navigate: async () => { throw new Error('unexpected full navigation') },
+  }
+  const self = {
+    registration: { showNotification: async () => {} },
+    clients: { matchAll: async () => [client], openWindow: async () => { throw new Error('unexpected new window') } },
+    location: { origin: 'https://jaz.example' },
+    addEventListener: (type, handler) => { listeners[type] = handler },
+  }
+  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
+  const waiting = []
+  listeners.push({ data: { json: () => ({ title: 'Done', session_id: 'bot one', kind: 'bot' }) }, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  const notification = { data: { session: 'bot one', kind: 'bot' }, close: () => {} }
+  listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  expect(messages).toEqual([{ type: 'jaz:open', path: '/bots/bot%20one' }])
+  expect(focused).toBe(1)
+})
+
 function fixture({ publicKey = Buffer.alloc(65, 1).toString('base64url'), existing = false, putStatus = 204 } = {}) {
   const calls = []
   const state = {
