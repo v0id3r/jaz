@@ -248,7 +248,7 @@ provider = "managed:kimi-code"
 		t.Fatalf("unrelated Kimi config changed:\n%s", first)
 	}
 	cfg, ok := readKimiConfig(existing)
-	want := append([]string{"/custom"}, skills.RootsForWorkspace(root, workspace)...)
+	want := append([]string{"/custom", skills.UserRoot(root)}, skills.WorkspaceSkillDirs()...)
 	if !ok || !reflect.DeepEqual(cfg.ExtraSkillDirs, want) {
 		t.Fatalf("Kimi skill dirs = %#v, want %#v", cfg.ExtraSkillDirs, want)
 	}
@@ -261,6 +261,83 @@ provider = "managed:kimi-code"
 	}
 	if _, err := os.Stat(filepath.Join(existing, "skills", "alpha")); !os.IsNotExist(err) {
 		t.Fatalf("Jaz skill copied to Kimi profile: %v", err)
+	}
+}
+
+func TestEnsureKimiSkillDirsWritesSharedSetToCleanConfig(t *testing.T) {
+	home := t.TempDir()
+	config := `# preserved
+default_model = "kimi-code/kimi-for-coding"
+[providers."managed:kimi-code"]
+[models."kimi-code/kimi-for-coding"]
+provider = "managed:kimi-code"
+`
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureKimiSkillDirs(home, "/jaz/skills", skills.WorkspaceSkillDirs()); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := readKimiConfig(home)
+	want := append([]string{"/jaz/skills"}, skills.WorkspaceSkillDirs()...)
+	if !ok || !reflect.DeepEqual(cfg.ExtraSkillDirs, want) {
+		t.Fatalf("Kimi skill dirs = %#v, want %#v", cfg.ExtraSkillDirs, want)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil || !strings.Contains(string(data), "# preserved") || !strings.Contains(string(data), `[providers."managed:kimi-code"]`) {
+		t.Fatalf("unrelated Kimi config changed: %v\n%s", err, data)
+	}
+}
+
+func TestEnsureKimiSkillDirsRemovesAccumulatedSessionPaths(t *testing.T) {
+	home := t.TempDir()
+	config := `extra_skill_dirs = [
+  "/ws/one/.claude/skills",
+  "/custom",
+  "/ws/two/repo/.jaz/skills",
+  "team/skills",
+  "/ws/one/.agents/skills",
+  "/ws/two/repo/.codex/skills",
+]
+default_model = "kimi-code/kimi-for-coding"
+`
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureKimiSkillDirs(home, "/jaz/skills", skills.WorkspaceSkillDirs()); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := readKimiConfig(home)
+	want := append([]string{"/custom", "team/skills", "/jaz/skills"}, skills.WorkspaceSkillDirs()...)
+	if !ok || !reflect.DeepEqual(cfg.ExtraSkillDirs, want) {
+		t.Fatalf("Kimi skill dirs = %#v, want %#v", cfg.ExtraSkillDirs, want)
+	}
+	if strings.Contains(strings.Join(cfg.ExtraSkillDirs, "\n"), "/ws/") {
+		t.Fatalf("per-session paths remain: %#v", cfg.ExtraSkillDirs)
+	}
+}
+
+func TestEnsureKimiSkillDirsIsIdempotent(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("extra_skill_dirs = [\"/ws/.claude/skills\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureKimiSkillDirs(home, "/jaz/skills", skills.WorkspaceSkillDirs()); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "config.toml")
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureKimiSkillDirs(home, "/jaz/skills", skills.WorkspaceSkillDirs()); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil || string(second) != string(first) {
+		t.Fatalf("second call rewrote Kimi config: %v\n%s", err, second)
 	}
 }
 

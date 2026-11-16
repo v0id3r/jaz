@@ -56,14 +56,24 @@ func LoadForWorkspace(root, workspace string) (Catalog, error) {
 	return catalog, nil
 }
 
+// WorkspaceSkillDirs returns the skill directory names relative to a
+// workspace root; native agents resolve them per session.
+func WorkspaceSkillDirs() []string {
+	out := make([]string, len(workspaceSkillDirs))
+	for i, dir := range workspaceSkillDirs {
+		out[i] = filepath.Join(dir, userSkillsDir)
+	}
+	return out
+}
+
 func RootsForWorkspace(root, workspace string) []string {
 	roots := []string{UserRoot(root)}
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
 		return roots
 	}
-	for _, dir := range workspaceSkillDirs {
-		roots = append(roots, filepath.Join(workspace, dir, userSkillsDir))
+	for _, dir := range WorkspaceSkillDirs() {
+		roots = append(roots, filepath.Join(workspace, dir))
 	}
 	return roots
 }

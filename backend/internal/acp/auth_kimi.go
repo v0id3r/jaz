@@ -145,10 +145,14 @@ func (m *Manager) prepareKimiProcessEnv(root string, cfg AgentConfig, env map[st
 	if err != nil || len(catalog.Skills) == 0 {
 		return err
 	}
-	return ensureKimiSkillDirs(auth.Config.Path, skills.RootsForWorkspace(root, cwd))
+	return ensureKimiSkillDirs(auth.Config.Path, skills.UserRoot(root), skills.WorkspaceSkillDirs())
 }
 
-func ensureKimiSkillDirs(home string, dirs []string) error {
+// ensureKimiSkillDirs keeps extra_skill_dirs equal to the shared Jaz skill
+// set: the absolute user root plus workspace-relative directories that Kimi
+// resolves from each session's project root. Absolute workspace paths
+// previously appended per session are removed once.
+func ensureKimiSkillDirs(home, userRoot string, workspaceDirs []string) error {
 	path := filepath.Join(home, "config.toml")
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -158,8 +162,13 @@ func ensureKimiSkillDirs(home string, dirs []string) error {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse kimi config %s: %w", path, err)
 	}
-	merged := append([]string(nil), cfg.ExtraSkillDirs...)
-	for _, dir := range dirs {
+	merged := make([]string, 0, len(cfg.ExtraSkillDirs)+1+len(workspaceDirs))
+	for _, dir := range cfg.ExtraSkillDirs {
+		if !isPerSessionSkillDir(dir, workspaceDirs) {
+			merged = append(merged, dir)
+		}
+	}
+	for _, dir := range append([]string{userRoot}, workspaceDirs...) {
 		if !slices.Contains(merged, dir) {
 			merged = append(merged, dir)
 		}
@@ -174,10 +183,37 @@ func ensureKimiSkillDirs(home string, dirs []string) error {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return fmt.Errorf("prepare kimi profile %s: %w", home, err)
 	}
-	if err := os.WriteFile(path, updated, 0o600); err != nil {
+	tmp, err := os.CreateTemp(home, ".config-*.toml")
+	if err != nil {
+		return fmt.Errorf("prepare kimi config %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(updated); err != nil {
+		tmp.Close()
 		return fmt.Errorf("write kimi config %s: %w", path, err)
 	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write kimi config %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace kimi config %s: %w", path, err)
+	}
 	return nil
+}
+
+// isPerSessionSkillDir reports whether dir is an absolute workspace skill
+// path previously appended per session; relative entries now cover those.
+func isPerSessionSkillDir(dir string, workspaceDirs []string) bool {
+	if !filepath.IsAbs(dir) {
+		return false
+	}
+	for _, rel := range workspaceDirs {
+		if strings.HasSuffix(dir, string(filepath.Separator)+rel) {
+			return true
+		}
+	}
+	return false
 }
 
 func setTopLevelTOMLStringArray(data []byte, key string, values []string) ([]byte, error) {
