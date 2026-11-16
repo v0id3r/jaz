@@ -17,7 +17,7 @@ Equivalent configuration fields are jaz.push.keyfile, keyid, teamid and bundleid
 
 Installed PWA clients can use Web Push instead of APNs. Set `JAZ_WEB_PUSH_PUBLIC_KEY` and `JAZ_WEB_PUSH_PRIVATE_KEY` to a persistent VAPID key pair, and optionally `JAZ_WEB_PUSH_SUBJECT` to an operator contact URL (defaults to the server's public HTTPS URL). The equivalent fields are `jaz.webpush.publickey`, `privatekey` and `subject`. Empty keys disable browser push.
 
-Browser subscriptions use `PUT/DELETE /v1/mobile/web-push` and belong to the authenticated paired device. `/v1/mobile/push` exposes the public VAPID key needed to subscribe. Payloads include Safari's declarative `web_push: 8030` envelope with the conversation's absolute `notification.navigate` URL; other browsers use the PWA's service worker, which shows alerts and opens their thread on click. Web Push carries no Live Activity state. Paired clients report the visible, focused conversation through `PUT /v1/mobile/presence`; this presence expires after 60 seconds and suppresses that conversation's APNs/Web Push alert on every device.
+Browser subscriptions use `PUT/DELETE /v1/mobile/web-push` and belong to the authenticated paired device. `/v1/mobile/push` exposes the public VAPID key needed to subscribe. The PWA's service worker shows alerts and on click routes an already running client without reloading it; an unresponsive client falls back to opening the conversation URL. Web Push carries no Live Activity state. Paired clients report the visible, focused conversation through `PUT /v1/mobile/presence`; this presence expires after 60 seconds and suppresses that conversation's APNs/Web Push alert on every device.
 
 ## Contract
 
