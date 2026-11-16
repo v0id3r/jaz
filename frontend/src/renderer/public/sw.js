@@ -25,15 +25,12 @@ self.addEventListener('notificationclick', (event) => {
   const path = session ? `/${kind === 'chat' ? 'sessions' : 'bots'}/${encodeURIComponent(session)}` : '/'
   event.waitUntil((async () => {
     const url = new URL(path, self.location.origin).href
-    if (/iPhone|iPad/.test(self.navigator?.userAgent || '')) {
-      await self.clients.openWindow(url)
-      return
-    }
+    const ios = /iPhone|iPad/.test(self.navigator?.userAgent || '')
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     for (const client of windows) {
-      if ('focus' in client) {
+      if ('focus' in client && (!ios || client.focused)) {
         client.postMessage({ type: 'jaz:open', path })
-        await client.focus()
+        if (!client.focused) await client.focus()
         return
       }
     }

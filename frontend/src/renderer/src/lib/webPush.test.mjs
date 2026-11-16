@@ -123,14 +123,42 @@ test('notification click sends a bot target and focuses the existing client', as
   expect(focused).toBe(1)
 })
 
-test('iOS notification click opens a fresh client for the bot target', async () => {
+test('iOS notification click reuses the focused PWA client', async () => {
+  const listeners = {}
+  const messages = []
+  const client = {
+    focused: true,
+    postMessage: (message) => messages.push(message),
+    focus: async () => { throw new Error('focused client must not be focused again') },
+  }
+  const self = {
+    navigator: { userAgent: 'iPhone' },
+    clients: {
+      matchAll: async () => [client],
+      openWindow: async () => { throw new Error('must not reload the active PWA') },
+    },
+    location: { origin: 'https://jaz.example' },
+    addEventListener: (type, handler) => { listeners[type] = handler },
+  }
+  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
+  const waiting = []
+  const notification = { data: { session: 'bot one', kind: 'bot' }, close: () => {} }
+  listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  expect(messages).toEqual([{ type: 'jaz:open', path: '/bots/bot%20one' }])
+})
+
+test('iOS notification click opens a fresh client instead of reusing an inert one', async () => {
   const listeners = {}
   const opened = []
   const self = {
     navigator: { userAgent: 'iPhone' },
-    registration: { showNotification: async () => {} },
     clients: {
-      matchAll: async () => { throw new Error('must not reuse the inert client') },
+      matchAll: async () => [{
+        focused: false,
+        postMessage: () => { throw new Error('must not message an inert client') },
+        focus: async () => { throw new Error('must not focus an inert client') },
+      }],
       openWindow: async (url) => { opened.push(url) },
     },
     location: { origin: 'https://jaz.example' },
