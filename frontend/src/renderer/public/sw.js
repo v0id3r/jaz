@@ -6,6 +6,17 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim())
 })
 
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url)
+  if (event.request.mode !== 'navigate' || url.searchParams.get('from') !== 'push') return
+  event.respondWith((async () => {
+    const [client] = await self.clients.matchAll({ type: 'window' })
+    if (!client) return fetch(event.request)
+    client.postMessage({ type: 'jaz:open', path: url.pathname })
+    return new Response(null, { status: 204 })
+  })())
+})
+
 self.addEventListener('push', (event) => {
   let data = {}
   try {

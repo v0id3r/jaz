@@ -74,7 +74,7 @@ func TestWebPushDeliveryUsesPairedDeviceAndDedupes(t *testing.T) {
 	if len(web.payloads) != 1 || web.payloads[0]["session_id"] != session.ID {
 		t.Fatalf("web payloads = %#v", web.payloads)
 	}
-	if web.payloads[0]["web_push"] != float64(8030) || web.payloads[0]["notification"].(map[string]any)["navigate"] != "https://jaz.example/sessions/"+session.ID {
+	if web.payloads[0]["web_push"] != float64(8030) || web.payloads[0]["notification"].(map[string]any)["navigate"] != "https://jaz.example/sessions/"+session.ID+"?from=push" {
 		t.Fatalf("declarative navigation = %#v", web.payloads[0])
 	}
 	var saved deviceRegistration

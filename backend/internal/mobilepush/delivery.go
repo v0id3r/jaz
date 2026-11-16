@@ -331,7 +331,7 @@ func (s *Service) sendWebPush(ctx context.Context, deviceID string, subscription
 		"notification": map[string]any{
 			"title":    title,
 			"body":     alert.Body,
-			"navigate": strings.TrimRight(s.webPush.PublicURL(), "/") + path,
+			"navigate": strings.TrimRight(s.webPush.PublicURL(), "/") + path + "?from=push",
 		},
 		"title":      title,
 		"body":       alert.Body,

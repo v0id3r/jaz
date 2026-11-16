@@ -144,6 +144,31 @@ test('iOS notification click opens a fresh client for the bot target', async () 
   expect(opened).toEqual(['https://jaz.example/bots/bot%20one'])
 })
 
+test('push navigation switches the live client in place and loads normally without one', async () => {
+  const listeners = {}
+  const messages = []
+  let clients = [{ postMessage: (message) => messages.push(message) }]
+  const self = {
+    clients: { matchAll: async () => clients },
+    addEventListener: (type, handler) => { listeners[type] = handler },
+  }
+  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
+  const navigate = async (url, mode = 'navigate') => {
+    let response
+    listeners.fetch({ request: { url, mode }, respondWith: (value) => { response = value } })
+    return response && await response
+  }
+  expect(await navigate('https://jaz.example/sessions/abc')).toBeUndefined()
+  expect(await navigate('https://jaz.example/sessions/abc?from=push', 'cors')).toBeUndefined()
+  expect((await navigate('https://jaz.example/sessions/abc?from=push')).status).toBe(204)
+  expect(messages).toEqual([{ type: 'jaz:open', path: '/sessions/abc' }])
+  clients = []
+  replace('fetch', async (request) => new Response('shell', { status: 200, headers: { 'x-url': request.url } }))
+  const cold = await navigate('https://jaz.example/bots/b?from=push')
+  expect([cold.status, cold.headers.get('x-url')]).toEqual([200, 'https://jaz.example/bots/b?from=push'])
+  expect(messages).toHaveLength(1)
+})
+
 function fixture({ publicKey = Buffer.alloc(65, 1).toString('base64url'), existing = false, putStatus = 204 } = {}) {
   const calls = []
   const state = {
