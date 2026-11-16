@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate } from '@tanstack/react-router'
-import { Folder, SquarePen } from 'lucide-react'
+import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
+import { ChevronDown, Folder, SquarePen } from 'lucide-react'
 import { motion, Reorder, type Transition, useDragControls } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatedList, AnimatedListItem } from '@/components/ui/AnimatedList'
@@ -18,6 +18,7 @@ import { modalDialogOpen } from '@/lib/dom/modal'
 import { useMetaHeld } from '@/lib/hooks/useMetaHeld'
 import { useWindowEvent } from '@/lib/hooks/useWindowEvent'
 import { keys } from '@/lib/query/keys'
+import { readSessionViewHistory, recordSessionView } from '@/lib/sessionViewHistory'
 import { SessionRow } from './SessionRow'
 import {
   SidebarOrganizationMenu,
@@ -30,7 +31,9 @@ import {
   sessionDisplayBlocks,
   sessionPage,
   sidebarSessionSections,
+  sortSessionBlocksByActivity,
   SESSION_PAGE_SIZE,
+  UNGROUPED_BLOCK_KEY,
   type SessionBlockKey,
   type SessionDisplayBlock,
 } from './sidebarSessionModel'
@@ -140,6 +143,7 @@ function ProjectGroup({
   onToggle,
   onShowMore,
   onReorderEnd,
+  reorderEnabled,
   shortcutByID,
   shortcutMode,
 }: {
@@ -147,6 +151,7 @@ function ProjectGroup({
   onToggle: () => void
   onShowMore: () => void
   onReorderEnd: () => void
+  reorderEnabled: boolean
   shortcutByID: Map<string, number>
   shortcutMode: boolean
 }) {
@@ -165,11 +170,11 @@ function ProjectGroup({
       <div className="group/project flex h-[30px] items-center justify-between rounded-lg pr-1 transition-colors duration-150 hover:bg-list-hover max-sm:h-11">
         <motion.button
           type="button"
-          onPointerDown={(event) => dragControls.start(event)}
+          onPointerDown={reorderEnabled ? (event) => dragControls.start(event) : undefined}
           onTap={onToggle}
           aria-expanded={!collapsed}
           aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${group.label}`}
-          className="flex h-full min-w-0 flex-1 cursor-grab touch-none items-center gap-2 rounded-lg px-2.5 text-left outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-primary/40"
+          className={`flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${reorderEnabled ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
         >
           <span className="grid size-[18px] shrink-0 place-items-center">
             <Folder size={15} className="text-ink-2" />
@@ -196,17 +201,22 @@ function ProjectGroup({
           </button>
         ) : null}
       </Collapse>
+      {collapsed ? (
+        <SessionRows items={block.focusItems} shortcutByID={shortcutByID} shortcutMode={shortcutMode} />
+      ) : null}
     </Reorder.Item>
   )
 }
 
 function UngroupedSessions({
   block,
+  onToggle,
   onShowMore,
   shortcutByID,
   shortcutMode,
 }: {
   block: Extract<SessionDisplayBlock, { kind: 'ungrouped' }>
+  onToggle: () => void
   onShowMore: () => void
   shortcutByID: Map<string, number>
   shortcutMode: boolean
@@ -220,18 +230,31 @@ function UngroupedSessions({
       dragListener={false}
       className="not-first:mt-3"
     >
-      <p
-        className={`flex h-[30px] items-center px-2.5 max-sm:h-11 max-sm:px-3 ${SECTION_LABEL_CLASS}`}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!block.collapsed}
+        className={`flex h-[30px] w-full items-center gap-1.5 rounded-lg px-2.5 text-left transition-colors duration-150 hover:bg-list-hover max-sm:h-11 max-sm:px-3 ${SECTION_LABEL_CLASS}`}
       >
-        Recents
-      </p>
-      <RecentSessionList
-        items={block.items}
-        total={block.total}
-        onShowMore={onShowMore}
-        shortcutByID={shortcutByID}
-        shortcutMode={shortcutMode}
-      />
+        <span>Recents</span>
+        <ChevronDown
+          size={13}
+          className={`shrink-0 transition-transform duration-150 ${block.collapsed ? '-rotate-90' : ''}`}
+          aria-hidden
+        />
+      </button>
+      <Collapse open={!block.collapsed}>
+        <RecentSessionList
+          items={block.items}
+          total={block.total}
+          onShowMore={onShowMore}
+          shortcutByID={shortcutByID}
+          shortcutMode={shortcutMode}
+        />
+      </Collapse>
+      {block.collapsed ? (
+        <SessionRows items={block.focusItems} shortcutByID={shortcutByID} shortcutMode={shortcutMode} reserveIconSpace={false} />
+      ) : null}
     </Reorder.Item>
   )
 }
@@ -243,6 +266,7 @@ function ProjectSessionList({
   onToggle,
   onExpand,
   onExpandUngrouped,
+  reorderEnabled,
   shortcutByID,
   shortcutMode,
 }: {
@@ -252,6 +276,7 @@ function ProjectSessionList({
   onToggle: (key: string) => void
   onExpand: (key: string) => void
   onExpandUngrouped: () => void
+  reorderEnabled: boolean
   shortcutByID: Map<string, number>
   shortcutMode: boolean
 }) {
@@ -272,6 +297,7 @@ function ProjectSessionList({
             onToggle={() => onToggle(block.group.key)}
             onShowMore={() => onExpand(block.group.key)}
             onReorderEnd={onReorderEnd}
+            reorderEnabled={reorderEnabled}
             shortcutByID={shortcutByID}
             shortcutMode={shortcutMode}
           />
@@ -279,6 +305,7 @@ function ProjectSessionList({
           <UngroupedSessions
             key={block.key}
             block={block}
+            onToggle={() => onToggle(UNGROUPED_BLOCK_KEY)}
             onShowMore={onExpandUngrouped}
             shortcutByID={shortcutByID}
             shortcutMode={shortcutMode}
@@ -324,6 +351,13 @@ export function SidebarSessions({ open }: { open: boolean }) {
   const queryClient = useQueryClient()
   const sessions = useQuery(sidebarSessionsQuery)
   const projects = useQuery(projectsQuery)
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const routeSessionID = pathname.match(/^\/sessions\/([^/]+)\/?$/)?.[1]
+  const currentSessionID = sessions.data
+    ? sessions.data.find((item) => item.session.id === routeSessionID || item.session.slug === routeSessionID)?.session.id ?? routeSessionID
+    : undefined
+  const [views, setViews] = useState(readSessionViewHistory)
+  const [focusNow, setFocusNow] = useState(Date.now)
   const [organization, setOrganization] = useSidebarOrganization()
   const [visibleRecentCount, setVisibleRecentCount] = useState(SESSION_PAGE_SIZE)
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
@@ -331,24 +365,40 @@ export function SidebarSessions({ open }: { open: boolean }) {
   const [collapsedProjects, setCollapsedProjects] = useState(storedCollapsedProjects)
   const [dragOrder, setDragOrder] = useState<SessionBlockKey[] | null>(null)
   useEffect(() => storeCollapsedProjects(collapsedProjects), [collapsedProjects])
+  useEffect(() => {
+    if (!currentSessionID) return
+    const now = Date.now()
+    setViews(recordSessionView(currentSessionID, now))
+    setFocusNow(now)
+  }, [currentSessionID])
+  useEffect(() => {
+    const timer = window.setInterval(() => setFocusNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
+  const focus = useMemo(() => ({ now: focusNow, currentSessionID, views }), [currentSessionID, focusNow, views])
   const sections = useMemo(
-    () => sidebarSessionSections(sessions.data ?? [], projects.data ?? []),
-    [projects.data, sessions.data],
+    () => sidebarSessionSections(sessions.data ?? [], projects.data ?? [], focus),
+    [focus, projects.data, sessions.data],
   )
   const groups = useMemo(
     () => applySessionDragOrder(sections.groups, dragOrder),
     [dragOrder, sections.groups],
   )
-  const blocks = useMemo(
+  const manualBlocks = useMemo(
     () => sessionDisplayBlocks(
       groups,
       sections.ungrouped,
       expandedProjects,
       showAllUngrouped,
       collapsedProjects,
+      focus,
     ),
-    [collapsedProjects, expandedProjects, groups, sections.ungrouped, showAllUngrouped],
+    [collapsedProjects, expandedProjects, focus, groups, sections.ungrouped, showAllUngrouped],
+  )
+  const blocks = useMemo(
+    () => organization === 'activity' ? sortSessionBlocksByActivity(manualBlocks, focus) : manualBlocks,
+    [focus, manualBlocks, organization],
   )
   const recentPage = useMemo(
     () => sessionPage(sections.recentItems, visibleRecentCount),
@@ -358,8 +408,8 @@ export function SidebarSessions({ open }: { open: boolean }) {
   const shortcutItems = useMemo(
     () => [
       ...sections.pinnedItems,
-      ...(organization === 'project'
-        ? blocks.flatMap((block) => block.kind === 'project' && block.collapsed ? [] : block.items)
+      ...(organization !== 'recent'
+        ? blocks.flatMap((block) => block.collapsed ? block.focusItems : block.items)
         : recentPage.items),
     ].slice(0, 9),
     [blocks, organization, recentPage.items, sections.pinnedItems],
@@ -399,7 +449,7 @@ export function SidebarSessions({ open }: { open: boolean }) {
     reorder.mutate(next.map((project) => project.path))
   }
 
-  if (sessions.isPending || organization === 'project' && projects.isPending) {
+  if (sessions.isPending || organization !== 'recent' && projects.isPending) {
     return <SkeletonRows count={4} />
   }
   if (sessions.isError && !sessions.data) {
@@ -415,8 +465,15 @@ export function SidebarSessions({ open }: { open: boolean }) {
           shortcutMode={shortcutMode}
         />
         <div>
-          <SidebarOrganizationMenu organization={organization} onChange={changeOrganization} />
-          {organization === 'project' ? (
+          <SidebarOrganizationMenu
+            organization={organization}
+            onChange={changeOrganization}
+            onCollapseAll={() => setCollapsedProjects(new Set(blocks.map((block) =>
+              block.kind === 'project' ? block.group.key : UNGROUPED_BLOCK_KEY,
+            )))}
+            onExpandAll={() => setCollapsedProjects(new Set())}
+          />
+          {organization !== 'recent' ? (
             <ProjectSessionList
               blocks={blocks}
               onReorder={setDragOrder}
@@ -424,6 +481,7 @@ export function SidebarSessions({ open }: { open: boolean }) {
               onToggle={toggleProject}
               onExpand={expandProject}
               onExpandUngrouped={() => setShowAllUngrouped(true)}
+              reorderEnabled={organization === 'project'}
               shortcutByID={shortcutByID}
               shortcutMode={shortcutMode}
             />

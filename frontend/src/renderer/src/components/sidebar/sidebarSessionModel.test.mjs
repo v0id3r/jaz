@@ -6,17 +6,34 @@ import {
   sessionDisplayBlocks,
   sessionPage,
   sidebarSessionSections,
+  sortSessionBlocksByActivity,
 } from './sidebarSessionModel'
+import { sessionFocusScore } from '@/lib/sessionFocus'
 
-function item(id, { path = '', pinned = false, at = id } = {}) {
+const NOW = Date.parse('2026-11-16T12:00:00Z')
+const HOUR = 60 * 60 * 1000
+
+function item(id, {
+  path = '',
+  pinned = false,
+  at = id,
+  status = 'idle',
+  unread = false,
+  child = false,
+  parentId,
+} = {}) {
+  const timestamp = typeof at === 'number' ? new Date(at).toISOString() : at
   return {
-    child: false,
+    child,
     session: {
       id,
       pinned,
+      status,
+      unread,
+      parent_id: parentId,
       runtime_ref: path ? { project_path: path } : undefined,
-      updated_at: at,
-      last_attention_at: at,
+      updated_at: timestamp,
+      last_attention_at: timestamp,
     },
   }
 }
@@ -164,4 +181,96 @@ test('shows project groups only when they contain visible unpinned sessions', ()
   const removed = sidebarSessionSections(sessions, projects.filter((project) => project.path !== '/active'))
   expect(removed.groups).toEqual([])
   expect(removed.ungrouped.map((entry) => entry.session.id)).toEqual(['thread'])
+})
+
+
+describe('adaptive session focus', () => {
+  test('keeps attention states and the open session above decaying recency', () => {
+    const sessions = [
+      item('recent', { at: NOW }),
+      item('current', { at: NOW - 24 * HOUR }),
+      item('running', { at: NOW - 10 * 24 * HOUR, status: 'running' }),
+      item('unread', { at: NOW - 20 * 24 * HOUR, unread: true }),
+      item('error', { at: NOW - 30 * 24 * HOUR, status: 'error' }),
+    ]
+
+    const sections = sidebarSessionSections(sessions, [], { now: NOW, currentSessionID: 'current' })
+
+    expect(sections.recentItems.map((entry) => entry.session.id)).toEqual([
+      'error', 'unread', 'running', 'current', 'recent',
+    ])
+  })
+
+  test('decays activity by half in a day and rewards repeated views with a bounded score', () => {
+    const fresh = item('fresh', { at: NOW })
+    const dayOld = item('day-old', { at: NOW - 24 * HOUR })
+    const viewed = item('viewed', { at: NOW - 10 * 24 * HOUR })
+
+    expect(sessionFocusScore(dayOld, { now: NOW })).toBeCloseTo(sessionFocusScore(fresh, { now: NOW }) / 2)
+    const once = sessionFocusScore(viewed, { now: NOW, views: { viewed: { at: NOW, count: 1 } } })
+    const repeated = sessionFocusScore(viewed, { now: NOW, views: { viewed: { at: NOW, count: 8 } } })
+    expect(repeated).toBeGreaterThan(once)
+    expect(repeated).toBeLessThanOrEqual(1)
+  })
+
+  test('keeps active, open and three recent units visible in a collapsed project', () => {
+    const path = '/project'
+    const sessions = [
+      item('stale', { path, at: NOW - 30 * 24 * HOUR }),
+      item('recent-3', { path, at: NOW - 3 * HOUR }),
+      item('recent-1', { path, at: NOW - HOUR }),
+      item('error', { path, at: NOW - 30 * 24 * HOUR, status: 'error' }),
+      item('recent-2', { path, at: NOW - 2 * HOUR }),
+      item('current', { path, at: NOW - 10 * 24 * HOUR }),
+      item('recent-0', { path, at: NOW }),
+    ]
+    const focus = { now: NOW, currentSessionID: 'current' }
+    const sections = sidebarSessionSections(sessions, [{ path, name: 'Project' }], focus)
+
+    const [block] = sessionDisplayBlocks(
+      sections.groups, [], new Set(), false, new Set([path]), focus,
+    )
+
+    expect(block.focusItems.map((entry) => entry.session.id)).toEqual([
+      'error', 'current', 'recent-0', 'recent-1', 'recent-2',
+    ])
+  })
+
+  test('ranks projects by their strongest session in activity mode', () => {
+    const projects = [
+      { path: '/recent', name: 'Recent' },
+      { path: '/error', name: 'Error' },
+      { path: '/running', name: 'Running' },
+      { path: '/stale', name: 'Stale' },
+    ]
+    const sections = sidebarSessionSections([
+      item('recent', { path: '/recent', at: NOW }),
+      item('error', { path: '/error', at: NOW - 30 * 24 * HOUR, status: 'error' }),
+      item('running', { path: '/running', at: NOW - 20 * 24 * HOUR, status: 'running' }),
+      item('stale', { path: '/stale', at: NOW - 30 * 24 * HOUR }),
+    ], projects, { now: NOW })
+    const blocks = sessionDisplayBlocks(sections.groups, [], new Set(), false, new Set())
+
+    expect(sortSessionBlocksByActivity(blocks, { now: NOW }).map((block) => block.key)).toEqual([
+      'project:/error', 'project:/running', 'project:/recent', 'project:/stale',
+    ])
+  })
+
+  test('keeps a running child attached to its parent through sorting and collapse', () => {
+    const path = '/project'
+    const sessions = [
+      item('recent', { path, at: NOW }),
+      item('parent', { path, at: NOW - 30 * 24 * HOUR }),
+      item('child', { path, at: NOW - 30 * 24 * HOUR, status: 'running', child: true, parentId: 'parent' }),
+    ]
+    const focus = { now: NOW }
+    const sections = sidebarSessionSections(sessions, [{ path, name: 'Project' }], focus)
+    const [block] = sessionDisplayBlocks(
+      sections.groups, [], new Set(), false, new Set([path]), focus,
+    )
+
+    expect(block.group.items.map((entry) => entry.session.id)).toEqual(['parent', 'child', 'recent'])
+    expect(block.focusItems.map((entry) => entry.session.id)).toEqual(['parent', 'child', 'recent'])
+    expect(block.focusItems[1].child).toBe(true)
+  })
 })
