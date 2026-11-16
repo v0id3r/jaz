@@ -23,6 +23,7 @@ export function App({ router }: { router: AnyRouter }) {
       const path = event.data?.path
       if (event.data?.type !== 'jaz:open' || typeof path !== 'string' || !/^\/(?:sessions|bots)\/[^/]+$/.test(path)) return
       router.history.push(path)
+      event.ports[0]?.postMessage(null)
     }
     navigator.serviceWorker.addEventListener('message', open)
     return () => navigator.serviceWorker.removeEventListener('message', open)

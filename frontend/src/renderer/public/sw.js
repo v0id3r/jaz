@@ -19,6 +19,19 @@ self.addEventListener('push', (event) => {
   }))
 })
 
+async function openInClient(client, path, waitForAck) {
+  if (!waitForAck) {
+    client.postMessage({ type: 'jaz:open', path })
+    return true
+  }
+  const channel = new MessageChannel()
+  const acknowledged = new Promise((resolve) => {
+    channel.port1.onmessage = () => resolve(true)
+  })
+  client.postMessage({ type: 'jaz:open', path }, [channel.port2])
+  return Promise.race([acknowledged, new Promise((resolve) => setTimeout(() => resolve(false), 250))])
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const { session, kind = 'chat' } = event.notification.data
@@ -28,9 +41,8 @@ self.addEventListener('notificationclick', (event) => {
     const ios = /iPhone|iPad/.test(self.navigator?.userAgent || '')
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     for (const client of windows) {
-      if ('focus' in client && (!ios || client.focused)) {
-        client.postMessage({ type: 'jaz:open', path })
-        if (!client.focused) await client.focus()
+      if ('focus' in client && await openInClient(client, path, ios)) {
+        if (!client.focused) await client.focus().catch(() => {})
         return
       }
     }

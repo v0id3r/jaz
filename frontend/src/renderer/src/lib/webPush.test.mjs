@@ -123,19 +123,31 @@ test('notification click sends a bot target and focuses the existing client', as
   expect(focused).toBe(1)
 })
 
-test('iOS notification click reuses the focused PWA client', async () => {
+test('iOS notification click reuses a responsive PWA client after click clears focus', async () => {
   const listeners = {}
   const messages = []
+  let channel
+  let focused = 0
+  replace('MessageChannel', class {
+    constructor() {
+      channel = this
+      this.port1 = {}
+      this.port2 = {}
+    }
+  })
   const client = {
-    focused: true,
-    postMessage: (message) => messages.push(message),
-    focus: async () => { throw new Error('focused client must not be focused again') },
+    focused: false,
+    postMessage: (message) => {
+      messages.push(message)
+      queueMicrotask(() => channel.port1.onmessage())
+    },
+    focus: async () => { focused += 1 },
   }
   const self = {
     navigator: { userAgent: 'iPhone' },
     clients: {
       matchAll: async () => [client],
-      openWindow: async () => { throw new Error('must not reload the active PWA') },
+      openWindow: async () => { throw new Error('must not reload the responsive PWA') },
     },
     location: { origin: 'https://jaz.example' },
     addEventListener: (type, handler) => { listeners[type] = handler },
@@ -146,17 +158,24 @@ test('iOS notification click reuses the focused PWA client', async () => {
   listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
   await Promise.all(waiting)
   expect(messages).toEqual([{ type: 'jaz:open', path: '/bots/bot%20one' }])
+  expect(focused).toBe(1)
 })
 
 test('iOS notification click opens a fresh client instead of reusing an inert one', async () => {
   const listeners = {}
   const opened = []
+  replace('MessageChannel', class {
+    constructor() {
+      this.port1 = {}
+      this.port2 = {}
+    }
+  })
   const self = {
     navigator: { userAgent: 'iPhone' },
     clients: {
       matchAll: async () => [{
         focused: false,
-        postMessage: () => { throw new Error('must not message an inert client') },
+        postMessage: () => {},
         focus: async () => { throw new Error('must not focus an inert client') },
       }],
       openWindow: async (url) => { opened.push(url) },
