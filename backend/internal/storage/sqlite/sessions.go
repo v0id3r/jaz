@@ -234,6 +234,22 @@ func (s *Store) UpdateSessionStatus(id, status, errorMessage string, attentionAt
 	return nil
 }
 
+func (s *Store) DismissSessionError(id string) (bool, error) {
+	s.writeMu.Lock()
+	updated, err := threaddb.New(s.db).DismissSessionError(context.Background(), threaddb.DismissSessionErrorParams{
+		UpdatedAtMs: timeToMs(time.Now().UTC()),
+		ID:          id,
+	})
+	s.writeMu.Unlock()
+	if err != nil || updated == 0 {
+		return false, err
+	}
+	if current, loadErr := s.LoadSession(id); loadErr == nil {
+		s.mirrorSession(current)
+	}
+	return true, nil
+}
+
 func (s *Store) CompleteSession(id string, completedAt time.Time) error {
 	s.writeMu.Lock()
 	err := threaddb.New(s.db).CompleteSession(context.Background(), threaddb.CompleteSessionParams{

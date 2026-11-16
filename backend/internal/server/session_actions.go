@@ -8,6 +8,7 @@ func knownSessionAction(action string) bool {
 		"unarchive",
 		"pin",
 		"unpin",
+		"dismiss-error",
 		"seen",
 		"rename",
 		"interactive-response",
