@@ -95,46 +95,14 @@
       }
     },
     "claude": {
-      "version": "0.93.0-jaz.4",
+      "version": "0.107.2-jaz.1",
       "assets": {
-        "darwin-arm64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.93.0-jaz.4/claude-agent-acp-0.93.0-jaz.4-darwin-arm64.tar.gz",
-          "sha256": "d8dd536ba08e1be0dd7eb584e9ac033ce6ef3230d516ec62e12f8c8bbfb4e660",
-          "binary": "claude-agent-acp",
-          "env": {
-            "CLAUDE_CODE_EXECUTABLE": "claude"
-          }
-        },
-        "darwin-x64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.93.0-jaz.4/claude-agent-acp-0.93.0-jaz.4-darwin-x64.tar.gz",
-          "sha256": "817b70c4033bc454b627a08e1a6f4463bfa4efa1b856cb62d38f7d75221aab03",
-          "binary": "claude-agent-acp",
-          "env": {
-            "CLAUDE_CODE_EXECUTABLE": "claude"
-          }
-        },
-        "linux-arm64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.93.0-jaz.4/claude-agent-acp-0.93.0-jaz.4-linux-arm64.tar.gz",
-          "sha256": "abc197e444311e0a61cf70b60890f73ec895c878846c22420d65d7918b2d7c93",
-          "binary": "claude-agent-acp",
-          "env": {
-            "CLAUDE_CODE_EXECUTABLE": "claude"
-          }
-        },
         "linux-x64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.93.0-jaz.4/claude-agent-acp-0.93.0-jaz.4-linux-x64.tar.gz",
-          "sha256": "e60610c49a40ed5992c0c30b42bea83b201b5c5e20211820bb28f119a6c83051",
+          "url": "https://github.com/v0id3r/claude-agent-acp/releases/download/v0.107.2-jaz.1/claude-agent-acp-0.107.2-jaz.1-linux-x64.tar.gz",
+          "sha256": "ea25be9752eb52a6197444ebc4876ae4be861d52a5605fe71c49b264bb12fe86",
           "binary": "claude-agent-acp",
           "env": {
             "CLAUDE_CODE_EXECUTABLE": "claude"
-          }
-        },
-        "win32-x64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.93.0-jaz.4/claude-agent-acp-0.93.0-jaz.4-win32-x64.tar.gz",
-          "sha256": "33066e2580a95c176447c83484d65f94b9f2d1068a9d05d62c127d1a791005ab",
-          "binary": "claude-agent-acp.exe",
-          "env": {
-            "CLAUDE_CODE_EXECUTABLE": "claude.exe"
           }
         }
       }
