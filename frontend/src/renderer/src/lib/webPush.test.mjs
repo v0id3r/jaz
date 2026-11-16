@@ -123,61 +123,14 @@ test('notification click sends a bot target and focuses the existing client', as
   expect(focused).toBe(1)
 })
 
-test('iOS notification click reuses a responsive PWA client after click clears focus', async () => {
-  const listeners = {}
-  const messages = []
-  let channel
-  let focused = 0
-  replace('MessageChannel', class {
-    constructor() {
-      channel = this
-      this.port1 = {}
-      this.port2 = {}
-    }
-  })
-  const client = {
-    focused: false,
-    postMessage: (message) => {
-      messages.push(message)
-      queueMicrotask(() => channel.port1.onmessage())
-    },
-    focus: async () => { focused += 1 },
-  }
-  const self = {
-    navigator: { userAgent: 'iPhone' },
-    clients: {
-      matchAll: async () => [client],
-      openWindow: async () => { throw new Error('must not reload the responsive PWA') },
-    },
-    location: { origin: 'https://jaz.example' },
-    addEventListener: (type, handler) => { listeners[type] = handler },
-  }
-  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
-  const waiting = []
-  const notification = { data: { session: 'bot one', kind: 'bot' }, close: () => {} }
-  listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
-  await Promise.all(waiting)
-  expect(messages).toEqual([{ type: 'jaz:open', path: '/bots/bot%20one' }])
-  expect(focused).toBe(1)
-})
-
-test('iOS notification click opens a fresh client instead of reusing an inert one', async () => {
+test('iOS notification click opens a fresh client for the bot target', async () => {
   const listeners = {}
   const opened = []
-  replace('MessageChannel', class {
-    constructor() {
-      this.port1 = {}
-      this.port2 = {}
-    }
-  })
   const self = {
     navigator: { userAgent: 'iPhone' },
+    registration: { showNotification: async () => {} },
     clients: {
-      matchAll: async () => [{
-        focused: false,
-        postMessage: () => {},
-        focus: async () => { throw new Error('must not focus an inert client') },
-      }],
+      matchAll: async () => { throw new Error('must not reuse the inert client') },
       openWindow: async (url) => { opened.push(url) },
     },
     location: { origin: 'https://jaz.example' },

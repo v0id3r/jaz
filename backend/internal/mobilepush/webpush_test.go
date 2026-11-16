@@ -74,8 +74,8 @@ func TestWebPushDeliveryUsesPairedDeviceAndDedupes(t *testing.T) {
 	if len(web.payloads) != 1 || web.payloads[0]["session_id"] != session.ID {
 		t.Fatalf("web payloads = %#v", web.payloads)
 	}
-	if _, ok := web.payloads[0]["web_push"]; ok {
-		t.Fatalf("unexpected declarative payload = %#v", web.payloads[0])
+	if web.payloads[0]["web_push"] != float64(8030) || web.payloads[0]["notification"].(map[string]any)["navigate"] != "https://jaz.example/sessions/"+session.ID {
+		t.Fatalf("declarative navigation = %#v", web.payloads[0])
 	}
 	var saved deviceRegistration
 	setting, err := store.LoadSetting(namespace, "phone")
@@ -178,6 +178,7 @@ type capturingWebSender struct {
 
 func (s *capturingWebSender) Enabled() bool     { return true }
 func (s *capturingWebSender) PublicKey() string { return "public" }
+func (s *capturingWebSender) PublicURL() string { return "https://jaz.example" }
 func (s *capturingWebSender) Send(_ context.Context, _ WebPushSubscription, payload any) error {
 	data, _ := json.Marshal(payload)
 	var decoded map[string]any
