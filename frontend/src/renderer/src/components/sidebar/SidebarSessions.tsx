@@ -182,6 +182,11 @@ function ProjectGroup({
           <span className={`min-w-0 truncate ${GROUP_LABEL_CLASS}`} title={group.label}>
             {group.label}
           </span>
+          <ChevronDown
+            size={13}
+            className={`shrink-0 transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`}
+            aria-hidden
+          />
         </motion.button>
         <Link
           to="/new"
