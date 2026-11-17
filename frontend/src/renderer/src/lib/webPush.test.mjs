@@ -48,9 +48,17 @@ test('PWA subscribes with the server VAPID key and registers the paired device',
   const module = load()
   await module.subscribeWebPush()
   expect(f.calls.map((call) => call.init?.method || 'GET')).toEqual(['GET', 'PUT'])
-  expect(JSON.parse(f.calls[1].init.body)).toEqual({ endpoint: 'https://push.example/device', keys: { p256dh: 'key', auth: 'auth' } })
+  expect(JSON.parse(f.calls[1].init.body)).toEqual({ endpoint: 'https://push.example/device', keys: { p256dh: 'key', auth: 'auth' }, declarative: false })
   expect(f.subscriptionOptions.applicationServerKey.byteLength).toBe(65)
   expect(f.unsubscribed).toBe(0)
+})
+
+test('iPhone and iPad register for declarative navigation', async () => {
+  for (const device of [{ platform: 'iPhone' }, { platform: 'MacIntel', maxTouchPoints: 5 }]) {
+    const f = fixture({ device })
+    await load().subscribeWebPush()
+    expect(JSON.parse(f.calls[1].init.body).declarative).toBe(true)
+  }
 })
 
 test('failed server registration does not leave an orphaned local subscription', async () => {
@@ -169,7 +177,7 @@ test('push navigation switches the live client in place and loads normally witho
   expect(messages).toHaveLength(1)
 })
 
-function fixture({ publicKey = Buffer.alloc(65, 1).toString('base64url'), existing = false, putStatus = 204 } = {}) {
+function fixture({ publicKey = Buffer.alloc(65, 1).toString('base64url'), existing = false, putStatus = 204, device = { platform: 'MacIntel' } } = {}) {
   const calls = []
   const state = {
     calls,
@@ -191,7 +199,7 @@ function fixture({ publicKey = Buffer.alloc(65, 1).toString('base64url'), existi
   }
   replace('window', { matchMedia: () => ({ matches: true }) })
   replace('navigator', {
-    platform: 'MacIntel',
+    ...device,
     serviceWorker: {
       register: async () => registration,
       getRegistration: async () => registration,

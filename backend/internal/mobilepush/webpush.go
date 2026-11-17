@@ -26,6 +26,7 @@ type WebPushSubscription struct {
 		P256DH string `json:"p256dh"`
 		Auth   string `json:"auth"`
 	} `json:"keys"`
+	Declarative bool `json:"declarative,omitempty"`
 }
 
 type WebPushSender interface {

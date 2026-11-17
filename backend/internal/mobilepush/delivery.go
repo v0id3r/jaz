@@ -325,18 +325,19 @@ func (s *Service) sendWebPush(ctx context.Context, deviceID string, subscription
 	if alert.Kind == "chat" {
 		kind = "sessions"
 	}
-	path := "/" + kind + "/" + alert.SessionID
 	payload := map[string]any{
-		"web_push": 8030,
-		"notification": map[string]any{
-			"title":    title,
-			"body":     alert.Body,
-			"navigate": strings.TrimRight(s.webPush.PublicURL(), "/") + path + "?from=push",
-		},
 		"title":      title,
 		"body":       alert.Body,
 		"session_id": alert.SessionID,
 		"kind":       alert.Kind,
+	}
+	if subscription.Declarative {
+		payload["web_push"] = 8030
+		payload["notification"] = map[string]any{
+			"title":    title,
+			"body":     alert.Body,
+			"navigate": strings.TrimRight(s.webPush.PublicURL(), "/") + "/" + kind + "/" + alert.SessionID + "?from=push",
+		}
 	}
 	if alert.RequestID != "" {
 		payload["request_id"] = alert.RequestID

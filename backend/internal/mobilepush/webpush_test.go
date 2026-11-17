@@ -50,10 +50,20 @@ func TestWebPushSendsEncryptedPayloadAndDropsExpiredSubscription(t *testing.T) {
 }
 
 func TestWebPushDeliveryUsesPairedDeviceAndDedupes(t *testing.T) {
+	for _, declarative := range []bool{false, true} {
+		t.Run(map[bool]string{false: "classic", true: "declarative"}[declarative], func(t *testing.T) {
+			testWebPushDelivery(t, declarative)
+		})
+	}
+}
+
+func testWebPushDelivery(t *testing.T, declarative bool) {
 	service, store, _, session := pushFixture(t, "")
 	web := &capturingWebSender{}
 	service.webPush = web
-	if err := service.RegisterWebPush("phone", testWebPushSubscription(t, "https://push.example")); err != nil {
+	subscription := testWebPushSubscription(t, "https://push.example")
+	subscription.Declarative = declarative
+	if err := service.RegisterWebPush("phone", subscription); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpdateSessionStatus(session.ID, "running", "", time.Time{}); err != nil {
@@ -74,7 +84,11 @@ func TestWebPushDeliveryUsesPairedDeviceAndDedupes(t *testing.T) {
 	if len(web.payloads) != 1 || web.payloads[0]["session_id"] != session.ID {
 		t.Fatalf("web payloads = %#v", web.payloads)
 	}
-	if web.payloads[0]["web_push"] != float64(8030) || web.payloads[0]["notification"].(map[string]any)["navigate"] != "https://jaz.example/sessions/"+session.ID+"?from=push" {
+	if !declarative {
+		if _, ok := web.payloads[0]["notification"]; ok {
+			t.Fatalf("classic payload carries declarative navigation: %#v", web.payloads[0])
+		}
+	} else if web.payloads[0]["web_push"] != float64(8030) || web.payloads[0]["notification"].(map[string]any)["navigate"] != "https://jaz.example/sessions/"+session.ID+"?from=push" {
 		t.Fatalf("declarative navigation = %#v", web.payloads[0])
 	}
 	var saved deviceRegistration

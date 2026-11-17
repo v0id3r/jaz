@@ -2,8 +2,10 @@ import { del, get, put } from '@/lib/api/client'
 
 export type WebPushState = { available: boolean; subscribed: boolean }
 
+const ios = () => /iPhone|iPad/.test(navigator.platform) || navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
+
 export async function webPushState(): Promise<WebPushState> {
-  const installedIOS = !/iPhone|iPad/.test(navigator.platform) || window.matchMedia('(display-mode: standalone)').matches
+  const installedIOS = !ios() || window.matchMedia('(display-mode: standalone)').matches
   const available = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && installedIOS
   if (!available) return { available, subscribed: false }
   const registration = await navigator.serviceWorker.getRegistration('/sw.js')
@@ -27,7 +29,7 @@ export async function subscribeWebPush(): Promise<void> {
     applicationServerKey: decodeBase64URL(publicKey),
   })
   try {
-    await put<never>('/v1/mobile/web-push', subscription.toJSON())
+    await put<never>('/v1/mobile/web-push', { ...subscription.toJSON(), declarative: ios() })
   } catch (error) {
     await subscription.unsubscribe()
     throw error
