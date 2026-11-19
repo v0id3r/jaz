@@ -4,9 +4,9 @@ import { Composer } from '@/components/session/Composer'
 import { useLiveSessionSend } from '@/components/session/useLiveSessionSend'
 
 // The prompt Claude Code predicts comes next stands in for the placeholder of an
-// empty idle composer, in threads and bot chats alike. Tab writes it into the
-// draft; a draft hides it and emptying the draft shows it again; once a message
-// is sent it stays hidden while the turn runs.
+// empty idle composer, in threads and bot chats alike. Tab or the in-row button
+// writes it into the draft; a draft hides it and emptying the draft shows it
+// again; once a message is sent it stays hidden while the turn runs.
 export async function exerciseComposerSuggestion(): Promise<void> {
   const prediction = 'run the tests'
   const finishes: (() => void)[] = []
@@ -62,6 +62,16 @@ export async function exerciseComposerSuggestion(): Promise<void> {
       root.render(<QueryClientProvider client={client}><Thread chat={chat} suggestedPrompt={prediction} /></QueryClientProvider>)
       await until(() => field().placeholder === prediction)
       await window.smoke.capture(chat ? 'suggested-prompt-bot-chat' : 'suggested-prompt-thread')
+      element.querySelector<HTMLButtonElement>('button[aria-label="Use suggested prompt"]')!.click()
+      await until(() => field().value === prediction)
+      if (document.activeElement !== field() || field().selectionStart !== prediction.length) {
+        throw new Error(`The button in a ${layout} left the composer or the caret short of the accepted prompt`)
+      }
+      if (finishes.length !== 0) {
+        throw new Error(`The button in a ${layout} sent the suggestion instead of filling the draft`)
+      }
+      setDraft('')
+      await until(() => field().placeholder === prediction)
       field().focus()
       await window.smoke.key('Tab')
       await until(() => field().value === prediction)
