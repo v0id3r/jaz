@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Archive, CornerDownRight, Pencil, Pin } from 'lucide-react'
+import { Archive, CornerDownRight, Pencil, Pin, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { SessionHoverDetails } from '@/components/sidebar/SessionHoverDetails'
 import { ActiveRowHighlight } from '@/components/sidebar/SidebarScroll'
@@ -10,7 +10,8 @@ import { Input } from '@/components/ui/Input'
 import { KeyboardShortcut } from '@/components/ui/KeyboardShortcut'
 import { Modal } from '@/components/ui/Modal'
 import { ContextMenu, MenuRow } from '@/components/ui/Popover'
-import { setSessionArchived, setSessionPinned, setSessionTitle } from '@/lib/api/sessions'
+import { useToast } from '@/components/ui/toast'
+import { dismissSessionError, setSessionArchived, setSessionPinned, setSessionTitle } from '@/lib/api/sessions'
 import type { Session } from '@/lib/api/types'
 import { useContextMenuTrigger } from '@/lib/hooks/useContextMenuTrigger'
 import { invalidateSessionLists } from '@/lib/query/invalidate'
@@ -118,6 +119,7 @@ export function SessionRow({
               ) : null}
               {shortcutMode || inlineEditing ? null : (
                 <>
+                  {session.status === 'error' ? <DismissErrorButton session={session} /> : null}
                   <PinButton session={session} />
                   <ArchiveButton session={session} />
                 </>
@@ -274,6 +276,32 @@ function PinButton({ session }: { session: Session }) {
       className={`${pinned ? 'text-primary' : 'text-ink-3'} hidden size-5 shrink-0 cursor-pointer place-items-center rounded transition-colors duration-150 hover:bg-surface-2 hover:text-ink group-hover:grid max-sm:grid max-sm:size-8`}
     >
       <Pin size={13} className={pinned ? 'fill-current' : ''} />
+    </button>
+  )
+}
+
+function DismissErrorButton({ session }: { session: Session }) {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const dismiss = useMutation({
+    mutationFn: () => dismissSessionError(session.id),
+    onSettled: () => invalidateSessionLists(queryClient, { session: session.id }),
+    onError: () => toast('Could not dismiss the error', 'danger'),
+  })
+  return (
+    <button
+      type="button"
+      aria-label="Dismiss error"
+      title="Dismiss error"
+      disabled={dismiss.isPending}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        dismiss.mutate()
+      }}
+      className="hidden size-5 shrink-0 cursor-pointer place-items-center rounded text-danger transition-colors duration-150 hover:bg-surface-2 disabled:opacity-50 group-hover:grid max-sm:grid max-sm:size-8"
+    >
+      <X size={13} />
     </button>
   )
 }

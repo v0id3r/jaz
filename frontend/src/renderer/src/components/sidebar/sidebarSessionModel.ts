@@ -1,9 +1,16 @@
 import type { Project } from '@/lib/api/sessions'
 import type { Session } from '@/lib/api/types'
+import {
+  bestSessionItem,
+  compareSessionFocus,
+  sessionFocusItems,
+  sortSessionItems,
+  type SessionFocusOptions,
+} from '@/lib/sessionFocus'
 
 export const SESSION_PAGE_SIZE = 50
 const PROJECT_SESSION_LIMIT = 5
-const UNGROUPED_BLOCK_KEY = 'ungrouped'
+export const UNGROUPED_BLOCK_KEY = 'ungrouped'
 export type SessionBlockKey = `project:${string}` | typeof UNGROUPED_BLOCK_KEY
 
 export interface SessionListItem {
@@ -25,8 +32,8 @@ export type SessionSections = {
 }
 
 export type SessionDisplayBlock =
-  | { kind: 'project'; key: `project:${string}`; group: SessionProjectGroup; items: SessionListItem[]; collapsed: boolean }
-  | { kind: 'ungrouped'; key: typeof UNGROUPED_BLOCK_KEY; items: SessionListItem[]; total: number }
+  | { kind: 'project'; key: `project:${string}`; group: SessionProjectGroup; items: SessionListItem[]; focusItems: SessionListItem[]; collapsed: boolean }
+  | { kind: 'ungrouped'; key: typeof UNGROUPED_BLOCK_KEY; items: SessionListItem[]; focusItems: SessionListItem[]; total: number; collapsed: boolean }
 
 export function sessionProjectBlockKey(path: string): `project:${string}` {
   return `project:${path}`
@@ -151,11 +158,21 @@ function groupSessionsForDisplay(sessions: Session[]): SessionListItem[] {
   return ordered
 }
 
-export function sidebarSessionSections(sessions: Session[], projects: Project[]): SessionSections {
+export function sidebarSessionSections(
+  sessions: Session[],
+  projects: Project[],
+  focus: SessionFocusOptions = { now: Date.now() },
+): SessionSections {
   const items = groupSessionsForDisplay(sessions)
   const pinnedItems = withLocalChildState(items.filter((item) => item.session.pinned))
-  const recentItems = withLocalChildState(items.filter((item) => !item.session.pinned))
-  return { pinnedItems, recentItems, ...sessionsBySavedProject(recentItems, projects) }
+  const projectItems = withLocalChildState(items.filter((item) => !item.session.pinned))
+  const grouped = sessionsBySavedProject(projectItems, projects)
+  return {
+    pinnedItems,
+    recentItems: sortSessionItems(projectItems, focus),
+    groups: grouped.groups.map((group) => ({ ...group, items: sortSessionItems(group.items, focus) })),
+    ungrouped: sortSessionItems(grouped.ungrouped, focus),
+  }
 }
 
 export function applySessionDragOrder(
@@ -186,18 +203,36 @@ export function sessionPage(items: SessionListItem[], limit: number) {
   return { items: items.slice(0, limit), total: items.length }
 }
 
+export function sortSessionBlocksByActivity(
+  blocks: SessionDisplayBlock[],
+  focus: SessionFocusOptions,
+): SessionDisplayBlock[] {
+  const topItems = new Map(blocks.map((block) => [block.key, bestSessionItem(
+    block.kind === 'project' ? block.group.items : block.items,
+    focus,
+  )]))
+  return [...blocks].sort((a, b) => {
+    const aItem = topItems.get(a.key)
+    const bItem = topItems.get(b.key)
+    if (!aItem || !bItem) return a.key.localeCompare(b.key)
+    return compareSessionFocus(aItem, bItem, focus) || a.key.localeCompare(b.key)
+  })
+}
+
 export function sessionDisplayBlocks(
   groups: SessionProjectGroup[],
   ungrouped: SessionListItem[],
   expandedProjects: Set<string>,
   showAllUngrouped: boolean,
   collapsedProjects: Set<string>,
+  focus: SessionFocusOptions = { now: Date.now() },
 ): SessionDisplayBlock[] {
   const blocks: SessionDisplayBlock[] = groups.map((group) => ({
     kind: 'project',
     key: sessionProjectBlockKey(group.key),
     group,
     items: sessionPage(group.items, expandedProjects.has(group.key) ? group.items.length : PROJECT_SESSION_LIMIT).items,
+    focusItems: sessionFocusItems(group.items, focus),
     collapsed: collapsedProjects.has(group.key),
   }))
   if (!ungrouped.length) return blocks
@@ -206,6 +241,8 @@ export function sessionDisplayBlocks(
     kind: 'ungrouped',
     key: UNGROUPED_BLOCK_KEY,
     ...sessionPage(ungrouped, showAllUngrouped ? ungrouped.length : PROJECT_SESSION_LIMIT),
+    focusItems: sessionFocusItems(ungrouped, focus),
+    collapsed: collapsedProjects.has(UNGROUPED_BLOCK_KEY),
   })
   return blocks
 }

@@ -318,6 +318,11 @@ SET
   END
 WHERE id = sqlc.arg(id);
 
+-- name: DismissSessionError :execrows
+UPDATE threads
+SET status = 'idle', error = NULL, updated_at_ms = sqlc.arg(updated_at_ms)
+WHERE id = sqlc.arg(id) AND status = 'error' AND COALESCE(turn, '') = '';
+
 -- name: CompleteSession :exec
 UPDATE threads
 SET

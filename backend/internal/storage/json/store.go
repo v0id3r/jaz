@@ -412,6 +412,21 @@ func (s *Store) UpdateSessionStatus(id, status, errorMessage string, attentionAt
 	return s.saveSession(session)
 }
 
+func (s *Store) DismissSessionError(id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, err := s.loadSessionByID(id)
+	if err != nil {
+		return false, err
+	}
+	if session.Status != storage.StatusError || session.Turn != nil {
+		return false, nil
+	}
+	session.Status = storage.StatusIdle
+	session.Error = ""
+	return true, s.saveSession(session)
+}
+
 func (s *Store) CompleteSession(id string, completedAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

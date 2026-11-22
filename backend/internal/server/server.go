@@ -312,6 +312,25 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, sessionview.Public(session))
 		return
 	}
+	if action == "dismiss-error" {
+		dismissed, err := s.Store.DismissSessionError(session.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !dismissed {
+			writeError(w, http.StatusConflict, fmt.Errorf("session has no dismissable terminal error"))
+			return
+		}
+		session, err = s.Store.LoadSession(session.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		s.publishSessionChanged(session.ID)
+		writeJSON(w, http.StatusOK, sessionview.Public(session))
+		return
+	}
 	if action == "seen" {
 		if !session.Unread {
 			writeJSON(w, http.StatusOK, sessionview.Public(session))

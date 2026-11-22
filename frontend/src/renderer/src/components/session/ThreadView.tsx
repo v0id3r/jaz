@@ -55,7 +55,7 @@ import {
   sessionRepoQuery,
   uploadSessionAttachment,
 } from '@/lib/api/sessions'
-import type { AgentSessionState, ChatMessage, SessionEvent, SessionOverview } from '@/lib/api/types'
+import type { AgentSessionState, ChatMessage, SessionEvent, SessionMessages, SessionOverview } from '@/lib/api/types'
 import { useIsMobile } from '@/lib/hooks/useIsMobile'
 import { MCPAppThreadContext, type MCPAppThread } from '@/lib/mcpAppThread'
 import { SidePanelSlot } from '@/lib/sidePanelSlot'
@@ -395,10 +395,15 @@ export function ThreadView({
 
 
   useEffect(() => {
-    if (seenRequestedRef.current) return
-    seenRequestedRef.current = true
-    void markThreadSeen(sessionId).finally(() => invalidateSessionLists(queryClient))
-  }, [sessionId, queryClient])
+    if (!detailSession?.unread) return
+    void markThreadSeen(sessionId)
+      .then((seen) => queryClient.setQueryData<SessionMessages>(keys.sessionMessages(sessionId), (current) =>
+        current?.session.last_attention_at === seen.last_attention_at
+          ? { ...current, session: { ...current.session, unread: false } }
+          : current,
+      ))
+      .finally(() => invalidateSessionLists(queryClient))
+  }, [detailSession?.unread, detailSession?.last_attention_at, sessionId, queryClient])
 
   // A deep link jumps once. Without this the effect re-fires on every streamed
   // update and drags the reader back to the linked message after they have

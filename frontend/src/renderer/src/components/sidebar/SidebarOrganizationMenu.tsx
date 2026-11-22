@@ -4,11 +4,12 @@ import { MenuRow, Popover } from '@/components/ui/Popover'
 
 const STORAGE_KEY = 'jaz.sidebar.organization'
 
-export type SidebarOrganization = 'project' | 'recent'
+export type SidebarOrganization = 'project' | 'activity' | 'recent'
 
 function storedOrganization(): SidebarOrganization {
   try {
-    return localStorage.getItem(STORAGE_KEY) === 'recent' ? 'recent' : 'project'
+    const value = localStorage.getItem(STORAGE_KEY)
+    return value === 'recent' || value === 'activity' ? value : 'project'
   } catch {
     return 'project'
   }
@@ -30,16 +31,20 @@ export function useSidebarOrganization(): [SidebarOrganization, (next: SidebarOr
 export function SidebarOrganizationMenu({
   organization,
   onChange,
+  onCollapseAll,
+  onExpandAll,
 }: {
   organization: SidebarOrganization
   onChange: (organization: SidebarOrganization) => void
+  onCollapseAll: () => void
+  onExpandAll: () => void
 }) {
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])
   return (
     <div className="group/organization flex h-[30px] items-center justify-between pl-2.5 max-sm:h-11 max-sm:pl-3">
       <p className="text-[13px] font-medium text-ink-3 max-sm:text-[15px]">
-        {organization === 'project' ? 'Projects' : 'Recents'}
+        {organization === 'project' ? 'Projects' : organization === 'activity' ? 'Projects by activity' : 'Recents'}
       </p>
       <Popover
         open={open}
@@ -72,6 +77,15 @@ export function SidebarOrganizationMenu({
           By project
         </MenuRow>
         <MenuRow
+          selected={organization === 'activity'}
+          onClick={() => {
+            onChange('activity')
+            close()
+          }}
+        >
+          Projects by activity
+        </MenuRow>
+        <MenuRow
           selected={organization === 'recent'}
           onClick={() => {
             onChange('recent')
@@ -80,6 +94,27 @@ export function SidebarOrganizationMenu({
         >
           In one list
         </MenuRow>
+        {organization !== 'recent' ? (
+          <>
+            <div className="my-1 h-px bg-border/70" />
+            <MenuRow
+              onClick={() => {
+                onCollapseAll()
+                close()
+              }}
+            >
+              Collapse all
+            </MenuRow>
+            <MenuRow
+              onClick={() => {
+                onExpandAll()
+                close()
+              }}
+            >
+              Expand all
+            </MenuRow>
+          </>
+        ) : null}
       </Popover>
     </div>
   )

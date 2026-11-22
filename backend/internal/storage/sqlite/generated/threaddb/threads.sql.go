@@ -103,6 +103,25 @@ func (q *Queries) CompleteSession(ctx context.Context, arg CompleteSessionParams
 	return err
 }
 
+const dismissSessionError = `-- name: DismissSessionError :execrows
+UPDATE threads
+SET status = 'idle', error = NULL, updated_at_ms = ?1
+WHERE id = ?2 AND status = 'error' AND COALESCE(turn, '') = ''
+`
+
+type DismissSessionErrorParams struct {
+	UpdatedAtMs int64  `json:"updated_at_ms"`
+	ID          string `json:"id"`
+}
+
+func (q *Queries) DismissSessionError(ctx context.Context, arg DismissSessionErrorParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, dismissSessionError, arg.UpdatedAtMs, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, slug, title, parent_id, status, error, runtime, acp_agent, acp_session_id, cwd, model_provider, model, reasoning_effort, input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens, queued_messages, source_type, source_id, archived, created_at_ms, updated_at_ms, context_tokens, context_window_tokens, cached_write_tokens, project_path, last_attention_at_ms, pinned, artifact_surface, mcp_server_policy, pending_steer_message, unread, goal, manual_title, last_completed_at_ms, title_locked, event_compaction_version, event_revision, transcript_revision, turn, completed_turn_started_at_ms, prompt_digest, turns_ended, background_work, deferred_mcp_tools FROM threads
 WHERE id = ?1 OR slug = ?1

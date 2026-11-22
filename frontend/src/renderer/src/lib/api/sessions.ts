@@ -372,6 +372,10 @@ export function setSessionPinned(id: string, pinned: boolean): Promise<Session> 
   return post<Session>(`/v1/sessions/${id}/${pinned ? 'pin' : 'unpin'}`)
 }
 
+export function dismissSessionError(id: string): Promise<Session> {
+  return post<Session>(`/v1/sessions/${id}/dismiss-error`)
+}
+
 export function setSessionTitle(id: string, title: string): Promise<Session> {
   return post<Session>(`/v1/sessions/${id}/rename`, { title })
 }

@@ -1,4 +1,4 @@
-import { ArrowUp, AudioLines, ListChecks, LoaderCircle, Mic, Plus, Square, Target, X } from 'lucide-react'
+import { ArrowUp, AudioLines, CornerDownLeft, ListChecks, LoaderCircle, Mic, Plus, Square, Target, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ClipboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FileDropOverlay, useFileDropTarget } from '@/components/ui/FileDrop'
@@ -163,7 +163,12 @@ export function ComposerCard({
     },
   })
 
+  // Claude Code's ghost text: it takes the placeholder's place while the idle
+  // draft is empty; Tab or the in-row button writes it into the draft.
   const suggestion = !streaming && !disabled && !dictation.phase && mention.text === '' ? suggestedPrompt : undefined
+  const acceptSuggestion = () => {
+    if (suggestion) mention.insertText(suggestion)
+  }
 
   const setGoalRequested = useCallback((next: boolean) => {
     if (goalRequestedRef.current === next) return
@@ -539,6 +544,17 @@ export function ComposerCard({
             </div>
           )}
           <div className="flex min-h-10 shrink-0 items-center gap-2 [grid-area:controls]" inert={dictation.phase !== null}>
+            {suggestion ? (
+              <IconButton
+                size="md"
+                className="relative after:absolute after:-inset-1 pointer-coarse:size-10"
+                aria-label="Use suggested prompt"
+                title="Use suggested prompt"
+                onClick={acceptSuggestion}
+              >
+                <CornerDownLeft size={16} />
+              </IconButton>
+            ) : null}
             {dictation.showButton && !voiceActive ? (
               <IconButton
                 variant="ghost"
