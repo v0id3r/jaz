@@ -2,7 +2,6 @@ import { afterEach, expect, test } from 'bun:test'
 import { build } from 'bun'
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
-import { pathToFileURL } from 'node:url'
 
 const bundle = await build({ entrypoints: [new URL('./connectionSession.ts', import.meta.url).pathname], target: 'node', format: 'cjs', external: ['electron'] })
 if (!bundle.success) {
@@ -22,10 +21,9 @@ afterEach(() => {
   }
 })
 
-function fixture({ start, registration, principal = 'device', deviceId = 'identity' } = {}) {
+function fixture({ start, registration, principal = 'device', deviceId = 'identity', deviceProof = false } = {}) {
   delete process.env.ELECTRON_RENDERER_URL
-  const rendererPath = '/fixture/app/out/renderer/index.html'
-  const url = pathToFileURL(rendererPath).toString()
+  const url = 'app://jaz/index.html'
   const listeners = new Map()
   const invocations = new Map()
   const electron = { ipcMain: { on: (name, handler) => listeners.set(name, handler), handle: (name, handler) => invocations.set(name, handler) } }

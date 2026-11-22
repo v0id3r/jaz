@@ -43,6 +43,7 @@ import { installFileActions } from '@main/fileActions'
 import { attachContextMenu } from '@main/contextMenu'
 import { configureLocalBackendTransport, registerLocalBackendTransport } from '@main/localBackendTransport'
 import { LOCAL_BACKEND_URL } from '@shared/localBackend'
+import { migrateFileOriginStorage, rendererURL, serveRenderer } from '@main/rendererScheme'
 
 // Matches --color-bg under :root.dark; used as the window paint color before
 // the renderer mounts so a dark launch doesn't flash white behind the content.
@@ -210,11 +211,7 @@ function createWindow(): void {
 
   attachPreviewWebviews(win.webContents, join(__dirname, '../preload/index.js'))
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  win.loadURL(rendererURL())
 }
 
 // Deep link from a board window into the main app (e.g. "Open loop").
@@ -284,14 +281,13 @@ function openBoardWindow(boardId: string): void {
   attachBrowserNavigationCommands(win)
   win.on('close', () => saveBoardBounds(boardId, win.getBounds()))
   win.on('closed', () => boardWindows.delete(boardId))
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/boards/${boardId}`)
-  } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'), { hash: `/boards/${boardId}` })
-  }
+  win.loadURL(rendererURL(`/boards/${boardId}`))
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  serveRenderer()
+  await migrateFileOriginStorage()
+
   configureBrowserSessions(join(__dirname, '../preload/chrome.js'), join(__dirname, '../preload/passkeyFallback.js'))
   installBrowserDownloads()
   installFileActions(connectionSession)

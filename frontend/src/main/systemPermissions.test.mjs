@@ -40,7 +40,7 @@ if (process.env.JAZ_SYSTEM_PERMISSIONS_TEST_CHILD === '1') {
   installSystemPermissions()
   afterAll(() => mock.restore())
 
-  function event(type = 'window', url = 'file:///Applications/Jaz.app/Contents/Resources/app.asar/out/renderer/index.html') {
+  function event(type = 'window', url = 'app://jaz/index.html') {
     const sender = Object.assign(new EventEmitter(), { id: 7, getType: () => type, mainFrame: { url } })
     return { sender, senderFrame: sender.mainFrame }
   }

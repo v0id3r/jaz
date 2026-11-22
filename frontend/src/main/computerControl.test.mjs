@@ -22,7 +22,7 @@ if (process.env.JAZ_COMPUTER_IPC_TEST_CHILD === '1') {
   installComputerControl()
   afterAll(() => mock.restore())
 
-  function event(type = 'window', url = 'file:///Applications/Jaz.app/Contents/Resources/app.asar/out/renderer/index.html') {
+  function event(type = 'window', url = 'app://jaz/index.html') {
     const sender = Object.assign(new EventEmitter(), { id: 12, getType: () => type, mainFrame: { url } })
     return { sender, senderFrame: sender.mainFrame }
   }
