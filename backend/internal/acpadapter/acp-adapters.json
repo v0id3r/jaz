@@ -95,81 +95,49 @@
       }
     },
     "claude": {
-      "version": "0.107.0-jaz.1",
+      "version": "0.107.2-jaz.1",
       "assets": {
-        "darwin-arm64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.107.0-jaz.1/claude-agent-acp-0.107.0-jaz.1-darwin-arm64.tar.gz",
-          "sha256": "92341512e2008487cdb8123d6825f09d529ecbe20f64ba7ff7c3a500530745a1",
-          "binary": "claude-agent-acp",
-          "env": {
-            "CLAUDE_CODE_EXECUTABLE": "claude"
-          }
-        },
-        "darwin-x64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.107.0-jaz.1/claude-agent-acp-0.107.0-jaz.1-darwin-x64.tar.gz",
-          "sha256": "e54b77576963ce0b1c7c2c55d46890724899055312b1a5122900cab07c796577",
-          "binary": "claude-agent-acp",
-          "env": {
-            "CLAUDE_CODE_EXECUTABLE": "claude"
-          }
-        },
-        "linux-arm64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.107.0-jaz.1/claude-agent-acp-0.107.0-jaz.1-linux-arm64.tar.gz",
-          "sha256": "b696776dc1a399e8ab34ab39c4a5f1cc67c507c857bbf9c5afbfe854f0557fb8",
-          "binary": "claude-agent-acp",
-          "env": {
-            "CLAUDE_CODE_EXECUTABLE": "claude"
-          }
-        },
         "linux-x64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.107.0-jaz.1/claude-agent-acp-0.107.0-jaz.1-linux-x64.tar.gz",
-          "sha256": "8ee5c3752c085f6030edaf5b0c82932ffaa7f51377a30f1e63f289375ce49974",
+          "url": "https://github.com/v0id3r/claude-agent-acp/releases/download/v0.107.2-jaz.1/claude-agent-acp-0.107.2-jaz.1-linux-x64.tar.gz",
+          "sha256": "ea25be9752eb52a6197444ebc4876ae4be861d52a5605fe71c49b264bb12fe86",
           "binary": "claude-agent-acp",
           "env": {
             "CLAUDE_CODE_EXECUTABLE": "claude"
-          }
-        },
-        "win32-x64": {
-          "url": "https://github.com/gluonfield/claude-agent-acp/releases/download/v0.107.0-jaz.1/claude-agent-acp-0.107.0-jaz.1-win32-x64.tar.gz",
-          "sha256": "4aa8bfcc942a1192060b993e08d65db00b99e1e8a6acd91fd748ba28542cc422",
-          "binary": "claude-agent-acp.exe",
-          "env": {
-            "CLAUDE_CODE_EXECUTABLE": "claude.exe"
           }
         }
       }
     },
     "kimi": {
-      "version": "2.6.2-jaz.1",
+      "version": "2.6.1-jaz.10",
       "assets": {
         "darwin-arm64": {
-          "url": "https://github.com/gluonfield/kimi-code/releases/download/v2.6.2-jaz.1/kimi-code-darwin-arm64.zip",
-          "sha256": "141ccc11defe89d04481b3c01575251edbb9fcd71423a54d7c24b2b5f17f8c9b",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.10/kimi-code-darwin-arm64.zip",
+          "sha256": "4148cfe5d9028fa2d04175a3a92aa9c72ef1797633fe5c1e9296cd76173f10df",
           "binary": "kimi"
         },
         "darwin-x64": {
-          "url": "https://github.com/gluonfield/kimi-code/releases/download/v2.6.2-jaz.1/kimi-code-darwin-x64.zip",
-          "sha256": "cbf860290acb0a969a57929701001b031407e23255fff6969d20e9cfcc2e306f",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.10/kimi-code-darwin-x64.zip",
+          "sha256": "f08965ea1b00502c4d633173c33481404faa6cd167737b8160a275ba39de1152",
           "binary": "kimi"
         },
         "linux-arm64": {
-          "url": "https://github.com/gluonfield/kimi-code/releases/download/v2.6.2-jaz.1/kimi-code-linux-arm64.zip",
-          "sha256": "585edb302b18a5b9140813ff811f51daead97e0ba4a05365fd6862c28e38b5e2",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.10/kimi-code-linux-arm64.zip",
+          "sha256": "c77289c80006d3e6ca2b9cfda7d324dc95ff9105b2729a35bdad7e6b05c7222f",
           "binary": "kimi"
         },
         "linux-x64": {
-          "url": "https://github.com/gluonfield/kimi-code/releases/download/v2.6.2-jaz.1/kimi-code-linux-x64.zip",
-          "sha256": "c87eeac1910895b178e8bd218e31b68a59779ebe3ce4404f6f2a7914be270763",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.10/kimi-code-linux-x64.zip",
+          "sha256": "8cafc8469c0f82a0ed557991ec527c5509a8c7d9c92126e04a690fac9e409712",
           "binary": "kimi"
         },
         "win32-arm64": {
-          "url": "https://github.com/gluonfield/kimi-code/releases/download/v2.6.2-jaz.1/kimi-code-win32-arm64.zip",
-          "sha256": "d6647b3961555e1102ddbdd9acbe44ab469fe49b2ede41981eb2657b8f2aae17",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.10/kimi-code-win32-arm64.zip",
+          "sha256": "1ce7dc5d39891a676fb03fe091ad591957aae172b5149aab05c260dcbaa46c97",
           "binary": "kimi.exe"
         },
         "win32-x64": {
-          "url": "https://github.com/gluonfield/kimi-code/releases/download/v2.6.2-jaz.1/kimi-code-win32-x64.zip",
-          "sha256": "da2201ed021428bfd7249564811ae9f46e7cac1f14a35b906a63318235925042",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.6.1-jaz.10/kimi-code-win32-x64.zip",
+          "sha256": "f45fd4dd9e0dbe3678419b9317b65d28ed19f25882c611cf88aad5411a92b351",
           "binary": "kimi.exe"
         }
       }
