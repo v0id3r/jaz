@@ -617,7 +617,7 @@ func TestAgentSessionEventsKeepOnlyTheLatest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, err := sqliteMigrations.ReadFile("migrations/0089_coalesce_agent_session_events.sql")
+	raw, err := sqliteMigrations.ReadFile("migrations/0095_coalesce_agent_session_events.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +703,7 @@ func TestPostTurnTextRunRepairMigrationCoalescesFragments(t *testing.T) {
 	insert("acp_message", "after ", idleACP)
 	insert("acp_message", "tool.", idleACP)
 
-	raw, err := sqliteMigrations.ReadFile("migrations/0092_repair_post_turn_text_runs.sql")
+	raw, err := sqliteMigrations.ReadFile("migrations/0098_repair_post_turn_text_runs.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
