@@ -339,8 +339,19 @@ async function pair(value: Attempt, proofRequired: boolean): Promise<string | nu
     block(error)
     return error
   }
-  pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id)
+  pending(value, { url: value.url, id: body.pairing.id, secret: body.pairing_secret, expiresAt: body.pairing.expires_at, deviceName: profile.name }, profile.device_id, proofRequired)
   return null
+}
+
+// A web app served by the backend's own origin regains the proxy session only
+// through a top-level navigation, which the proxy turns into its login page.
+// reload() revalidates the document, so a cached app shell cannot short-circuit it.
+function signInThroughBrowser(url: string): boolean {
+  if (clientRuntime.kind !== 'web' || url !== window.location.origin) {
+    return false
+  }
+  window.location.reload()
+  return true
 }
 
 export async function connectRemote(input: string): Promise<string | null> {

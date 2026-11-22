@@ -81,8 +81,9 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       return { url: result.url, token: 'jaz_local-device-token', deviceId: 'identity', remembered: false }
     },
   }
+  let reloads = 0
   replace('window', {
-    location: { origin: 'http://localhost', search: '', hash: '' },
+    location: { origin: web ? 'https://jaz.example' : 'http://localhost', search: '', hash: '', reload: () => { reloads += 1 } },
     addEventListener() {},
     jaz: web ? undefined : {
       apiBaseUrl: 'http://127.0.0.1:5299',
@@ -119,7 +120,7 @@ async function fixture({ auth, pairing = false, storedValues = [], encryptCreden
       return Response.json({ ok: false })
     }
     if (target.pathname === '/health') {
-      return health ? health() : Response.json({ ok: true, auth_required: true })
+      return health ? health(init) : Response.json({ ok: true, auth_required: true })
     }
     if (target.pathname === '/v1/devices/register') {
       if (registration) {
@@ -366,6 +367,45 @@ test('one missed health poll keeps the session; consecutive misses show reconnec
   expect(await poll(true)).toBe('connected')
 })
 
+test('a web auth proxy login redirect reloads the serving origin and asks to sign in elsewhere', async () => {
+  const redirects = []
+  const { connection, reloads } = await fixture({
+    web: true,
+    storedValues: [['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: 'https://startup.example' })]],
+    health: (init) => {
+      redirects.push(init.redirect)
+      return { type: 'opaqueredirect', ok: false, status: 0, headers: new Headers() }
+    },
+  })
+  redirects.length = 0
+  expect(await connection.connectRemote('https://jaz.example')).toBeNull()
+  expect(reloads()).toBe(1)
+  expect(await connection.connectRemote('https://other.example')).toBe('Sign in through Teleport again to reach the backend at https://other.example')
+  expect(reloads()).toBe(1)
+  expect(redirects).toEqual(['manual', 'manual'])
+})
+
+test('web startup signs in through the serving origin instead of showing server options', async () => {
+  const target = 'https://jaz.example'
+  const { reloads } = await fixture({
+    web: true,
+    storedValues: [['jaz.connection', JSON.stringify({ mode: 'remote', remoteUrl: target })]],
+    health: () => ({ type: 'opaqueredirect', ok: false, status: 0, headers: new Headers() }),
+  })
+  expect(reloads()).toBe(1)
+})
+
+test('web startup restores a saved same-origin login without a connection preference', async () => {
+  const target = 'https://jaz.example'
+  const { connection } = await fixture({
+    web: true,
+    browserCredentials: new Map([[target, { token: 'jaz_saved', deviceId: 'identity' }]]),
+    auth: () => Response.json({ ok: true, auth_kind: 'device', device_id: 'identity' }),
+  })
+  expect(connection.useConnection().status).toBe('connected')
+  expect(connection.cachedApiAuthToken(target)).toBe('jaz_saved')
+})
+
 test('an unauthenticated health probe does not unlock saved credentials', async () => {
   let unlocks = 0
   const target = 'https://jaz.example'
@@ -474,6 +514,25 @@ test('a late same-origin candidate cannot replace the verified token or ticket',
   expect(connection.apiEmbeddedGetUrl('/v1/sessions/thread/file?raw=1')).toContain('new-ticket')
   expect(connection.connectionPreference()).toBeNull()
   expect(stored.has('jaz.backendAuth.https://jaz.example')).toBe(false)
+})
+
+test('a connected window renews its resource ticket on its own', async () => {
+  let ticket = 'first-ticket'
+  const { connection, timers } = await fixture({
+    auth: () => Response.json({ ok: true, auth_kind: 'device', device_id: 'identity', resource_ticket: { token: ticket, expires_at: '2099-01-01T00:00:00Z' } }),
+  })
+  await connection.connectRemote('https://jaz.example#key=jaz_token')
+  const pinned = connection.apiEmbeddedGetUrl('/fixture/file')
+  expect(pinned).toContain('first-ticket')
+  ticket = 'next-ticket'
+  const [id, renewal] = [...timers.entries()].find(([, timer]) => timer.delay === 30_000)
+  timers.delete(id)
+  await renewal.callback()
+  await settle()
+  expect(connection.apiEmbeddedGetUrl('/fixture/file')).toContain('next-ticket')
+  expect(connection.withCurrentTicket(pinned)).toBe(connection.apiEmbeddedGetUrl('/fixture/file'))
+  expect(connection.embeddedUrlKey(pinned)).toBe('https://jaz.example/fixture/file')
+  expect(connection.withCurrentTicket('https://example.com/a.png')).toBe('https://example.com/a.png')
 })
 
 test('explicit remember failure preserves the verified session and prior ciphertext', async () => {

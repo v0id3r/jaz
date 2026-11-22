@@ -16,13 +16,23 @@ export async function readJSON<T>(response: Response): Promise<T | null> {
   }
 }
 
-function loginResponse(url: string, response: Response): boolean {
+// Health probes use redirect: 'manual'. An auth proxy answers an expired session
+// with a redirect to its login origin; followed, that becomes an opaque CORS
+// failure indistinguishable from a dead backend.
+function loginResponse(response: Response): boolean {
   if (clientRuntime.kind !== 'web') {
     return false
   }
   const contentType = response.headers.get('content-type') || ''
-  return contentType.includes('text/html') || (response.redirected && new URL(response.url).origin !== url) ||
+  return contentType.includes('text/html') || response.type === 'opaqueredirect' ||
     ((response.status === 401 || response.status === 403) && !contentType.includes('json'))
+}
+
+// A first request through an access proxy can wait for the proxy to issue
+// the client its credentials, which takes a few seconds.
+function probeSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(10_000)
+  return signal ? AbortSignal.any([signal, timeout]) : timeout
 }
 
 export async function readHealth(url: string, signal?: AbortSignal): Promise<Health> {
@@ -30,13 +40,13 @@ export async function readHealth(url: string, signal?: AbortSignal): Promise<Hea
     return { ok: false, error: 'Remote connections require HTTPS', recoverable: false }
   }
   try {
-    const response = await backendFetch(url + '/health', { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
-    if (loginResponse(url, response)) {
-      return { ok: false, error: `Sign in through Teleport again to reach the backend at ${url}`, recoverable: false }
+    const response = await backendFetch(url + '/health', { redirect: 'manual', signal: probeSignal(signal) })
+    if (loginResponse(response)) {
+      return { ok: false, error: `Sign in through Teleport again to reach the backend at ${url}`, recoverable: false, code: 'browser_session_required' }
     }
-    const body = await readJSON<{ ok?: boolean; auth_required?: boolean }>(response)
+    const body = await readJSON<{ ok?: boolean; auth_required?: boolean; capabilities?: { device_proof?: boolean } }>(response)
     if (response.ok && body?.ok === true && typeof body.auth_required === 'boolean') {
-      return { ok: true, authRequired: body.auth_required }
+      return { ok: true, authRequired: body.auth_required, proofRequired: body.capabilities?.device_proof === true }
     }
   } catch {
     // A health failure never unlocks a credential or issues a replacement.
