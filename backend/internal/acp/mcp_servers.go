@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"slices"
 	"strings"
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
@@ -12,6 +13,22 @@ import (
 )
 
 const jaztoolsSurfaceQueryParam = "jaztools_surface"
+
+type withoutBackendKeyKey struct{}
+
+// mcpAuthContext keeps the backend key out of the MCP servers of a sandboxed
+// agent when Jaz admits sandboxed agents by their session certificate.
+func (m *Manager) mcpAuthContext(ctx context.Context, sandboxed bool) context.Context {
+	if !sandboxed || !m.cfg.SandboxMCPWithoutKey {
+		return ctx
+	}
+	return context.WithValue(ctx, withoutBackendKeyKey{}, true)
+}
+
+func withoutBackendKey(ctx context.Context) bool {
+	without, _ := ctx.Value(withoutBackendKeyKey{}).(bool)
+	return without
+}
 
 type httpMCPServer struct {
 	Type    string             `json:"type"`
@@ -61,6 +78,11 @@ func enabledHTTPMCPServers(ctx context.Context, store mcpconfig.ServerReader, po
 			continue
 		}
 		headers := resolvedACPHeaders(ctx, server)
+		if withoutBackendKey(ctx) {
+			headers = slices.DeleteFunc(headers, func(header mcpconfig.Header) bool {
+				return strings.EqualFold(header.Name, "Authorization")
+			})
+		}
 		if headers == nil {
 			// codex-acp's schema requires an array; null fails session/new.
 			headers = []mcpconfig.Header{}

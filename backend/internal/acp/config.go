@@ -11,6 +11,7 @@ import (
 	"github.com/wins/jaz/backend/internal/plugins"
 	"github.com/wins/jaz/backend/internal/promptmodule"
 	"github.com/wins/jaz/backend/internal/provider"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/storage"
 )
 
@@ -133,6 +134,11 @@ type Config struct {
 	TurnNote func(storage.Session) (note, promptDigest string)
 	// SteerNote refreshes context when a user writes during a running turn.
 	SteerNote func(storage.Session) string
+	// Launcher starts agent processes; nil runs them directly on the host.
+	Launcher sandbox.Launcher
+	// SandboxMCPWithoutKey leaves the backend key out of the MCP servers of
+	// sandboxed agents, which Jaz admits by their session certificate.
+	SandboxMCPWithoutKey bool
 }
 
 type AgentConfig struct {

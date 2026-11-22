@@ -36,6 +36,7 @@ import (
 	"github.com/wins/jaz/backend/internal/providerstore"
 	"github.com/wins/jaz/backend/internal/runtimeenv"
 	"github.com/wins/jaz/backend/internal/runtimefiles"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/sessioncontext"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/sessionlock"
@@ -65,10 +66,13 @@ type Config struct {
 	Voice            VoiceConfig
 	ACP              acp.Config
 	MicrosoftCopilot m365copilot.OAuthConfig
+	Sandbox          sandbox.Config
+	Identity         IdentityConfig
 	Memory           MemoryConfig
 	Connections      ConnectionsConfig
 	Devices          DevicesConfig
 	Push             mobilepush.Config
+	WebPush          mobilepush.WebPushConfig
 	Bots             []bots.Config
 	// MCPServers declares MCP servers as a JSON array of server inputs
 	// (JAZ_MCP_SERVERS), which each start applies.
@@ -352,6 +356,7 @@ func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, pro
 	cfg.ACP.AgentSource = source
 	cfg.ACP.Adapters = adapters
 	cfg.ACP.Root = store.RootDir()
+	cfg.ACP.MemoryRoot = memory.Root()
 	cfg.ACP.Workspace = string(workspace)
 	cfg.ACP.Providers = cfg.ModelProviders
 	cfg.ACP.ProviderSource = providerSource
@@ -360,6 +365,9 @@ func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, pro
 	cfg.ACP.ClaudePlugins = installed.ClaudePlugins
 	cfg.ACP.MCPStore = mcpServers
 	cfg.ACP.MicrosoftCopilot = msCopilot
+	cfg.ACP.Launcher = launch
+	// Agents of mesh-only networks are admitted by their session certificate.
+	cfg.ACP.SandboxMCPWithoutKey = len(cfg.Identity.Mesh.Require) > 0
 	promptBuilder := loops.RuntimePromptBuilder{Repo: store, PromptExtras: []func(loops.Loop, loops.Run) string{bots.RoutineInstructions(store)}}
 	if widgetService != nil {
 		promptBuilder.PromptExtras = append(promptBuilder.PromptExtras, widgetService.LoopPromptExtra)

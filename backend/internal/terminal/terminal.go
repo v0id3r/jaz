@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/wins/jaz/backend/internal/sandbox"
 	"github.com/wins/jaz/backend/internal/shellcmd"
 )
 
@@ -36,10 +37,13 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	replay   int
+	launcher sandbox.Launcher
 }
 
-func New() *Manager {
-	return &Manager{sessions: map[string]*Session{}, replay: defaultReplayBytes}
+// New starts terminals through launcher, so a terminal for a sandboxed
+// session runs where that session's agent runs.
+func New(launcher sandbox.Launcher) *Manager {
+	return &Manager{sessions: map[string]*Session{}, replay: defaultReplayBytes, launcher: launcher}
 }
 
 func (m *Manager) Open(id, cwd string, size Size) (*Session, error) {
@@ -64,7 +68,7 @@ func (m *Manager) Open(id, cwd string, size Size) (*Session, error) {
 		delete(m.sessions, id)
 		session.Terminate()
 	}
-	session := newSession(cwd, m.replay, func(s *Session) {
+	session := newSession(cwd, m.replay, m.launcher, func(s *Session) {
 		m.mu.Lock()
 		if m.sessions[id] == s {
 			delete(m.sessions, id)
@@ -82,7 +86,7 @@ func (m *Manager) Open(id, cwd string, size Size) (*Session, error) {
 }
 
 func OpenCommand(cmd *exec.Cmd, size Size) (*Session, error) {
-	session := newSession(cmd.Dir, defaultReplayBytes, nil)
+	session := newSession(cmd.Dir, defaultReplayBytes, sandbox.Local{}, nil)
 	if err := session.start(cmd, size); err != nil {
 		return nil, err
 	}
@@ -122,21 +126,24 @@ func (m *Manager) Close() {
 type Session struct {
 	cwd       string
 	replayMax int
+	launcher  sandbox.Launcher
 	onExit    func(*Session)
 	done      chan struct{}
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
+	release func()
 	file    *os.File
 	exit    Message
 	buffer  []byte
 	clients map[chan Message]struct{}
 }
 
-func newSession(cwd string, replayMax int, onExit func(*Session)) *Session {
+func newSession(cwd string, replayMax int, launcher sandbox.Launcher, onExit func(*Session)) *Session {
 	return &Session{
 		cwd:       cwd,
 		replayMax: replayMax,
+		launcher:  launcher,
 		clients:   map[chan Message]struct{}{},
 		onExit:    onExit,
 		done:      make(chan struct{}),
@@ -229,14 +236,28 @@ func (s *Session) start(cmd *exec.Cmd, size Size) error {
 	if runtime.GOOS == "windows" {
 		return ErrUnsupported
 	}
-	cmd.Env = terminalEnv(cmd.Environ())
+	launch, release, err := s.launcher.Command(sandbox.Spec{
+		Path: cmd.Path,
+		Args: cmd.Args[1:],
+		Env:  terminalEnv(cmd.Environ()),
+		Dir:  cmd.Dir,
+		TTY:  true,
+	})
+	if err != nil {
+		return err
+	}
+	cmd = exec.Command(launch.Path, launch.Args...)
+	cmd.Dir = launch.Dir
+	cmd.Env = launch.Env
 	win := &pty.Winsize{Cols: firstNonZero(size.Cols, 80), Rows: firstNonZero(size.Rows, 24)}
 	file, err := pty.StartWithSize(cmd, win)
 	if err != nil {
+		release()
 		return err
 	}
 	s.mu.Lock()
 	s.cmd = cmd
+	s.release = release
 	s.file = file
 	s.mu.Unlock()
 	drained := make(chan struct{})
@@ -269,6 +290,7 @@ func (s *Session) wait(drained <-chan struct{}) {
 		_ = s.file.Close()
 		<-drained
 	}
+	s.release()
 	code := exitCode(err)
 	msg := Message{Type: "exit", Code: code}
 	if err != nil && !errors.Is(err, os.ErrProcessDone) {

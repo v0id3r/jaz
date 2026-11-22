@@ -30,11 +30,10 @@ func TestConfigureCodexEnv(t *testing.T) {
 		},
 	}
 
-	cleanup, err := configureCodexEnv(env, cfg, providers, "Jaz instructions")
+	err := configureCodexEnv(t.TempDir(), env, cfg, providers, "Jaz instructions")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(cleanup)
 	config, err := decodeCodexConfig(env["CODEX_CONFIG"])
 	if err != nil {
 		t.Fatal(err)
@@ -66,14 +65,13 @@ func TestConfigureCodexEnv(t *testing.T) {
 
 func TestConfigureCodexEnvKeepsOpenAIAccountAuthNative(t *testing.T) {
 	env := map[string]string{"CODEX_CONFIG": "null"}
-	cleanup, err := configureCodexEnv(env, AgentConfig{
+	err := configureCodexEnv(t.TempDir(), env, AgentConfig{
 		ModelProvider: modelprovider.ProviderOpenAI,
 		Model:         modelprovider.OpenAIModelGPT6Sol,
 	}, nil, "instructions")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(cleanup)
 	config, err := decodeCodexConfig(env["CODEX_CONFIG"])
 	if err != nil {
 		t.Fatal(err)
@@ -262,11 +260,10 @@ func TestConfigureCodexEnvReadsFileOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := map[string]string{"CODEX_CONFIG": "@" + path}
-	cleanup, err := configureCodexEnv(env, AgentConfig{}, nil, "instructions")
+	err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, "instructions")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(cleanup)
 	config, err := decodeCodexConfig(env["CODEX_CONFIG"])
 	if err != nil || config["custom"] != "preserved" || config["developer_instructions"] != "instructions" {
 		t.Fatalf("config = %#v, err = %v", config, err)
@@ -275,7 +272,7 @@ func TestConfigureCodexEnvReadsFileOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	env["CODEX_CONFIG"] = "@" + path
-	if _, err := configureCodexEnv(env, AgentConfig{}, nil, "instructions"); err == nil {
+	if err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, "instructions"); err == nil {
 		t.Fatal("missing config file was accepted")
 	}
 }

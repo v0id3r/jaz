@@ -237,19 +237,43 @@ func queryAuthAllowed(r *http.Request) bool {
 		(action == "file" && rawSessionFileRequested(r))
 }
 
-func bearerToken(header string) string {
-	fields := strings.Fields(header)
-	if len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
-		return fields[1]
-	}
-	return ""
+func internalMCPRequest(r *http.Request) bool {
+	return internalMCPPath(r.URL.Path) && httpapi.LoopbackRequest(r)
 }
 
-func internalMCPRequest(r *http.Request) bool {
-	switch r.URL.Path {
+func internalMCPPath(path string) bool {
+	switch path {
 	case serverconfig.JazToolsMCPPath, serverconfig.JazToolsMCPCompatPath, serverconfig.JazmemMCPPath, serverconfig.MCPProxyPath:
-		return httpapi.LoopbackRequest(r)
+		return true
 	default:
 		return false
 	}
+}
+
+// meshRequired reports a request from a network whose agents must come
+// through the mesh; the backend key alone does not admit them.
+func meshRequired(r *http.Request, networks []netip.Prefix) bool {
+	if len(networks) == 0 {
+		return false
+	}
+	addr, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := addr.Addr().Unmap()
+	return slices.ContainsFunc(networks, func(network netip.Prefix) bool { return network.Contains(ip) })
+}
+
+// agentMCPRequest reports an internal MCP request from sandboxed agents, which
+// reach Jaz over the network instead of loopback.
+func agentMCPRequest(r *http.Request, networks []netip.Prefix) bool {
+	if len(networks) == 0 || !internalMCPPath(r.URL.Path) || httpapi.ForwardedRequest(r) {
+		return false
+	}
+	addr, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := addr.Addr().Unmap()
+	return slices.ContainsFunc(networks, func(network netip.Prefix) bool { return network.Contains(ip) })
 }
