@@ -365,8 +365,7 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 	}()
 	go func() {
 		defer cancel()
-		err := peer.Serve(runCtx)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err := peer.Serve(runCtx); !errors.Is(err, context.Canceled) {
 			m.setServeErr(peer, err)
 		}
 	}()

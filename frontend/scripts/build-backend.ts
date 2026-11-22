@@ -17,9 +17,7 @@ const requireTelegramBundle =
   process.env.CI === 'true' || process.env.JAZ_REQUIRE_TELEGRAM_BUNDLE === '1'
 const telegramLDFlags = telegramBackendLDFlags(requireTelegramBundle)
 
-mkdirSync(dirname(output), { recursive: true })
-
-const ldflags = [`-s -w -X main.version=${backendVersion}`]
+const ldflags = [`-s -w -X github.com/wins/jaz/backend/internal/buildinfo.version=${backendVersion}`]
 ldflags.push(...telegramLDFlags)
 
 const args = ['build', '-o', output, '-ldflags', ldflags.join(' ')]

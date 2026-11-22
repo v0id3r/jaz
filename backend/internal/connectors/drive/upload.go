@@ -90,7 +90,7 @@ func (c APIClient) Create(ctx context.Context, input CreateInput, content io.Rea
 	location, err := resp.Location()
 	resp.Body.Close()
 	if err != nil || location.User != nil || location.Scheme != req.URL.Scheme || location.Host != req.URL.Host {
-		return File{}, fmt.Errorf("Google Drive returned an invalid upload location")
+		return File{}, fmt.Errorf("google Drive returned an invalid upload location")
 	}
 	req, err = http.NewRequestWithContext(ctx, http.MethodPut, location.String(), content)
 	if err != nil {

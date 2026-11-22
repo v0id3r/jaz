@@ -1,6 +1,6 @@
 # Engineering Rules
 
-- Use Go 1.26.
+- Use Go 1.27.
 - Keep code and JSON minimal. Each line of code should fight for its existence; every field and line must earn its place.
 - Prefer implementations that reduce total code over ones that add more. Adding lines is a cost to justify; a good fix often deletes code, collapses branches, or moves an invariant to the layer that already owns it.
 - Trim strings at real input boundaries only: user input, config files, env vars, HTTP payloads, CLI args, and persisted loose text. Do not sprinkle `strings.TrimSpace` over internal constants, typed IDs, enum values, or values that have already crossed a validation boundary.

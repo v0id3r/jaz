@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/wins/jaz/backend/internal/api"
+	"github.com/wins/jaz/backend/internal/buildinfo"
 	"github.com/wins/jaz/backend/internal/serverconfig"
 )
 

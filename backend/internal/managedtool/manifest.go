@@ -42,7 +42,7 @@ func (m *Manager) resolveSpec(ctx context.Context, name string) (toolSpec, error
 		return toolSpec{}, err
 	}
 	if strings.TrimSpace(manifest.Version) == "" || strings.TrimSpace(manifest.URL) == "" || strings.TrimSpace(manifest.SHA512) == "" {
-		return toolSpec{}, fmt.Errorf("Antigravity CLI manifest is incomplete")
+		return toolSpec{}, fmt.Errorf("antigravity CLI manifest is incomplete")
 	}
 	root := filepath.Join(m.root, "acp", "managed", "tools", name, platform)
 	return toolSpec{
@@ -59,7 +59,7 @@ func (m *Manager) resolveSpec(ctx context.Context, name string) (toolSpec, error
 func (m *Manager) fetchAntigravityManifest(ctx context.Context, platform string) (antigravityManifest, error) {
 	base := strings.TrimRight(strings.TrimSpace(m.baseURL), "/")
 	if base == "" {
-		return antigravityManifest{}, fmt.Errorf("Antigravity CLI manifest URL is not configured")
+		return antigravityManifest{}, fmt.Errorf("antigravity CLI manifest URL is not configured")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/manifests/"+platform+".json", nil)
 	if err != nil {

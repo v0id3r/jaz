@@ -71,7 +71,8 @@ func serveProxy(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		return
 	}
 	proxy := &httputil.ReverseProxy{
-		Director: func(out *http.Request) {
+		Rewrite: func(proxyRequest *httputil.ProxyRequest) {
+			out := proxyRequest.Out
 			out.URL.Scheme = target.Scheme
 			out.URL.Host = target.Host
 			out.URL.Path = path

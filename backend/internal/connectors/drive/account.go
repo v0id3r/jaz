@@ -23,7 +23,7 @@ func GetAccount(ctx context.Context, client *http.Client) (Account, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Account{}, fmt.Errorf("Google Drive account verification: %s", resp.Status)
+		return Account{}, fmt.Errorf("google Drive account verification: %s", resp.Status)
 	}
 	var result struct {
 		User Account `json:"user"`
@@ -32,7 +32,7 @@ func GetAccount(ctx context.Context, client *http.Client) (Account, error) {
 		return Account{}, err
 	}
 	if result.User.Email == "" {
-		return Account{}, fmt.Errorf("Google Drive returned no account email")
+		return Account{}, fmt.Errorf("google Drive returned no account email")
 	}
 	return result.User, nil
 }

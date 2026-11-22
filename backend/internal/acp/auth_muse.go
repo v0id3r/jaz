@@ -41,7 +41,7 @@ func disconnectMuseAuth(ctx context.Context, cfg AgentConfig, root string) error
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Env = processenv.List(env)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Muse sign out: %w", err)
+		return fmt.Errorf("muse sign out: %w", err)
 	}
 	return nil
 }

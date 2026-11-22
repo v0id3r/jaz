@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -53,7 +54,8 @@ func sameArgs(a, b []string) bool {
 func TestPrintVersion(t *testing.T) {
 	var out bytes.Buffer
 	printVersion(&out)
-	if got, want := out.String(), "jaz dev\n"; got != want {
-		t.Fatalf("version output = %q, want %q", got, want)
+	got := out.String()
+	if !strings.HasPrefix(got, "jaz dev (commit ") || !strings.HasSuffix(got, ")\n") {
+		t.Fatalf("version output = %q", got)
 	}
 }

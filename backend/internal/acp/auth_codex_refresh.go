@@ -28,7 +28,7 @@ func (m *Manager) RefreshCodexOAuth(ctx context.Context, cfg AgentConfig, home s
 		var err error
 		executable, err = resolveLoginExecutable(loginBinDirs(cfg), "codex")
 		if err != nil {
-			return fmt.Errorf("Codex CLI is required to refresh your OpenAI account sign-in")
+			return fmt.Errorf("codex CLI is required to refresh your OpenAI account sign-in")
 		}
 	}
 	command := exec.CommandContext(ctx, executable, "app-server")
@@ -67,13 +67,13 @@ func (m *Manager) RefreshCodexOAuth(ctx context.Context, cfg AgentConfig, home s
 				Error json.RawMessage `json:"error"`
 			}
 			if err := decoder.Decode(&reply); err != nil {
-				return fmt.Errorf("Codex OAuth refresh did not complete")
+				return fmt.Errorf("codex OAuth refresh did not complete")
 			}
 			if reply.ID != id {
 				continue
 			}
 			if len(reply.Error) != 0 && string(reply.Error) != "null" {
-				return fmt.Errorf("Codex could not refresh your OpenAI account sign-in; sign in again in Agents → Codex")
+				return fmt.Errorf("codex could not refresh your OpenAI account sign-in; sign in again in Agents → Codex")
 			}
 			return nil
 		}

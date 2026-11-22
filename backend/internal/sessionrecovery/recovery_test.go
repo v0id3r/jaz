@@ -167,7 +167,7 @@ func TestResumeFailureIsNotRetriedOnNextStartup(t *testing.T) {
 		}
 	}
 	stored, err := store.LoadSession(session.ID)
-	if err != nil || attempts != 3 || stored.Status != storage.StatusError || stored.Error != "Could not resume chat after restart: provider unavailable" {
+	if err != nil || attempts != 3 || stored.Status != storage.StatusError || stored.Error != "could not resume chat after restart: provider unavailable" {
 		t.Fatalf("attempts = %d, stored = %+v, err = %v", attempts, stored, err)
 	}
 }

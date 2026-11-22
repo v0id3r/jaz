@@ -180,7 +180,7 @@ func (p *Provider) watchQR(session *qrSession, qrChan <-chan whatsmeow.QRChannel
 			// The client event handler owns pairing completion and connection errors.
 			return
 		case whatsmeow.QRChannelEventPasskeyRequest, whatsmeow.QRChannelEventPasskeyResponse:
-			p.failQRSession(p.ctx, session, errors.New("WhatsApp requires passkey verification to link this account. Jaz does not support that step yet."))
+			p.failQRSession(p.ctx, session, errors.New("WhatsApp requires passkey verification to link this account. Jaz does not support that step yet"))
 			return
 		case whatsmeow.QRChannelTimeout.Event:
 			session.setStatus("expired", "WhatsApp closed the pairing socket before the code was approved")

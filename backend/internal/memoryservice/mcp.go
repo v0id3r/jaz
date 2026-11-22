@@ -65,7 +65,7 @@ func (t memoryTools) Search(ctx context.Context, req *mcp.CallToolRequest, input
 	if query == "" {
 		return nil, nil, errors.New("query is required")
 	}
-	if err := (gatedJazmem{service: t.service}).ready(); err != nil {
+	if err := gatedJazmem(t).ready(); err != nil {
 		return nil, nil, err
 	}
 	limit := input.Limit

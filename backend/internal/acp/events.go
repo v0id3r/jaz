@@ -248,10 +248,7 @@ func (j *jobState) permissionEvent(req acpschema.RequestPermissionRequest) sessi
 		})
 	}
 	for _, location := range call.Locations {
-		out.Locations = append(out.Locations, sessionevents.ACPPermissionLocation{
-			Path: location.Path,
-			Line: location.Line,
-		})
+		out.Locations = append(out.Locations, sessionevents.ACPPermissionLocation(location))
 	}
 	return out
 }

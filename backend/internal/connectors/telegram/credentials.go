@@ -38,11 +38,11 @@ func ParseCredentials(id, hash string) (ClientCredentials, bool, error) {
 		return ClientCredentials{}, false, nil
 	}
 	if id == "" || hash == "" {
-		return ClientCredentials{}, false, errors.New("Telegram client id and hash must both be set")
+		return ClientCredentials{}, false, errors.New("telegram client id and hash must both be set")
 	}
 	parsed, err := strconv.Atoi(id)
 	if err != nil || parsed <= 0 {
-		return ClientCredentials{}, false, fmt.Errorf("Telegram client id is invalid")
+		return ClientCredentials{}, false, fmt.Errorf("telegram client id is invalid")
 	}
 	return ClientCredentials{APIID: parsed, APIHash: hash}, true, nil
 }

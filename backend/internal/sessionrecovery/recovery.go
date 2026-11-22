@@ -69,7 +69,7 @@ func Resume(ctx context.Context, store storage.SessionStore, runtime Runtime, lo
 				if ctx.Err() != nil {
 					break
 				}
-				if err := runtime.FailInterruptedTurn(ctx, id, fmt.Errorf("Could not resume chat after restart: %w", err)); err != nil {
+				if err := runtime.FailInterruptedTurn(ctx, id, fmt.Errorf("could not resume chat after restart: %w", err)); err != nil {
 					logger.Error("end a chat that cannot resume", "session", id, "error", err)
 				}
 			}

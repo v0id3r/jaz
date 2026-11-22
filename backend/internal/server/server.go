@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +22,6 @@ import (
 	"github.com/wins/jaz/backend/internal/m365copilot"
 	"github.com/wins/jaz/backend/internal/managedtool"
 	mcpconfig "github.com/wins/jaz/backend/internal/mcpconfig"
-	"github.com/wins/jaz/backend/internal/media"
 	"github.com/wins/jaz/backend/internal/memoryservice"
 	"github.com/wins/jaz/backend/internal/modelcatalog"
 	"github.com/wins/jaz/backend/internal/pathsafe"
@@ -167,29 +165,6 @@ func (s *Server) logger() *log.Logger {
 
 type messageRecordStore interface {
 	LoadMessageRecords(string) ([]storage.Message, error)
-}
-
-type reasoningMessageStore interface {
-	SaveMessagesWithReasoning(string, []provider.Message, map[int]string) error
-}
-
-type mediaReasoningMessageStore interface {
-	SaveMessagesWithReasoningAndMedia(string, []provider.Message, map[int]string, map[string][]media.Ref) error
-}
-
-type usageStore interface {
-	AddUsage(string, storage.Usage) error
-}
-
-func (s *Server) resolveWorkspaceDir(directory string) (string, error) {
-	if strings.TrimSpace(s.Workspace) == "" {
-		return "", fmt.Errorf("workspace is not configured")
-	}
-	cwd, err := pathsafe.Resolve(s.Workspace, directory)
-	if err != nil {
-		return "", err
-	}
-	return cwd, os.MkdirAll(cwd, 0o755)
 }
 
 func (s *Server) handleListACPAgents(w http.ResponseWriter, r *http.Request) {
@@ -570,22 +545,6 @@ func (s *Server) setSessionStatusWithError(session storage.Session, status, mess
 		attentionAt = time.Now().UTC()
 	}
 	_ = s.Store.UpdateSessionStatus(session.ID, status, errorMessage, attentionAt)
-}
-
-func (s *Server) addUsage(sessionID string, usage *provider.Usage) {
-	if usage == nil {
-		return
-	}
-	if usageStore, ok := s.Store.(usageStore); ok {
-		_ = usageStore.AddUsage(sessionID, storage.Usage{
-			InputTokens:           usage.InputTokens,
-			CachedInputTokens:     usage.CachedInputTokens,
-			CachedWriteTokens:     usage.CachedWriteTokens,
-			OutputTokens:          usage.OutputTokens,
-			ReasoningOutputTokens: usage.ReasoningOutputTokens,
-			TotalTokens:           usage.TotalTokens,
-		})
-	}
 }
 
 func titleFromMessage(message string) string {

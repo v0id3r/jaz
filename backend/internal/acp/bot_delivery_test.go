@@ -437,7 +437,7 @@ func TestAThreadThatCannotResumeAfterARestartTellsItsBot(t *testing.T) {
 		return false
 	})
 	worker, err := store.LoadSession(thread.ThreadID)
-	if err != nil || worker.Status != storage.StatusError || !strings.Contains(worker.Error, "Could not resume chat after restart") {
+	if err != nil || worker.Status != storage.StatusError || !strings.Contains(worker.Error, "could not resume chat after restart") {
 		t.Fatalf("thread = %+v, %v; want it failed with why", worker, err)
 	}
 	session, err := store.LoadSession(bot.ID)

@@ -39,7 +39,7 @@ func TestInputPeerFromResolvedUser(t *testing.T) {
 
 func TestExplicitTelegramPeerRecipients(t *testing.T) {
 	provider := &Provider{}
-	peer, conversationID, err := provider.resolvePeer(nil, nil, "channel:100:200")
+	peer, conversationID, err := provider.resolvePeer(context.TODO(), nil, "channel:100:200")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,9 @@ import (
 
 var ErrSessionNotFound = errors.New("session not found")
 
-var ErrPromptUnconfirmed = errors.New("Jaz restarted before the agent confirmed it had this task")
+var ErrPromptUnconfirmed = errors.New("jaz restarted before the agent confirmed it had this task")
+
+var ErrNoActiveTurn = errors.New("no active turn")
 
 // ErrThreadRunning reports a turn claim lost to a turn that already holds the
 // thread, such as one its agent began on its own.
