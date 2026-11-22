@@ -512,7 +512,7 @@ func (m *Manager) newACPSession(ctx context.Context, ac *agentConn, agent string
 	return m.newACPProtocolSession(ctx, ac, "agent", newSessionRequest{
 		Meta:       meta,
 		Cwd:        cwd,
-		MCPServers: m.mcpServersForAgent(ctx, ac.initRaw, session.RuntimeRef.MCPServerPolicy),
+		MCPServers: m.mcpServersForAgent(m.mcpAuthContext(ctx, ac.sandboxed), ac.initRaw, session.RuntimeRef.MCPServerPolicy, agent),
 	})
 }
 
