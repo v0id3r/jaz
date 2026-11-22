@@ -43,6 +43,11 @@ func (a Annotator) Clone() Annotator {
 	return clone
 }
 
+// OpenTextKey is the projection key of the text run the next event may continue.
+func (a Annotator) OpenTextKey() string {
+	return a.openKey
+}
+
 func NewProjector() *Projector {
 	return &Projector{byKey: map[string]int{}}
 }
@@ -144,6 +149,9 @@ func (p *Projector) Events() []Event {
 	items := make([]transcriptItem, 0, len(p.items))
 	for _, item := range p.items {
 		event := item.event
+		if item.chunks != nil {
+			event.ProjectionOp = ProjectionReplace
+		}
 		if len(item.chunks) > 1 {
 			text := strings.Join(item.chunks, "")
 			if event.Type == TypeACPMessage {
@@ -317,6 +325,13 @@ func ProviderSubagentProjectionKey(ownerID string, subagent ProviderSubagentEven
 		key += ownerID + ":"
 	}
 	return key + subagent.Provider + ":" + subagent.ID
+}
+
+// CoalescesAtEnd reports whether a coalesced event is the thread's current
+// status, which moves to the end of history when it changes. Other coalesced
+// events stay where they first appeared.
+func CoalescesAtEnd(event Event) bool {
+	return event.Type == "acp"
 }
 
 func StorageCoalesceKey(event Event) string {

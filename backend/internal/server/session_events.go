@@ -37,8 +37,8 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request, ses
 	replay := make([]sessionevents.Event, 0, len(stored))
 	legacyProjection := false
 	for _, event := range stored {
-		if event.Seq > afterSeq {
-			afterSeq = event.Seq
+		if event.StreamSeq > afterSeq {
+			afterSeq = event.StreamSeq
 		}
 		var ok bool
 		event, ok = storage.DisplayEvent(event)
@@ -66,7 +66,7 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request, ses
 		}
 		replay = replay[:0]
 		for _, event := range projector.Events() {
-			if event.Seq > resumeSeq {
+			if event.StreamSeq > resumeSeq {
 				event.ProjectionOp = sessionevents.ProjectionReplace
 				replay = append(replay, event)
 			}
@@ -81,11 +81,11 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request, ses
 		writeSessionEventSSE(w, flusher, event)
 	}
 	for event := range events {
-		if event.Seq > 0 && event.Seq <= afterSeq {
+		if event.StreamSeq > 0 && event.StreamSeq <= afterSeq {
 			continue
 		}
-		if event.Seq > afterSeq {
-			afterSeq = event.Seq
+		if event.StreamSeq > afterSeq {
+			afterSeq = event.StreamSeq
 		}
 		var ok bool
 		event, ok = storage.DisplayEvent(event)
@@ -132,8 +132,8 @@ func writeSessionEventSSE(w http.ResponseWriter, flusher http.Flusher, event ses
 	if err != nil {
 		return
 	}
-	if event.Seq > 0 {
-		_, _ = fmt.Fprintf(w, "id: %d\n", event.Seq)
+	if event.StreamSeq > 0 {
+		_, _ = fmt.Fprintf(w, "id: %d\n", event.StreamSeq)
 	}
 	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 	flusher.Flush()

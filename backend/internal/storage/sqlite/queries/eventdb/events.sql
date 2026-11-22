@@ -2,6 +2,7 @@
 SELECT
   thread_id,
   seq,
+  stream_seq,
   coalesce_key,
   projection_key,
   projection_op,
@@ -118,6 +119,7 @@ ORDER BY seq;
 SELECT
   thread_id,
   seq,
+  stream_seq,
   coalesce_key,
   projection_key,
   projection_op,
@@ -156,6 +158,7 @@ SELECT CAST(COALESCE((
 SELECT
   thread_id,
   seq,
+  stream_seq,
   projection_key,
   projection_op,
   type,
@@ -173,6 +176,7 @@ UNION ALL
 SELECT
   thread_id,
   seq,
+  stream_seq,
   projection_key,
   projection_op,
   type,
@@ -218,8 +222,8 @@ WHERE session_events.thread_id = sqlc.arg(thread_id)
 ORDER BY seq DESC
 LIMIT sqlc.arg(limit_count);
 
--- name: LatestSessionEventSeq :one
-SELECT CAST(COALESCE(MAX(seq), 0) AS INTEGER) AS seq
+-- name: LatestSessionEventStreamSeq :one
+SELECT CAST(COALESCE(MAX(stream_seq), 0) AS INTEGER) AS stream_seq
 FROM session_events
 WHERE thread_id = sqlc.arg(thread_id);
 
@@ -227,6 +231,7 @@ WHERE thread_id = sqlc.arg(thread_id);
 SELECT
   thread_id,
   seq,
+  stream_seq,
   projection_key,
   projection_op,
   type,
@@ -237,8 +242,8 @@ SELECT
   created_at_ms
 FROM session_events
 WHERE thread_id = sqlc.arg(thread_id)
-  AND seq > sqlc.arg(after_seq)
-ORDER BY seq;
+  AND stream_seq > sqlc.arg(after_stream_seq)
+ORDER BY stream_seq;
 
 -- name: ListSessionEventsAfterTime :many
 SELECT
@@ -258,7 +263,7 @@ WHERE thread_id = sqlc.arg(thread_id)
 ORDER BY seq;
 
 -- name: NextSessionEventSeq :one
-SELECT COALESCE(MAX(seq), 0) + 1 AS seq
+SELECT COALESCE(MAX(stream_seq), 0) + 1 AS seq
 FROM session_events
 WHERE thread_id = sqlc.arg(thread_id);
 
@@ -312,6 +317,7 @@ WHERE id = sqlc.arg(thread_id)
 INSERT INTO session_events (
   thread_id,
   seq,
+  stream_seq,
   coalesce_key,
   projection_key,
   projection_op,
@@ -324,6 +330,7 @@ INSERT INTO session_events (
 ) VALUES (
   sqlc.arg(thread_id),
   sqlc.arg(seq),
+  sqlc.arg(stream_seq),
   sqlc.arg(coalesce_key),
   sqlc.arg(projection_key),
   sqlc.arg(projection_op),
@@ -335,6 +342,7 @@ INSERT INTO session_events (
   sqlc.arg(created_at_ms)
 )
 ON CONFLICT(thread_id, seq) DO UPDATE SET
+  stream_seq = excluded.stream_seq,
   coalesce_key = excluded.coalesce_key,
   projection_key = excluded.projection_key,
   projection_op = excluded.projection_op,
@@ -383,3 +391,23 @@ WHERE thread_id = sqlc.arg(thread_id) AND seq = sqlc.arg(seq);
 -- name: DeleteSessionEvents :exec
 DELETE FROM session_events
 WHERE thread_id = sqlc.arg(thread_id) AND seq IN (sqlc.slice('seqs'));
+
+-- name: ListSessionEventProjectionHeads :many
+SELECT
+  thread_id,
+  seq,
+  stream_seq,
+  projection_key,
+  projection_op,
+  type,
+  content,
+  acp,
+  plan,
+  permission,
+  created_at_ms
+FROM session_events INDEXED BY idx_session_events_text_runs
+WHERE thread_id = sqlc.arg(thread_id)
+  AND seq < sqlc.arg(before_seq)
+  AND projection_op = 'append'
+  AND projection_key IN (sqlc.slice('projection_keys'))
+ORDER BY seq;

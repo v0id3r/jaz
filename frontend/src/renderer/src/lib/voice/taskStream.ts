@@ -1,5 +1,5 @@
 import type { SessionEvent, SessionMessages } from '@/lib/api/types'
-import { coalesceSessionEvents, mergeSessionEvent } from '@/lib/sessionEvents'
+import { coalesceSessionEvents, isAfterCursor, liveAfterCursor, mergeSessionEvent, streamSeq } from '@/lib/sessionEvents'
 import { taskFinished, voiceAgentRunning, voiceReplyChunks, voiceTaskActivity, voiceTaskUpdate, type VoiceTask } from '@/lib/voice/delegation'
 import { voiceQuestion } from '@/lib/voice/question'
 import { voiceChatContext, voiceToolContext } from '@/lib/voice/transcript'
@@ -109,10 +109,8 @@ export class VoiceTaskStream {
           this.append(`Current chat identity: the user renamed you to ${JSON.stringify(snapshot.session.title)}. This is now your own name.`, false)
         }
         snapshot.events = coalesceSessionEvents(snapshot.events)
-        for (const event of [...this.snapshot?.events ?? []].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))) {
-          if ((event.seq ?? 0) > snapshot.latest_event_seq) {
-            this.apply(snapshot, { ...event, projection_op: 'replace' })
-          }
+        for (const event of liveAfterCursor(this.snapshot?.events ?? [], snapshot.latest_event_seq)) {
+          if (event.seq) this.apply(snapshot, event)
         }
         this.snapshot = snapshot
         this.deliver(following.filter((task) => this.tasks.includes(task)))
@@ -126,11 +124,11 @@ export class VoiceTaskStream {
   }
 
   private apply(snapshot: SessionMessages, event: SessionEvent) {
-    if (event.seq && event.seq <= snapshot.latest_event_seq) {
+    if (!isAfterCursor(event, snapshot.latest_event_seq)) {
       return
     }
     snapshot.events = mergeSessionEvent(snapshot.events, event)
-    snapshot.latest_event_seq = Math.max(snapshot.latest_event_seq, event.seq ?? 0)
+    snapshot.latest_event_seq = Math.max(snapshot.latest_event_seq, streamSeq(event))
     snapshot.acp_state = event.acp?.state ?? snapshot.acp_state
     snapshot.acp_permissions = event.acp?.permissions ?? snapshot.acp_permissions
     const permission = event.permission

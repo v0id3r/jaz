@@ -37,20 +37,70 @@ export function sessionEventCoalesceKey(event: SessionEvent): string {
   return event.projection_key ?? ''
 }
 
-export function mergeSessionEvent(prev: SessionEvent[], event: SessionEvent): SessionEvent[] {
+// A live text run remembers where each folded delta starts, so a snapshot
+// cursor can cut it exactly.
+export type LiveSessionEvent = SessionEvent & { live_chunks?: { stream_seq: number; start: number }[] }
+
+// The live tail holds one entry per projection: a replace supersedes the held
+// copy, a text delta folds into its run.
+export function mergeSessionEvent(prev: LiveSessionEvent[], event: LiveSessionEvent): LiveSessionEvent[] {
   const key = sessionEventCoalesceKey(event)
-  let keyIndex = -1
-  for (let index = 0; index < prev.length; index += 1) {
-    const candidate = prev[index]
-    if (event.seq && candidate.session_id === event.session_id && candidate.seq === event.seq)
-      return prev
-    if (key && sessionEventCoalesceKey(candidate) === key) keyIndex = index
-  }
-  if (keyIndex === -1) return [...prev, event]
-  if (event.seq && (prev[keyIndex].seq ?? 0) >= event.seq) return prev
+  const index = prev.findLastIndex((candidate) =>
+    (event.seq && candidate.session_id === event.session_id && candidate.seq === event.seq) ||
+    (key && sessionEventCoalesceKey(candidate) === key),
+  )
+  if (index === -1) return [...prev, event.projection_op === 'append' ? appendLiveText(undefined, event) : event]
+  if (event.seq && streamSeq(prev[index]) >= streamSeq(event)) return prev
   const next = [...prev]
-  next[keyIndex] = event.projection_op === 'append' ? appendProjection(next[keyIndex], event) : event
+  next[index] = event.projection_op === 'append' ? appendLiveText(prev[index], event) : event
   return next
+}
+
+// The part of the live tail a snapshot taken at the cursor does not hold.
+export function liveAfterCursor(events: LiveSessionEvent[], cursor: number): LiveSessionEvent[] {
+  let changed = false
+  const next = events.flatMap((event) => {
+    const kept = eventAfterCursor(event, cursor)
+    changed ||= kept !== event
+    return kept ? [kept] : []
+  })
+  return changed ? next : events
+}
+
+// Whether a snapshot taken at the stream cursor misses this event.
+export function isAfterCursor(event: SessionEvent, cursor: number): boolean {
+  return !event.seq || streamSeq(event) > cursor
+}
+
+function eventAfterCursor(event: LiveSessionEvent, cursor: number): LiveSessionEvent | undefined {
+  if (!isAfterCursor(event, cursor)) return undefined
+  const chunks = event.live_chunks
+  if (!chunks) return event
+  const keep = chunks.findIndex((chunk) => chunk.stream_seq > cursor)
+  const start = chunks[keep].start
+  if (start === 0) return event
+  const text = liveText(event).slice(start)
+  return {
+    ...event,
+    ...(event.type === 'acp_thought' ? { acp: { ...event.acp!, thought: text } } : { content: text }),
+    live_chunks: chunks.slice(keep).map((chunk) => ({ stream_seq: chunk.stream_seq, start: chunk.start - start })),
+  }
+}
+
+function appendLiveText(held: LiveSessionEvent | undefined, event: LiveSessionEvent): LiveSessionEvent {
+  const start = held ? liveText(held).length : 0
+  const chunks = event.live_chunks ?? [{ stream_seq: streamSeq(event), start: 0 }]
+  return {
+    ...(held ? appendProjection(held, event) : event),
+    live_chunks: [
+      ...(held?.live_chunks ?? []),
+      ...chunks.map((chunk) => ({ stream_seq: chunk.stream_seq, start: chunk.start + start })),
+    ],
+  }
+}
+
+function liveText(event: SessionEvent): string {
+  return (event.type === 'acp_thought' ? event.acp?.thought : event.content) ?? ''
 }
 
 export function coalesceSessionEvents(events: SessionEvent[]): SessionEvent[] {
@@ -97,10 +147,15 @@ function appendProjection(prev: SessionEvent, event: SessionEvent): SessionEvent
   }
 }
 
+export function streamSeq(event: SessionEvent): number {
+  return event.stream_seq ?? event.seq ?? 0
+}
+
+// Copies of one event order newest first, so deduplication keeps the latest update.
 function compareEvents(a: SessionEvent, b: SessionEvent): number {
   const seqA = a.seq ?? 0
   const seqB = b.seq ?? 0
-  if (seqA && seqB && a.session_id === b.session_id) return seqA - seqB
+  if (seqA && seqB && a.session_id === b.session_id) return seqA - seqB || streamSeq(b) - streamSeq(a)
   const timeA = Date.parse(a.at)
   const timeB = Date.parse(b.at)
   return (Number.isNaN(timeA) ? 0 : timeA) - (Number.isNaN(timeB) ? 0 : timeB) || seqA - seqB

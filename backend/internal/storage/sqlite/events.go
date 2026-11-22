@@ -155,6 +155,7 @@ func (s *Store) appendSessionEventBatch(id string, closes []int64, change *stora
 	for i := range events {
 		stored := expanded[last[i]]
 		events[i].Seq = stored.Seq
+		events[i].StreamSeq = stored.StreamSeq
 		events[i].At = stored.At
 		events[i].SessionID = stored.SessionID
 		events[i].ProjectionKey = stored.ProjectionKey
@@ -184,12 +185,11 @@ func (s *Store) appendSessionEvents(ctx context.Context, id string, now time.Tim
 	eventq := eventdb.New(tx)
 	threadq := threaddb.New(tx)
 	var compactionPending int64
-	historyChanged := false
 	nextSeq, err := eventq.NextSessionEventSeq(ctx, id)
 	if err != nil {
 		return false, err
 	}
-	// Mutate in place so callers see the assigned Seq/At after the append.
+	// Mutate in place so callers see the assigned Seq/StreamSeq/At after the append.
 	for i := range events {
 		if events[i].SessionID == "" {
 			events[i].SessionID = id
@@ -197,9 +197,10 @@ func (s *Store) appendSessionEvents(ctx context.Context, id string, now time.Tim
 		if events[i].At.IsZero() {
 			events[i].At = now
 		}
+		streamSeq := nextSeq
+		nextSeq++
 		if events[i].Seq == 0 {
-			events[i].Seq = nextSeq
-			nextSeq++
+			events[i].Seq = streamSeq
 		}
 		events[i] = sessionevents.EnsureStatelessProjection(events[i])
 		if sessionevents.NeedsStorageCompaction(events[i]) {
@@ -207,30 +208,37 @@ func (s *Store) appendSessionEvents(ctx context.Context, id string, now time.Tim
 		}
 		coalesceKey := sessionevents.StorageCoalesceKey(events[i])
 		if coalesceKey != "" {
-			if sessionevents.NeedsProviderSubagentSnapshot(events[i]) {
-				previous, loadErr := eventq.GetSessionEventByCoalesceKey(ctx, eventdb.GetSessionEventByCoalesceKeyParams{
+			// Updates never shift history behind a client's cursor: an event either
+			// keeps its seq or moves past every loaded page. Its new stream_seq
+			// carries it to live readers.
+			previous, loadErr := eventq.GetSessionEventByCoalesceKey(ctx, eventdb.GetSessionEventByCoalesceKeyParams{
+				ThreadID:    events[i].SessionID,
+				CoalesceKey: coalesceKey,
+			})
+			switch {
+			case errors.Is(loadErr, sql.ErrNoRows):
+			case loadErr != nil:
+				return false, loadErr
+			case sessionevents.CoalescesAtEnd(events[i]):
+				if _, err := eventq.DeleteSessionEventByCoalesceKey(ctx, eventdb.DeleteSessionEventByCoalesceKeyParams{
 					ThreadID:    events[i].SessionID,
 					CoalesceKey: coalesceKey,
-				})
-				if loadErr == nil {
+				}); err != nil {
+					return false, err
+				}
+			default:
+				if sessionevents.NeedsProviderSubagentSnapshot(events[i]) {
 					stored, decodeErr := eventFromDBFields(previous.ThreadID, previous.Seq, previous.ProjectionKey, previous.ProjectionOp, previous.Type, previous.Content, previous.Acp, previous.Plan, previous.Permission, previous.CreatedAtMs)
 					if decodeErr != nil {
 						return false, decodeErr
 					}
 					events[i] = sessionevents.CompleteProviderSubagentSnapshot(stored, events[i])
-				} else if !errors.Is(loadErr, sql.ErrNoRows) {
-					return false, loadErr
 				}
+				events[i].Seq = previous.Seq
+				events[i].At = msToTime(previous.CreatedAtMs)
 			}
-			deleted, err := eventq.DeleteSessionEventByCoalesceKey(ctx, eventdb.DeleteSessionEventByCoalesceKeyParams{
-				ThreadID:    events[i].SessionID,
-				CoalesceKey: coalesceKey,
-			})
-			if err != nil {
-				return false, err
-			}
-			historyChanged = historyChanged || deleted > 0
 		}
+		events[i].StreamSeq = streamSeq
 		if err := insertSessionEvent(ctx, eventq, events[i], coalesceKey); err != nil {
 			return false, err
 		}
@@ -272,11 +280,6 @@ func (s *Store) appendSessionEvents(ctx context.Context, id string, now time.Tim
 		ThreadID:          id,
 	}); err != nil {
 		return false, err
-	}
-	if historyChanged {
-		if err := threadq.AdvanceTranscriptRevision(ctx, id); err != nil {
-			return false, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
@@ -321,8 +324,8 @@ func (s *Store) loadSessionEventsAfterTime(id string, afterMs int64) ([]sessione
 
 func (s *Store) loadSessionEventsAfter(id string, afterSeq int64) ([]sessionevents.Event, error) {
 	rows, err := eventdb.New(s.db).ListSessionEventsAfter(context.Background(), eventdb.ListSessionEventsAfterParams{
-		ThreadID: id,
-		AfterSeq: afterSeq,
+		ThreadID:       id,
+		AfterStreamSeq: afterSeq,
 	})
 	if err != nil {
 		return nil, err
@@ -357,6 +360,7 @@ func insertSessionEvent(ctx context.Context, q *eventdb.Queries, event sessionev
 	return q.UpsertSessionEvent(ctx, eventdb.UpsertSessionEventParams{
 		ThreadID:      event.SessionID,
 		Seq:           event.Seq,
+		StreamSeq:     max(event.StreamSeq, event.Seq),
 		CoalesceKey:   coalesceKey,
 		ProjectionKey: event.ProjectionKey,
 		ProjectionOp:  event.ProjectionOp,
@@ -370,11 +374,15 @@ func insertSessionEvent(ctx context.Context, q *eventdb.Queries, event sessionev
 }
 
 func eventFromDB(row eventdb.ListSessionEventsRow) (sessionevents.Event, error) {
-	return eventFromDBFields(row.ThreadID, row.Seq, row.ProjectionKey, row.ProjectionOp, row.Type, row.Content, row.Acp, row.Plan, row.Permission, row.CreatedAtMs)
+	event, err := eventFromDBFields(row.ThreadID, row.Seq, row.ProjectionKey, row.ProjectionOp, row.Type, row.Content, row.Acp, row.Plan, row.Permission, row.CreatedAtMs)
+	event.StreamSeq = row.StreamSeq
+	return event, err
 }
 
 func eventAfterFromDB(row eventdb.ListSessionEventsAfterRow) (sessionevents.Event, error) {
-	return eventFromDBFields(row.ThreadID, row.Seq, row.ProjectionKey, row.ProjectionOp, row.Type, row.Content, row.Acp, row.Plan, row.Permission, row.CreatedAtMs)
+	event, err := eventFromDBFields(row.ThreadID, row.Seq, row.ProjectionKey, row.ProjectionOp, row.Type, row.Content, row.Acp, row.Plan, row.Permission, row.CreatedAtMs)
+	event.StreamSeq = row.StreamSeq
+	return event, err
 }
 
 func eventFromDBFields(threadID string, seq int64, projectionKey, projectionOp, typ string, content string, acpRaw sql.NullString, planRaw sql.NullString, permissionRaw sql.NullString, createdAtMs int64) (sessionevents.Event, error) {
