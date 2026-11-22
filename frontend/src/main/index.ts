@@ -20,7 +20,8 @@ import { attachBrowserCloseShortcut } from '@main/browserCloseShortcut'
 import { attachWindowOpenHandler } from '@main/browserPopups'
 import { attachWindowLifecycle, installMainDiagnostics } from './diagnostics'
 import { installCredentialEncryption } from './credentialEncryption'
-import { getDeviceIdentity, getDeviceMetadata } from './deviceIdentity'
+import { deviceAccessToken, deviceKeyFetch, deviceProof, getDeviceIdentity, getDeviceMetadata } from './deviceIdentity'
+import { DeviceTokenError } from '@shared/deviceProof'
 import { registerDictation } from './dictation'
 import { configureAppPermissions } from './permissions'
 import { createNotifications } from './notifications'
@@ -65,11 +66,14 @@ installBrowserPasswords()
 let mainWindow: BrowserWindow | null = null
 const updates = createUpdateController(() => mainWindow)
 const previewURLTargets = new Set<number>()
-const notifications = createNotifications(openInMain)
+// A session whose device key is the credential has no token for the monitor
+// to present; it gets DPoP access tokens instead.
+const notifications = createNotifications(openInMain, (input, init) =>
+  connectionSession.current().session?.deviceKey ? deviceKeyFetch(String(input), init) : fetch(input, init))
 const connectionSession = createConnectionSession({
-  rendererPath: join(__dirname, '../renderer/index.html'),
   startLocal: startLocalBackend,
   profile: () => ({ ...getDeviceIdentity(), ...getDeviceMetadata() }),
+  fetchWithKey: deviceKeyFetch,
   stopConsumers: () => notifications.stop(),
 })
 
@@ -321,6 +325,20 @@ app.whenReady().then(() => {
     })
   })
   ipcMain.handle('jaz:get-device-identity', () => getDeviceIdentity())
+  ipcMain.handle('jaz:device-proof', (event, method: string, url: string, token?: string) => {
+    connectionSession.authorize(event)
+    return deviceProof(method, url, token)
+  })
+  // Only for the session's own backend, so no page can have the key
+  // authenticate it elsewhere. Errors cross IPC as the OAuth error code.
+  ipcMain.handle('jaz:device-access-token', (event, baseUrl: string, rejected?: string) => {
+    connectionSession.authorize(event)
+    if (baseUrl !== connectionSession.current().url) {
+      return { error: 'invalid_request' }
+    }
+    return deviceAccessToken(baseUrl, rejected).then((token) => ({ token }),
+      (error: unknown) => ({ error: error instanceof DeviceTokenError ? error.code : 'token_request_failed' }))
+  })
   ipcMain.handle('jaz:get-device-metadata', () => getDeviceMetadata())
   ipcMain.handle('jaz:configure-notifications', (event, config) => {
     connectionSession.authorizeOwner(event)

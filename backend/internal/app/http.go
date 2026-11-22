@@ -1,6 +1,9 @@
 package app
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/wins/jaz/backend/internal/acp"
 	"github.com/wins/jaz/backend/internal/canvas"
 	"github.com/wins/jaz/backend/internal/deviceauth"
@@ -58,6 +61,16 @@ func HTTPModule() fx.Option {
 	)
 }
 
-func NewDeviceAuth(store *sqlitestore.Store) *deviceauth.Service {
-	return deviceauth.New(store)
+func NewDeviceAuth(store *sqlitestore.Store, cfg Config) (*deviceauth.Service, error) {
+	if !cfg.Devices.RequireProof {
+		if !cfg.Devices.Proxy.IsZero() {
+			return nil, errors.New("jaz.devices.proxy: needs jaz.devices.requireproof")
+		}
+		return deviceauth.New(store), nil
+	}
+	devices, err := deviceauth.NewProofMode(store, cfg.Devices.Origins, cfg.Devices.Proxy)
+	if err != nil {
+		return nil, fmt.Errorf("jaz.devices.%v", err)
+	}
+	return devices, nil
 }

@@ -15,7 +15,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 ORDER BY
   CASE status
@@ -48,7 +49,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 WHERE id = sqlc.arg(id)
 LIMIT 1;
@@ -70,7 +72,8 @@ SELECT
   last_seen_at_ms,
   last_seen_ip,
   user_agent,
-  app_version
+  app_version,
+  user_identity
 FROM devices
 WHERE token_hash = sqlc.arg(token_hash)
 LIMIT 1;
@@ -156,7 +159,8 @@ ON CONFLICT(id) DO UPDATE SET
   last_seen_at_ms = excluded.last_seen_at_ms,
   last_seen_ip = excluded.last_seen_ip,
   user_agent = excluded.user_agent,
-  app_version = excluded.app_version;
+  app_version = excluded.app_version,
+  user_identity = '';
 
 -- name: UpdateDeviceSeen :execrows
 UPDATE devices
@@ -235,3 +239,9 @@ WHERE device_pairing_requests.id = sqlc.arg(id)
   AND secret_hash = sqlc.arg(secret_hash)
   AND status = 'approved'
   AND expires_at_ms > sqlc.arg(at_ms);
+
+-- name: BindDeviceUser :execrows
+UPDATE devices
+SET user_identity = sqlc.arg(user_identity)
+WHERE id = sqlc.arg(id)
+  AND user_identity IN ('', sqlc.arg(user_identity));

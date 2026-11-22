@@ -26,7 +26,7 @@ export function createNotifications(open: (path: string) => void) {
   const stream = createAlertStream((alert) => {
     const received = Date.now()
     queue = queue.then(() => deliver(alert, received)).catch((error) => logMain('Alert delivery failed', error))
-  })
+  }, fetcher)
 
   async function deliver(alert: Alert, received: number): Promise<void> {
     if (mode === 'off' || delivered.get(alert.sessionId) === alert.key || Date.now() - received > ISLAND_HOLD_MS) return

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -33,9 +34,11 @@ const pairingTTL = 10 * time.Minute
 type Store interface {
 	ListDevices() ([]storage.Device, error)
 	CountApprovedDevices() (int, error)
+	LoadDevice(id string) (storage.Device, error)
 	LoadDeviceByTokenHash(string) (storage.Device, error)
 	SaveApprovedDevice(storage.SaveApprovedDevice) (storage.Device, error)
 	UpdateDeviceSeen(id, ip, userAgent string, at time.Time) error
+	BindDeviceUser(id, user string) (bool, error)
 	RevokeDevice(id string, at time.Time) (storage.Device, error)
 	CreateDevicePairing(storage.CreateDevicePairing) (storage.DevicePairing, error)
 	LoadDevicePairing(id string) (storage.DevicePairing, string, error)
@@ -46,9 +49,19 @@ type Store interface {
 }
 
 type Service struct {
-	store  Store
-	access access
-	now    func() time.Time
+	requireProof bool
+	// origins are the normalized origins clients reach this server on; proofs
+	// and client assertions must name one of them or, on a direct loopback
+	// request, its own origin.
+	origins []string
+	store   Store
+	access  access
+	proofs  spentProofs
+	tokens  accessTokens
+	// proxy names whom access tokens are issued to and who owns the host;
+	// nil without a trusted auth proxy.
+	proxy *trustedProxy
+	now   func() time.Time
 }
 
 type SeenInfo struct {
@@ -74,6 +87,10 @@ type Registration struct {
 	Identity DeviceIdentity
 	Profile  DeviceProfile
 	Seen     SeenInfo
+	Proof    Proof
+	// ProxyJWT is the trusted auth proxy's JWT; a host owner's pairing
+	// request is approved at once.
+	ProxyJWT string
 }
 
 type Principal struct {
@@ -81,6 +98,14 @@ type Principal struct {
 	DeviceID        string `json:"device_id,omitempty"`
 	EnrollmentToken string `json:"-"`
 	CredentialHash  string `json:"-"`
+	// Owner marks a device whose access token was issued to a host owner the
+	// trusted auth proxy vouched for.
+	Owner bool `json:"-"`
+}
+
+// Manages reports whether the principal may manage devices and enrollment.
+func (p Principal) Manages() bool {
+	return p.Kind == PrincipalRoot || p.Owner
 }
 
 type RegisterResult struct {
@@ -101,6 +126,53 @@ func New(store Store) *Service {
 	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
 }
 
+// NewProofMode returns a Service whose devices prove possession of their key
+// with a DPoP proof on every request and remote registration, and hold no
+// long-lived token but access tokens from IssueAccessToken. origins are the
+// origins clients reach this server on; a non-zero proxy issues those tokens
+// only to the users it vouches for.
+func NewProofMode(store Store, origins []string, proxy ProxyConfig) (*Service, error) {
+	if len(origins) == 0 {
+		return nil, errors.New("origins: proof mode needs the origins clients reach this server on")
+	}
+	s := New(store)
+	s.requireProof = true
+	for _, raw := range origins {
+		origin := normalizeOrigin(strings.TrimSpace(raw))
+		if origin == "" {
+			return nil, fmt.Errorf("origins: %q is not an http(s) origin", raw)
+		}
+		s.origins = append(s.origins, origin)
+	}
+	proxy.Header, proxy.JWKS, proxy.Issuer, proxy.Audience = strings.TrimSpace(proxy.Header), strings.TrimSpace(proxy.JWKS), strings.TrimSpace(proxy.Issuer), strings.TrimSpace(proxy.Audience)
+	if proxy.IsZero() {
+		return s, nil
+	}
+	if proxy.Header == "" || proxy.JWKS == "" || proxy.Issuer == "" || proxy.Audience == "" {
+		return nil, errors.New("proxy: needs header, jwks, issuer and audience")
+	}
+	s.proxy = &trustedProxy{
+		header:    proxy.Header,
+		issuer:    &jwtIssuer{jwks: proxy.JWKS, issuer: proxy.Issuer, audience: proxy.Audience, client: &http.Client{Timeout: 10 * time.Second}},
+		users:     proxy.Users,
+		roles:     proxy.Roles,
+		roleClaim: proxy.RoleClaim,
+	}
+	return s, nil
+}
+
+// ProxyHeader names the request header a trusted auth proxy sends its JWT in.
+func (s *Service) ProxyHeader() string {
+	if s.proxy == nil {
+		return ""
+	}
+	return s.proxy.header
+}
+
+func (s *Service) RequireProof() bool {
+	return s.requireProof
+}
+
 func WithPrincipal(ctx context.Context, principal Principal) context.Context {
 	return context.WithValue(ctx, contextKey{}, principal)
 }
@@ -114,20 +186,26 @@ func (s *Service) ApprovedDeviceCount() (int, error) {
 	return s.store.CountApprovedDevices()
 }
 
-func (s *Service) Authenticate(token string, seen SeenInfo) (Principal, error) {
+func (s *Service) Authenticate(token string, proof Proof, seen SeenInfo) (Principal, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return Principal{}, ErrUnauthorized
 	}
-	device, err := s.store.LoadDeviceByTokenHash(TokenHash(token))
+	device, err := s.loadCredential(TokenHash(token))
+	if errors.Is(err, ErrTokenInvalid) {
+		return Principal{}, err
+	}
 	if err != nil {
 		return Principal{}, ErrUnauthorized
 	}
 	switch device.Status {
 	case storage.DeviceStatusApproved:
+		if err := s.verifyProof(proof, device.PublicKey, TokenHash(token)); err != nil {
+			return Principal{}, err
+		}
 		seen = normalizeSeenInfo(seen)
 		_ = s.store.UpdateDeviceSeen(device.ID, seen.IP, seen.UserAgent, s.now())
-		return Principal{Kind: PrincipalDevice, DeviceID: device.ID, CredentialHash: TokenHash(token)}, nil
+		return Principal{Kind: PrincipalDevice, DeviceID: device.ID, CredentialHash: TokenHash(token), Owner: s.ownerToken(TokenHash(token))}, nil
 	case storage.DeviceStatusPending:
 		return Principal{}, ErrApprovalRequired
 	default:
@@ -139,7 +217,7 @@ func (s *Service) Register(reg Registration) (RegisterResult, error) {
 	s.access.mu.Lock()
 	defer s.access.mu.Unlock()
 	var err error
-	reg, err = normalizeRegistration(reg)
+	reg, err = s.acceptRegistration(reg)
 	if err != nil {
 		return RegisterResult{}, err
 	}
@@ -170,11 +248,15 @@ func (s *Service) RegisterApproved(reg Registration) (RegisterResult, error) {
 
 func (s *Service) CreatePairing(reg Registration) (storage.DevicePairing, string, error) {
 	var err error
-	reg, err = normalizeRegistration(reg)
+	reg, err = s.acceptRegistration(reg)
 	if err != nil {
 		return storage.DevicePairing{}, "", err
 	}
-	return s.createPairing(reg)
+	pairing, secret, err := s.createPairing(reg)
+	if err == nil && s.ownerRequest(reg.ProxyJWT) {
+		pairing, err = s.ApprovePairing(pairing.ID)
+	}
+	return pairing, secret, err
 }
 
 func (s *Service) createPairing(reg Registration) (storage.DevicePairing, string, error) {
@@ -227,11 +309,11 @@ func (s *Service) PollPairing(id, secret string) (PairingPoll, error) {
 	if pairing.Status == storage.PairingStatusApproved {
 		s.access.mu.Lock()
 		defer s.access.mu.Unlock()
-		token, err := newToken()
+		token, tokenHash, err := s.deviceCredential(pairing.DeviceID)
 		if err != nil {
 			return PairingPoll{}, err
 		}
-		if err := s.store.ClaimDevicePairing(pairing.ID, secretHash, TokenHash(token), s.now()); err != nil {
+		if err := s.store.ClaimDevicePairing(pairing.ID, secretHash, tokenHash, s.now()); err != nil {
 			return PairingPoll{}, ErrUnauthorized
 		}
 		pairing.Device.Status = storage.DeviceStatusApproved
@@ -318,8 +400,18 @@ func normalizeRegistration(reg Registration) (Registration, error) {
 	return reg, nil
 }
 
+// acceptRegistration normalizes a registration that arrives without a host
+// credential, so its key must be proven before a device record carries it.
+func (s *Service) acceptRegistration(reg Registration) (Registration, error) {
+	reg, err := normalizeRegistration(reg)
+	if err != nil {
+		return Registration{}, err
+	}
+	return reg, s.verifyProof(reg.Proof, reg.Identity.PublicKey, "")
+}
+
 func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
-	token, err := newToken()
+	token, tokenHash, err := s.deviceCredential(reg.Identity.DeviceID)
 	if err != nil {
 		return RegisterResult{}, err
 	}
@@ -332,7 +424,7 @@ func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
 		Platform:   reg.Profile.Platform,
 		Family:     reg.Profile.Family,
 		Model:      reg.Profile.Model,
-		TokenHash:  TokenHash(token),
+		TokenHash:  tokenHash,
 		CreatedAt:  now,
 		ApprovedAt: now,
 		LastSeenAt: now,
@@ -349,7 +441,7 @@ func (s *Service) saveApprovedDevice(reg Registration) (RegisterResult, error) {
 
 func normalizeDeviceIdentity(publicKey, deviceID string) (string, string, error) {
 	raw, err := decodeRawPublicKey(publicKey)
-	if err != nil || len(raw) != 32 {
+	if err != nil || keyVerifier("EdDSA", raw) == nil && keyVerifier("ES256", raw) == nil {
 		return "", "", ErrInvalidIdentity
 	}
 	sum := sha256.Sum256(raw)

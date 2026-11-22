@@ -42,7 +42,7 @@ func TestPairingCannotEditApprovedProfileBeforeClaim(t *testing.T) {
 		if device.Name != info.Profile.Name || device.Kind != info.Profile.Kind {
 			t.Fatalf("unclaimed proposal changed trusted profile: %+v", device)
 		}
-		if _, err := service.Authenticate(registered.Token, SeenInfo{}); err != nil {
+		if _, err := service.Authenticate(registered.Token, Proof{}, SeenInfo{}); err != nil {
 			t.Fatalf("unclaimed proposal changed credential: %v", err)
 		}
 	}
@@ -54,10 +54,10 @@ func TestPairingCannotEditApprovedProfileBeforeClaim(t *testing.T) {
 	if err != nil || device.Name != proposal.Profile.Name || device.Kind != proposal.Profile.Kind {
 		t.Fatalf("approved exchange did not apply profile: %+v, %v", device, err)
 	}
-	if _, err := service.Authenticate(poll.Token, SeenInfo{}); err != nil {
+	if _, err := service.Authenticate(poll.Token, Proof{}, SeenInfo{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Authenticate(registered.Token, SeenInfo{}); err == nil {
+	if _, err := service.Authenticate(registered.Token, Proof{}, SeenInfo{}); err == nil {
 		t.Fatal("old credential survived completed exchange")
 	}
 }
@@ -171,7 +171,7 @@ func TestOldPairingProofCannotOverrideReenrollment(t *testing.T) {
 			if _, err := service.PollPairing(pairing.ID, proof); err == nil {
 				t.Fatal("older authorization replaced the new credential")
 			}
-			if _, err := service.Authenticate(fresh.Token, SeenInfo{}); err != nil {
+			if _, err := service.Authenticate(fresh.Token, Proof{}, SeenInfo{}); err != nil {
 				t.Fatalf("fresh credential invalidated: %v", err)
 			}
 		})

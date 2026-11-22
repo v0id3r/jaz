@@ -47,16 +47,10 @@ export function connectTerminal(
   measure()
   const size = () => ({ cols: term.cols, rows: term.rows })
   const params = new URLSearchParams({ cols: String(term.cols), rows: String(term.rows) })
-  let socket: WebSocket
-  try {
-    socket = apiWebSocket(`${path}?${params}`)
-  } catch {
-    term.dispose()
-    onEvent({ type: 'error', error: 'Terminal connection failed.' })
-    return
-  }
+  let socket: WebSocket | null = null
+  let closed = false
   const send = (message: ClientMessage) => {
-    if (socket.readyState !== WebSocket.OPEN) return false
+    if (socket?.readyState !== WebSocket.OPEN) return false
     try {
       socket.send(JSON.stringify(message))
       return true
@@ -69,16 +63,25 @@ export function connectTerminal(
   const input = term.onData((data) => send({ type: 'input', data }))
   const resize = term.onResize(() => send({ type: 'resize', ...size() }))
 
-  socket.onopen = () => send({ type: 'resize', ...size() })
-  socket.onmessage = ({ data }) => {
-    if (typeof data !== 'string') return
-    const event = parseTerminalMessage(data)
-    if (!event) return
-    if (event.type === 'output') term.write(event.data ?? '')
-    else onEvent(event)
-  }
-  socket.onerror = () => onEvent({ type: 'error', error: 'Terminal connection failed.' })
-  socket.onclose = () => onEvent({ type: 'closed' })
+  apiWebSocket(`${path}?${params}`).then((opened) => {
+    if (closed) {
+      opened.close()
+      return
+    }
+    socket = opened
+    opened.onopen = () => send({ type: 'resize', ...size() })
+    opened.onmessage = ({ data }) => {
+      if (typeof data !== 'string') return
+      const event = parseTerminalMessage(data)
+      if (!event) return
+      if (event.type === 'output') term.write(event.data ?? '')
+      else onEvent(event)
+    }
+    opened.onerror = () => onEvent({ type: 'error', error: 'Terminal connection failed.' })
+    opened.onclose = () => onEvent({ type: 'closed' })
+  }, (error: Error) => {
+    if (!closed) onEvent({ type: 'error', error: error.message || 'Terminal connection failed.' })
+  })
 
   return {
     term,
@@ -87,11 +90,14 @@ export function connectTerminal(
       observer.disconnect()
       input.dispose()
       resize.dispose()
-      socket.onclose = null
-      socket.onmessage = null
-      socket.onopen = null
-      socket.onerror = null
-      socket.close()
+      closed = true
+      if (socket) {
+        socket.onclose = null
+        socket.onmessage = null
+        socket.onopen = null
+        socket.onerror = null
+        socket.close()
+      }
       term.dispose()
     },
   }

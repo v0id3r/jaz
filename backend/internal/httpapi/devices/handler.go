@@ -65,6 +65,7 @@ type deviceDTO struct {
 	LastSeenIP string     `json:"last_seen_ip,omitempty"`
 	UserAgent  string     `json:"user_agent,omitempty"`
 	AppVersion string     `json:"app_version,omitempty"`
+	User       string     `json:"user,omitempty"`
 }
 
 type pairingDTO struct {
@@ -153,7 +154,7 @@ func (h Handler) List(w http.ResponseWriter, r *http.Request) {
 		Devices:         deviceDTOs(devices),
 		Pairings:        pairingDTOs(pairings),
 		CurrentDeviceID: principal.DeviceID,
-		CanManage:       principal.Kind == deviceauth.PrincipalRoot,
+		CanManage:       principal.Manages(),
 	})
 }
 
@@ -169,7 +170,7 @@ func (h Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := http.StatusOK
-	if result.Token == "" {
+	if result.Pairing != nil {
 		status = http.StatusAccepted
 	}
 	httpapi.WriteJSON(w, status, registerDTO(result))
@@ -192,6 +193,7 @@ func (h Handler) CreatePairing(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
+	info.ProxyJWT = r.Header.Get(h.service.ProxyHeader())
 	pairing, secret, err := h.service.CreatePairing(info)
 	if err != nil {
 		writeDeviceAuthError(w, err)
@@ -288,7 +290,8 @@ func inputFromRequest(r *http.Request) (deviceauth.Registration, error) {
 			Model:      strings.TrimSpace(r.Header.Get("X-Jaz-Device-Model")),
 			AppVersion: strings.TrimSpace(r.Header.Get("X-Jaz-App-Version")),
 		},
-		Seen: deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent},
+		Seen:  deviceauth.SeenInfo{IP: info.IP, UserAgent: info.UserAgent},
+		Proof: RequestProof(r),
 	}
 	if r.Body == nil {
 		return reg, nil
@@ -345,7 +348,7 @@ func writeDeviceAuthError(w http.ResponseWriter, err error) {
 		httpapi.WriteError(w, http.StatusForbidden, err)
 		return
 	}
-	if errors.Is(err, deviceauth.ErrUnauthorized) {
+	if errors.Is(err, deviceauth.ErrUnauthorized) || errors.Is(err, deviceauth.ErrProofInvalid) {
 		httpapi.WriteError(w, http.StatusUnauthorized, err)
 		return
 	}
@@ -358,7 +361,7 @@ func writeDeviceAuthError(w http.ResponseWriter, err error) {
 
 func requireOwner(w http.ResponseWriter, r *http.Request) bool {
 	principal, _ := deviceauth.PrincipalFromContext(r.Context())
-	if principal.Kind != deviceauth.PrincipalRoot {
+	if !principal.Manages() {
 		httpapi.WriteError(w, http.StatusForbidden, fmt.Errorf("manage devices from the host computer"))
 		return false
 	}
@@ -428,6 +431,7 @@ func deviceDTOFromStorage(device storage.Device) deviceDTO {
 		LastSeenIP: device.LastSeenIP,
 		UserAgent:  device.UserAgent,
 		AppVersion: device.AppVersion,
+		User:       device.User,
 	}
 }
 

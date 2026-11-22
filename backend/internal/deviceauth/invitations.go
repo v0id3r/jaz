@@ -9,7 +9,7 @@ type invitation struct {
 }
 
 func (s *Service) CreateInvitation(owner Principal) (string, error) {
-	if owner.Kind != PrincipalRoot {
+	if !owner.Manages() {
 		return "", ErrForbidden
 	}
 	token, err := newToken()
@@ -32,7 +32,7 @@ func (s *Service) CreateInvitation(owner Principal) (string, error) {
 }
 
 func (s *Service) RegisterInvited(token string, reg Registration) (RegisterResult, error) {
-	reg, err := normalizeRegistration(reg)
+	reg, err := s.acceptRegistration(reg)
 	if err != nil {
 		return RegisterResult{}, err
 	}
