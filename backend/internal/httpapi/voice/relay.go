@@ -188,7 +188,7 @@ func (h *RelayHandler) command(ctx context.Context, session string, call *live.D
 	if err == nil && command.Type == "start" {
 		var sdp string
 		if json.Unmarshal(result, &sdp) != nil || !strings.HasPrefix(sdp, "v=0\r\n") && !strings.HasPrefix(sdp, "v=0\n") || len(sdp) > 128*1024 {
-			return nil, errors.New("Claude returned an invalid voice connection answer")
+			return nil, errors.New("claude returned an invalid voice connection answer")
 		}
 	}
 	return result, err

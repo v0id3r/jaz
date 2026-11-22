@@ -67,7 +67,7 @@ func pushFixture(t *testing.T, source string) (*Service, *sqlitestore.Store, *ca
 		t.Fatal(err)
 	}
 	sender := &capturingSender{}
-	service := NewService(store, sender, func(string) bool {
+	service := NewService(store, sender, nil, func(string) bool {
 		return false
 	})
 	if err := service.Register("phone", Registration{Token: strings.Repeat("ab", 32), Environment: "development", InstallationID: "installation"}); err != nil {
@@ -158,7 +158,7 @@ func TestChatCompletionFollowsPersistedTurnAndUpdatesLiveActivity(t *testing.T) 
 	if sender.pushes[2].payload["aps"].(map[string]any)["event"] != "end" {
 		t.Fatal("completed activity remains live")
 	}
-	restarted := NewService(store, sender, func(string) bool {
+	restarted := NewService(store, sender, nil, func(string) bool {
 		return false
 	})
 	if err := restarted.process(context.Background(), idle); err != nil {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/wins/jaz/backend/internal/bots"
@@ -151,6 +152,7 @@ func (s *Service) deliver(ctx context.Context, session storage.Session, state co
 		return err
 	}
 	var failures []error
+	suppressed := activeSession(alert, registrations, approved)
 	for _, setting := range registrations {
 		if !approved[setting.Key] {
 			continue
@@ -160,8 +162,11 @@ func (s *Service) deliver(ctx context.Context, session storage.Session, state co
 			failures = append(failures, err)
 			continue
 		}
-		if alert != nil && device.Token != "" {
+		if alert != nil && !suppressed && device.Token != "" {
 			failures = append(failures, s.sendAlert(ctx, setting.Key, device.Registration, *alert))
+		}
+		if alert != nil && !suppressed && device.WebPush != nil {
+			failures = append(failures, s.sendWebPush(ctx, setting.Key, *device.WebPush, *alert))
 		}
 		if relevant {
 			failures = append(failures, s.track(ctx, setting.Key, device.Activities, session, state))
@@ -244,6 +249,21 @@ func (s *Service) refresh(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
+func activeSession(alert *Alert, registrations []storage.Setting, approved map[string]bool) bool {
+	if alert == nil {
+		return false
+	}
+	now := time.Now()
+	for _, setting := range registrations {
+		var device deviceRegistration
+		if approved[setting.Key] && json.Unmarshal(setting.Value, &device) == nil && device.Presence != nil &&
+			device.Presence.SessionID == alert.SessionID && device.Presence.ExpiresAt.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) sendAlert(ctx context.Context, deviceID string, registration Registration, alert Alert) error {
 	deliveryID := deviceID + ":" + alert.SessionID
 	encodedKey, _ := json.Marshal(alert.Key)
@@ -281,6 +301,52 @@ func (s *Service) sendAlert(ctx context.Context, deviceID string, registration R
 			return s.update(deviceID, func(device *deviceRegistration) {
 				if device.Token == registration.Token {
 					device.Token = ""
+				}
+			})
+		}
+		return err
+	}
+	_, err = s.store.SaveSetting("mobile_delivered", deliveryID, encodedKey)
+	return err
+}
+
+func (s *Service) sendWebPush(ctx context.Context, deviceID string, subscription WebPushSubscription, alert Alert) error {
+	deliveryID := deviceID + ":web:" + alert.SessionID
+	encodedKey, _ := json.Marshal(alert.Key)
+	previous, err := s.store.LoadSetting("mobile_delivered", deliveryID)
+	if err == nil && string(previous.Value) == string(encodedKey) {
+		return nil
+	}
+	if err != nil && !errors.Is(err, storage.ErrSettingNotFound) {
+		return err
+	}
+	title := cmp.Or(alert.Title, alert.Name, "Jaz")
+	kind := "bots"
+	if alert.Kind == "chat" {
+		kind = "sessions"
+	}
+	payload := map[string]any{
+		"title":      title,
+		"body":       alert.Body,
+		"session_id": alert.SessionID,
+		"kind":       alert.Kind,
+	}
+	if subscription.Declarative {
+		payload["web_push"] = 8030
+		payload["notification"] = map[string]any{
+			"title":    title,
+			"body":     alert.Body,
+			"navigate": strings.TrimRight(s.webPush.PublicURL(), "/") + "/" + kind + "/" + alert.SessionID + "?from=push",
+		}
+	}
+	if alert.RequestID != "" {
+		payload["request_id"] = alert.RequestID
+	}
+	if err := s.webPush.Send(ctx, subscription, payload); err != nil {
+		if errors.Is(err, ErrInvalidToken) {
+			return s.update(deviceID, func(device *deviceRegistration) {
+				if device.WebPush != nil && device.WebPush.Endpoint == subscription.Endpoint {
+					device.WebPush = nil
 				}
 			})
 		}

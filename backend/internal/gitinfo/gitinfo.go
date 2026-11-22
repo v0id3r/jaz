@@ -528,7 +528,76 @@ func splitNul(out string) []string {
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	return gitWithOptions(ctx, dir, nil, args...)
+}
+
+func gitWithOptions(ctx context.Context, dir string, options []string, args ...string) (string, error) {
+	return gitIn(ctx, dir, gitjail.Policy{}, options, args...)
+}
+
+// command runs git in dir under gitjail, with extra granting what the
+// command needs beyond dir's repository. Repository settings that would run
+// commands are switched off where Jaz can do without them, so jailed git does
+// not fail on them.
+func command(ctx context.Context, dir string, extra gitjail.Policy, options []string, args ...string) (*gitjail.Cmd, error) {
+	policy, err := gitjail.ForRepo(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(args) > 0 && args[0] == "init" {
+		policy.Writable = append(policy.Writable, dir)
+	}
+	policy.Writable = append(policy.Writable, extra.Writable...)
+	policy.Network, policy.Shell = extra.Network, extra.Shell
+	if len(args) > 0 && (args[0] == "commit" || args[0] == "verify-commit") {
+		policy.Shell = true
+		policy.Readable = append(policy.Readable, signingPaths(ctx, dir)...)
+	}
+	gitArgs := []string{"-C", dir, "-c", "core.fsmonitor=false"}
+	if len(args) == 0 || args[0] != "commit" || slices.Contains(args, "--no-verify") {
+		gitArgs = append(gitArgs, "-c", "core.hooksPath=/dev/null")
+	}
+	gitArgs = append(gitArgs, options...)
+	if len(args) > 0 && args[0] == "diff" {
+		args = append([]string{"diff", "--no-ext-diff", "--no-textconv"}, args[1:]...)
+	}
+	cmd, err := gitjail.Command(ctx, policy, append(gitArgs, args...)...)
+	if err == nil {
+		cmd.Env = append(os.Environ(), "TMPDIR="+dir)
+	}
+	return cmd, err
+}
+
+func signingPaths(ctx context.Context, dir string) []string {
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "config", "--get-regexp", `^(user\.signingkey|gpg\.ssh\.allowedSignersFile)$`).Output()
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for line := range strings.Lines(strings.TrimSpace(string(out))) {
+		_, path, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(path, "~/") {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				path = filepath.Join(home, path[2:])
+			}
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func gitIn(ctx context.Context, dir string, extra gitjail.Policy, options []string, args ...string) (string, error) {
+	cmd, err := command(ctx, dir, extra, options, args...)
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w", args[0], err)
+	}
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr

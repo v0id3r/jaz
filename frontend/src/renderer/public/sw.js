@@ -1,0 +1,53 @@
+self.addEventListener('install', () => {
+  self.skipWaiting()
+})
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim())
+})
+
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url)
+  if (event.request.mode !== 'navigate' || url.searchParams.get('from') !== 'push') return
+  event.respondWith((async () => {
+    const [client] = await self.clients.matchAll({ type: 'window' })
+    if (!client) return fetch(event.request)
+    client.postMessage({ type: 'jaz:open', path: url.pathname })
+    return new Response(null, { status: 204 })
+  })())
+})
+
+self.addEventListener('push', (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch {}
+  const session = typeof data.session_id === 'string' ? data.session_id : ''
+  event.waitUntil(self.registration.showNotification(data.title || 'Jaz', {
+    body: typeof data.body === 'string' ? data.body : '',
+    tag: session ? `jaz:${session}:${data.kind || 'update'}` : 'jaz',
+    data: { session, kind: data.kind || 'chat' },
+  }))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const { session, kind = 'chat' } = event.notification.data
+  const path = session ? `/${kind === 'chat' ? 'sessions' : 'bots'}/${encodeURIComponent(session)}` : '/'
+  event.waitUntil((async () => {
+    const url = new URL(path, self.location.origin).href
+    if (/iPhone|iPad/.test(self.navigator?.userAgent || '')) {
+      await self.clients.openWindow(url)
+      return
+    }
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    for (const client of windows) {
+      if ('focus' in client) {
+        client.postMessage({ type: 'jaz:open', path })
+        await client.focus()
+        return
+      }
+    }
+    await self.clients.openWindow(url)
+  })())
+})

@@ -579,6 +579,10 @@ async function init(): Promise<void> {
     return
   }
   const url = normalizeBaseUrl(localBaseUrl())
+  if (clientRuntime.kind === 'web') {
+    await restore(url)
+    return
+  }
   const value = begin(url)
   const health = await readHealth(url, value.controller.signal)
   if (!current(value)) {
@@ -602,8 +606,11 @@ async function restore(url: string): Promise<void> {
       return
     }
     if (!health.ok) {
+      if (health.code === 'browser_session_required' && signInThroughBrowser(url)) {
+        return
+      }
       if (health.recoverable) {
-        setState({ status: 'disconnected', error: health.error })
+        setState({ status: 'checking', error: health.error })
         pollTimer = setTimeout(() => void retry(), 5000)
       } else {
         block(health.error)

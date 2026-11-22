@@ -29,7 +29,7 @@ Remote backend setup and the planned connected-device approval model are in
 - `bun run dev` — dev mode with HMR (vite on port 5180)
 - `bun run build` — distributable: compiles the Go backend, bundles, and packages the desktop app into `dist/` via electron-builder (alias of `build:app`; macOS notarizes when Apple credentials are in the env)
 - `bun run build:bundle` — native helpers and electron-vite production bundle into `out/`
-- `bun run build:native` — compile the macOS speech helper into `resources/bin/` and the notch helper into `resources/macos/` (requires Xcode 26+; no-op on other platforms)
+- `bun run build:native` — compile the macOS speech and Secure Enclave device-key helpers into `resources/bin/` and the notch helper into `resources/macos/` (requires Xcode 26+; no-op on other platforms)
 - `bun run test:dictation` — verify native audio conversion and background callback isolation on macOS
 - `bun run typecheck` — renderer + main/preload TypeScript
 

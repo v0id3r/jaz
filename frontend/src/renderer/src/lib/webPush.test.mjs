@@ -1,0 +1,220 @@
+import { afterEach, expect, test } from 'bun:test'
+import { build } from 'bun'
+import { readFileSync } from 'node:fs'
+
+const bundle = await build({ entrypoints: [new URL('./webPush.ts', import.meta.url).pathname], target: 'browser', format: 'cjs', external: ['@/lib/api/client'] })
+if (!bundle.success) throw new AggregateError(bundle.logs)
+const compiled = new Function('module', 'exports', 'require', await bundle.outputs[0].text())
+
+function load() {
+  const module = { exports: {} }
+  compiled(module, module.exports, (name) => {
+    if (name !== '@/lib/api/client') throw new Error(`Unexpected import: ${name}`)
+    return {
+      get: async (path) => {
+        const response = await fetch(path)
+        return response.json()
+      },
+      put: async (path, body) => {
+        const response = await fetch(path, { method: 'PUT', body: JSON.stringify(body) })
+        if (!response.ok) throw new Error(String(response.status))
+      },
+      del: async (path) => {
+        const response = await fetch(path, { method: 'DELETE' })
+        if (!response.ok) throw new Error(String(response.status))
+      },
+    }
+  })
+  return module.exports
+}
+
+const originals = new Map()
+
+afterEach(() => {
+  for (const [name, descriptor] of originals) {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor)
+    else delete globalThis[name]
+  }
+  originals.clear()
+})
+
+function replace(name, value) {
+  if (!originals.has(name)) originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name))
+  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value })
+}
+
+test('PWA subscribes with the server VAPID key and registers the paired device', async () => {
+  const f = fixture()
+  const module = load()
+  await module.subscribeWebPush()
+  expect(f.calls.map((call) => call.init?.method || 'GET')).toEqual(['GET', 'PUT'])
+  expect(JSON.parse(f.calls[1].init.body)).toEqual({ endpoint: 'https://push.example/device', keys: { p256dh: 'key', auth: 'auth' }, declarative: false })
+  expect(f.subscriptionOptions.applicationServerKey.byteLength).toBe(65)
+  expect(f.unsubscribed).toBe(0)
+})
+
+test('iPhone and iPad register for declarative navigation', async () => {
+  for (const device of [{ platform: 'iPhone' }, { platform: 'MacIntel', maxTouchPoints: 5 }]) {
+    const f = fixture({ device })
+    await load().subscribeWebPush()
+    expect(JSON.parse(f.calls[1].init.body).declarative).toBe(true)
+  }
+})
+
+test('failed server registration does not leave an orphaned local subscription', async () => {
+  const f = fixture({ putStatus: 500 })
+  const module = load()
+  await expect(module.subscribeWebPush()).rejects.toThrow('500')
+  expect(f.unsubscribed).toBe(1)
+})
+
+test('disabling removes the server registration and local subscription', async () => {
+  const f = fixture({ existing: true })
+  const module = load()
+  await module.unsubscribeWebPush()
+  expect(f.calls[0].init.method).toBe('DELETE')
+  expect(f.unsubscribed).toBe(1)
+})
+
+test('service worker shows a push and opens its thread on click', async () => {
+  const listeners = {}
+  const shown = []
+  const opened = []
+  const activated = []
+  const self = {
+    registration: { showNotification: async (title, options) => shown.push({ title, ...options }) },
+    clients: {
+      matchAll: async () => [],
+      openWindow: async (url) => opened.push(url),
+      claim: async () => { activated.push('claim') },
+    },
+    skipWaiting: async () => { activated.push('skip') },
+    location: { origin: 'https://jaz.example' },
+    addEventListener: (type, handler) => { listeners[type] = handler },
+  }
+  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
+  const waiting = []
+  listeners.install()
+  listeners.activate({ waitUntil: (promise) => waiting.push(promise) })
+  expect(activated).toEqual(['skip', 'claim'])
+  listeners.push({ data: { json: () => ({ title: 'Done', body: 'Ready', session_id: 'thread one', kind: 'chat' }) }, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  expect(shown[0]).toMatchObject({ title: 'Done', body: 'Ready', tag: 'jaz:thread one:chat' })
+  const notification = { data: shown[0].data, close: () => {} }
+  listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  expect(opened).toEqual(['https://jaz.example/sessions/thread%20one'])
+})
+
+test('notification click sends a bot target and focuses the existing client', async () => {
+  const listeners = {}
+  const messages = []
+  let focused = 0
+  const client = {
+    postMessage: (message) => messages.push(message),
+    focus: async () => { focused += 1 },
+  }
+  const self = {
+    registration: { showNotification: async () => {} },
+    clients: { matchAll: async () => [client], openWindow: async () => { throw new Error('unexpected new window') } },
+    location: { origin: 'https://jaz.example' },
+    addEventListener: (type, handler) => { listeners[type] = handler },
+  }
+  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
+  const waiting = []
+  listeners.push({ data: { json: () => ({ title: 'Done', session_id: 'bot one', kind: 'bot' }) }, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  const notification = { data: { session: 'bot one', kind: 'bot' }, close: () => {} }
+  listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  expect(messages).toEqual([{ type: 'jaz:open', path: '/bots/bot%20one' }])
+  expect(focused).toBe(1)
+})
+
+test('iOS notification click opens a fresh client for the bot target', async () => {
+  const listeners = {}
+  const opened = []
+  const self = {
+    navigator: { userAgent: 'iPhone' },
+    registration: { showNotification: async () => {} },
+    clients: {
+      matchAll: async () => { throw new Error('must not reuse the inert client') },
+      openWindow: async (url) => { opened.push(url) },
+    },
+    location: { origin: 'https://jaz.example' },
+    addEventListener: (type, handler) => { listeners[type] = handler },
+  }
+  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
+  const waiting = []
+  const notification = { data: { session: 'bot one', kind: 'bot' }, close: () => {} }
+  listeners.notificationclick({ notification, waitUntil: (promise) => waiting.push(promise) })
+  await Promise.all(waiting)
+  expect(opened).toEqual(['https://jaz.example/bots/bot%20one'])
+})
+
+test('push navigation switches the live client in place and loads normally without one', async () => {
+  const listeners = {}
+  const messages = []
+  let clients = [{ postMessage: (message) => messages.push(message) }]
+  const self = {
+    clients: { matchAll: async () => clients },
+    addEventListener: (type, handler) => { listeners[type] = handler },
+  }
+  new Function('self', readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'))(self)
+  const navigate = async (url, mode = 'navigate') => {
+    let response
+    listeners.fetch({ request: { url, mode }, respondWith: (value) => { response = value } })
+    return response && await response
+  }
+  expect(await navigate('https://jaz.example/sessions/abc')).toBeUndefined()
+  expect(await navigate('https://jaz.example/sessions/abc?from=push', 'cors')).toBeUndefined()
+  expect((await navigate('https://jaz.example/sessions/abc?from=push')).status).toBe(204)
+  expect(messages).toEqual([{ type: 'jaz:open', path: '/sessions/abc' }])
+  clients = []
+  replace('fetch', async (request) => new Response('shell', { status: 200, headers: { 'x-url': request.url } }))
+  const cold = await navigate('https://jaz.example/bots/b?from=push')
+  expect([cold.status, cold.headers.get('x-url')]).toEqual([200, 'https://jaz.example/bots/b?from=push'])
+  expect(messages).toHaveLength(1)
+})
+
+function fixture({ publicKey = Buffer.alloc(65, 1).toString('base64url'), existing = false, putStatus = 204, device = { platform: 'MacIntel' } } = {}) {
+  const calls = []
+  const state = {
+    calls,
+    subscriptionOptions: undefined,
+    unsubscribed: 0,
+  }
+  const subscription = {
+    toJSON: () => ({ endpoint: 'https://push.example/device', keys: { p256dh: 'key', auth: 'auth' } }),
+    unsubscribe: async () => { state.unsubscribed += 1 },
+  }
+  const registration = {
+    pushManager: {
+      getSubscription: async () => existing ? subscription : null,
+      subscribe: async (options) => {
+        state.subscriptionOptions = options
+        return subscription
+      },
+    },
+  }
+  replace('window', { matchMedia: () => ({ matches: true }) })
+  replace('navigator', {
+    ...device,
+    serviceWorker: {
+      register: async () => registration,
+      getRegistration: async () => registration,
+      ready: Promise.resolve(registration),
+    },
+  })
+  replace('Notification', { requestPermission: async () => 'granted' })
+  replace('localStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {} })
+  replace('PushManager', class {})
+  replace('fetch', async (url, init) => {
+    calls.push({ url, init })
+    if ((init?.method || 'GET') === 'GET') {
+      return new Response(JSON.stringify({ web_push_public_key: publicKey }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    return new Response(null, { status: putStatus })
+  })
+  return state
+}

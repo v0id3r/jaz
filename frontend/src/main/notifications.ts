@@ -17,7 +17,7 @@ import { logMain } from '@main/diagnostics'
 
 // Routes classified alerts while Jaz is in the background: to the island when
 // it may appear, otherwise to Notification Center, never both.
-export function createNotifications(open: (path: string) => void) {
+export function createNotifications(open: (path: string) => void, fetcher: typeof fetch = fetch) {
   let mode: NotificationMode = 'off'
   let queue = Promise.resolve()
   const delivered = new Map<string, string>()

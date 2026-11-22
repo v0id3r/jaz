@@ -28,5 +28,6 @@ if (process.platform === 'darwin') {
     '-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__info_plist',
     '-Xlinker', 'native/dictation/Info.plist',
   )
+  compile('resources/bin/jaz-device-key', 'native/device-key/main.swift')
   compile('resources/macos/jaz-notch', 'native/notch/main.swift')
 }

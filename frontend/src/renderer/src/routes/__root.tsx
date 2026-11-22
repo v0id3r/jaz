@@ -35,6 +35,7 @@ import { VoiceDesktopBridge } from '@/lib/voice/VoiceDesktopBridge'
 import { drawerSlide } from '@/lib/dom/drawer'
 import { modalDialogOpen } from '@/lib/dom/modal'
 import { isMobileViewport, useIsMobile } from '@/lib/hooks/useIsMobile'
+import { useSessionPresence } from '@/lib/hooks/useSessionPresence'
 import { useWindowEvent } from '@/lib/hooks/useWindowEvent'
 import { TitlebarActionsOutlet, TitlebarProvider, TitlebarSlotOutlet } from '@/lib/titlebar'
 import type { BrowserNavigationDirection } from '../../../shared/browserNavigation'
@@ -169,7 +170,10 @@ function RootLayout() {
   // instantly.
   const isMobile = useIsMobile()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const activeSession = /^\/(?:sessions|bots)\/([^/]+)$/.exec(pathname)?.[1]
+  useSessionPresence(settingsOpen || !activeSession ? null : decodeURIComponent(activeSession))
   const tab = railTab(pathname, settingsOpen)
+  const chatLink = useChatLink(pathname)
   const hasPanel = isMobile || tab === 'chat' || tab === '/bots'
   const panelOpen = hasPanel && sidebarOpen
   // Desktop Settings keeps its menu in the column whatever the list toggle says.

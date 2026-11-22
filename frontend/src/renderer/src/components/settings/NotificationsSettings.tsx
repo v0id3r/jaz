@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageSquareCheck } from 'lucide-react'
+import { Bell, MessageSquareCheck } from 'lucide-react'
 import type { NotchAccess, NotificationMode } from '@shared/notifications'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
@@ -9,6 +9,7 @@ import { clientRuntime } from '@/lib/clientRuntime'
 import { useNotificationMode } from '@/lib/notificationSettings'
 import { keys } from '@/lib/query/keys'
 import { hasSystemPermissions } from '@/lib/systemPermissions'
+import { subscribeWebPush, unsubscribeWebPush, webPushState } from '@/lib/webPush'
 
 const MODES: { value: NotificationMode; label: string; description: string }[] = [
   { value: 'off', label: 'Off', description: 'Never notify' },
@@ -43,7 +44,12 @@ export function NotificationsSettings() {
     <section className="py-4">
       <h1 className="text-lg font-semibold text-ink">Notifications</h1>
       <p className="mt-0.5 text-[13px] text-ink-2">Choose when Jaz can get your attention.</p>
-      {!window.jaz ? <p className="mt-4 text-sm text-ink-2">Open Jaz desktop to get notifications.</p> : (
+      {!window.jaz ? (
+        <>
+          <p className="mt-4 text-sm text-ink-2">Browser push works even when this page is closed. On iOS, install Jaz to your Home Screen first.</p>
+          <WebPushSettings />
+        </>
+      ) : (
         <SettingsCard className="mt-4 divide-y divide-border">
           {hasSystemPermissions && <SystemPermissionRows permissions={['notifications']} />}
           <div className="flex min-h-[60px] items-center gap-3 px-3.5 py-2.5">
@@ -65,5 +71,32 @@ export function NotificationsSettings() {
         </SettingsCard>
       )}
     </section>
+  )
+}
+
+function WebPushSettings() {
+  const queryClient = useQueryClient()
+  const state = useQuery({ queryKey: ['web-push-state'], queryFn: webPushState })
+  const change = useMutation({
+    mutationFn: () => state.data?.subscribed ? unsubscribeWebPush() : subscribeWebPush(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['web-push-state'] }),
+  })
+  if (state.data && !state.data.available) {
+    return <p className="mt-4 text-sm text-ink-2">This browser has no Web Push support. On iOS, use the installed Home Screen app.</p>
+  }
+  return (
+    <SettingsCard className="mt-4">
+      <div className="flex min-h-[60px] items-center gap-3 px-3.5 py-2.5">
+        <Bell size={18} className="shrink-0 text-ink-2" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13.5px] font-medium text-ink">Browser push</p>
+          <p className="text-[12px] text-ink-3">Done, replies and questions on this device.</p>
+          {change.error && <p className="mt-1 text-[12px] text-danger">{change.error.message}</p>}
+        </div>
+        <Button disabled={state.isPending || change.isPending} onClick={() => change.mutate()}>
+          {state.data?.subscribed ? 'Disable' : 'Enable'}
+        </Button>
+      </div>
+    </SettingsCard>
   )
 }

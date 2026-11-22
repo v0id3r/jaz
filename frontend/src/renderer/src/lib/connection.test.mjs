@@ -8,7 +8,7 @@ const bundle = await build({
   target: 'browser',
   format: 'cjs',
   external: ['react', '@/lib/browserCredentials'],
-  define: { 'import.meta.env': '{}' },
+  define: { 'import.meta.env': '{"VITE_JAZ_API_URL":"origin"}' },
   plugins: [{
     name: 'connection-fixture',
     setup(builder) {
@@ -55,10 +55,11 @@ async function settle() {
   }
 }
 
-async function fixture({ auth, pairing = false, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature, web = false, browserCredentials = new Map(), saveBrowserCredential, loadBrowserCredential } = {}) {
+async function fixture({ auth, pairing = false, pairingToken = 'jaz_device-token', deviceAccessToken, storedValues = [], encryptCredential, decryptCredential, health, registration, notifications = false, startLocalBackend, renderNotifications = false, owner = true, initialSnapshot, feature, web = false, browserCredentials = new Map(), saveBrowserCredential, loadBrowserCredential } = {}) {
   const stored = new Map(storedValues)
   if (web) stored.set('jaz.deviceIdentity', JSON.stringify({ device_id: 'identity', public_key: 'public' }))
   const configured = []
+  const proofs = []
   const timers = new Map()
   let nextTimer = 0
   let snapshot = initialSnapshot || { revision: 0, phase: 'initial', url: '', session: null, error: null, localPending: false }
@@ -318,6 +319,7 @@ test('remote startup waits for health before unlocking, stops on denial, and rec
   }
   const first = await fixture(options)
   expect(events).toEqual(['health'])
+  expect(first.connection.useConnection().status).toBe('checking')
   online = true
   const pending = [...first.timers.entries()].find(([, timer]) => timer.delay === 5_000)
   first.timers.delete(pending[0])
