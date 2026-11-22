@@ -30,9 +30,9 @@ func newPromptTrackingConn(conn jsonrpc.MessageConn) *promptTrackingConn {
 	return c
 }
 
-// trackPrompts calls onSending with the id of each turn's session/prompt
-// request before it goes out and onSent once it went out, and onAnswered with
-// the id of each response as the connection reads it, before it reads on.
+// trackPrompts calls onSending with the id of each turn's prompt or native
+// steering request before it goes out and onSent once it went out, and
+// onAnswered with the id of each response as the connection reads it.
 func (c *promptTrackingConn) trackPrompts(onSending func(id string) error, onSent func(), onAnswered func(id string)) {
 	c.cbMu.Lock()
 	defer c.cbMu.Unlock()
@@ -90,10 +90,10 @@ func (c *promptTrackingConn) Receive(ctx context.Context) (*jsonrpc.Message, err
 	return msg, nil
 }
 
-// promptID is the id of msg when it is a turn's session/prompt request; a
-// side chat's prompt is not one.
+// promptID is the id of a turn's prompt or native steering request; a side
+// chat's prompt is not one.
 func promptID(msg *jsonrpc.Message) string {
-	if !msg.IsRequest() || msg.Method != acpschema.AgentMethodSessionPrompt {
+	if !msg.IsRequest() || msg.Method != acpschema.AgentMethodSessionPrompt && msg.Method != string(steerNative) {
 		return ""
 	}
 	var prompt acpschema.PromptRequest

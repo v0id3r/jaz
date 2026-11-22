@@ -89,7 +89,7 @@ export function useSessionEvents(
         }
       }
       listsTimer ??= setTimeout(invalidateLists, 500)
-    })
+    }, setConnected)
     return () => {
       stop()
       if (flushTimer !== null) clearTimeout(flushTimer)

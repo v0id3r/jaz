@@ -8,6 +8,7 @@ import { taskSurfaceFromEvent } from '@/lib/taskSurface'
 import {
   buildTimeline,
   classifyTurnItems,
+  itemEnd,
   stableEventKey,
   type TimelineItem,
 } from './timeline'
@@ -15,6 +16,7 @@ import { useHistoryWindow } from '@/components/session/useHistoryWindow'
 import type { HistoryPaging } from '@/lib/hooks/useSessionHistory'
 import { SpokenReply } from '@/components/session/SpokenReply'
 import { ActivityBlock } from './ActivityBlock'
+import { isRunningToolStatus } from './toolPresentation'
 import { Bubble } from './Bubble'
 import { LiveEvent } from './LiveEvent'
 import type { SessionErrorAction } from './SessionErrorNotice'
@@ -90,6 +92,10 @@ const RESULT_EVENTS = new Set(['loop_created', 'mcp_app', 'bot_activity'])
 
 function isResultCard(item: TimelineItem): boolean {
   return item.kind === 'event' && RESULT_EVENTS.has(item.event.type)
+}
+
+function hasRunningTool(item: TimelineItem): boolean {
+  return item.kind === 'activity' && item.entries.some((entry) => entry.kind === 'tool' && isRunningToolStatus(entry.call.status))
 }
 
 function trailingErrorEventIndex(chronological: TimelineItem[], anchored: TimelineItem[]): number | undefined {
@@ -266,9 +272,10 @@ export const Transcript = memo(function Transcript({
     <div ref={historyRef} className="relative flex flex-col gap-7" aria-busy={paging?.loading}>
       {visibleTurns.map((turn, visibleTurnIndex) => {
         const turnIndex = historyStart + visibleTurnIndex
-        const active = working && turnIndex === turns.length - 1
         const resultCards = turn.items.filter(isResultCard)
         const flow = turn.items.filter((item) => !isResultCard(item))
+        // A message sent mid-tool opens a new turn; the tool it interrupted stays live.
+        const active = working && (turnIndex === turns.length - 1 || flow.some(hasRunningTool))
         const sections: ReactNode[] = []
         if (turn.opener) sections.push(renderItem(turn.opener))
         if (active) {
@@ -286,7 +293,7 @@ export const Transcript = memo(function Transcript({
           )
           if (workItems.length) {
             const durationMs =
-              workItems[workItems.length - 1].at - (turn.opener?.at ?? workItems[0].at)
+              Math.max(...workItems.map(itemEnd)) - (turn.opener?.at ?? workItems[0].at)
             sections.push(
               <WorkSection
                 key="work"

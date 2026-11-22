@@ -197,7 +197,6 @@ export function ThreadView({
 
   const [planDecisionPending, setPlanDecisionPending] = useState(false)
   const [planDecisionError, setPlanDecisionError] = useState('')
-  const seenRequestedRef = useRef(false)
   const detailSession = detail.data?.session
   const sideChatAvailable = isCodexACPSession(detailSession)
   const canvas = detailSession?.runtime_ref?.artifact_surface === 'canvas'
@@ -212,7 +211,7 @@ export function ThreadView({
     if (isPanelPresentation(event.artifact)) openView(event.artifact)
   }, [notifySessionEventError, openView])
   useEffect(() => setLastSessionEventAt(undefined), [sessionId])
-  useSessionEvents(sessionId, detail.data?.latest_event_seq, handleSessionEvent)
+  const eventsConnected = useSessionEvents(sessionId, detail.data?.latest_event_seq, handleSessionEvent)
   const showDetails = useCallback(() => {
     if (!panelOpen || panelMode !== 'overview') togglePanel('overview')
   }, [panelOpen, panelMode, togglePanel])
@@ -616,6 +615,7 @@ export function ThreadView({
                             <SessionLivenessIndicator
                               agent={session.runtime_ref?.agent}
                               running={sessionRunning}
+                              connected={eventsConnected}
                               activity={activity}
                               retrying={retrying}
                               activeOperation={detail.data?.acp_active_operation}

@@ -9,7 +9,9 @@ func (m *Manager) promptSending(job *jobState, id string) error {
 		return err
 	}
 	if turn := job.turn; turn != nil {
-		turn.unsent--
+		if turn.unsent > 0 {
+			turn.unsent--
+		}
 		turn.prompts[id] = struct{}{}
 	}
 	return nil

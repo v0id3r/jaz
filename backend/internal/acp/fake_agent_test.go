@@ -485,7 +485,10 @@ func TestFakeACPAgentProcess(t *testing.T) {
 			grokInterjections++
 			pendingPrompt = fakeGrokInterject(t, conn, msg, pendingPrompt, grokInterjections)
 		case "_session/steering":
-			fakeHold(os.Getenv("JAZ_FAKE_ACP_NATIVE_STEER_HOLD"))
+			stream := os.Getenv("JAZ_FAKE_ACP_NATIVE_STEER_STREAM") == "1"
+			if !stream {
+				fakeHold(os.Getenv("JAZ_FAKE_ACP_NATIVE_STEER_HOLD"))
+			}
 			if handled, pending := nativeSteering.handle(t, conn, msg, pendingPrompt); handled {
 				pendingPrompt = pending
 				continue
@@ -498,14 +501,31 @@ func TestFakeACPAgentProcess(t *testing.T) {
 				_ = conn.Send(context.Background(), resp)
 				continue
 			}
+			if stream && pendingPrompt != nil {
+				sendResult(conn, pendingPrompt, map[string]any{"stopReason": "end_turn"})
+				pendingPrompt = nil
+				notify(conn, "session/update", map[string]any{
+					"sessionId": fakeSessionID,
+					"update": map[string]any{
+						"sessionUpdate": "session_info_update",
+						"_meta": map[string]any{"turnId": 2, "jaz": map[string]any{
+							"stateUpdate": map[string]any{"state": "working"},
+						}},
+					},
+				})
+			}
 			notify(conn, "session/update", map[string]any{
 				"sessionId": fakeSessionID,
 				"update": map[string]any{
 					"sessionUpdate": "agent_message_chunk",
 					"messageId":     nextMessageID("native-steer"),
 					"content":       map[string]any{"type": "text", "text": "hello from native steer"},
+					"_meta":         map[string]any{"turnId": 2},
 				},
 			})
+			if stream {
+				fakeHold(os.Getenv("JAZ_FAKE_ACP_NATIVE_STEER_HOLD"))
+			}
 			promptResult := map[string]any{"stopReason": "end_turn"}
 			steerResult := map[string]any{"outcome": "injected", "stopReason": "end_turn"}
 			if pendingPrompt == nil {
