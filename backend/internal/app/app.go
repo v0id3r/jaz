@@ -348,7 +348,7 @@ func StartModelCatalogWarmup(lc fx.Lifecycle, catalog *modelcatalog.Service, log
 	})
 }
 
-func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, prompts *coordinator.Builder, catalog acp.AgentCatalog, source acp.AgentConfigSource, adapters *acpadapter.Manager, mcpServers mcpconfig.ServerReader, providerSource provider.Source, modelCatalog *modelcatalog.Service, widgetService *widgets.Service, installed *plugins.Store, msCopilot *m365copilot.AuthService) (acp.Config, error) {
+func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, memory *memoryservice.Service, prompts *coordinator.Builder, catalog acp.AgentCatalog, source acp.AgentConfigSource, adapters *acpadapter.Manager, mcpServers mcpconfig.ServerReader, providerSource provider.Source, modelCatalog *modelcatalog.Service, widgetService *widgets.Service, installed *plugins.Store, msCopilot *m365copilot.AuthService, launch sandbox.Launcher) (acp.Config, error) {
 	if err := bots.MigrateHomes(store); err != nil {
 		return acp.Config{}, err
 	}

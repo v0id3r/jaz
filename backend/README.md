@@ -51,8 +51,9 @@ downloaded on first use, checksum-verified and installed under `~/.jaz/acp`.
 Codex and Claude then launch through those managed binaries.
 
 Jaz exposes skills from `~/.jaz/skills` and workspace skill directories through
-the ACP prompt catalogue, with paths to the original files. Agent startup never
-copies Jaz skills into CLI profiles, including `~/.codex` and `~/.claude`.
+the ACP prompt catalogue, with paths to the original files. Kimi also receives
+these directories through its native `extra_skill_dirs` setting. Agent startup
+never copies Jaz skills into CLI profiles, including `~/.codex` and `~/.claude`.
 
 When developing an unmanaged ACP adapter, add a custom command-based agent in
 config and point it at the locally built binary:

@@ -24,7 +24,7 @@
 - Use Fx constructors directly in `fx.Provide`; avoid pass-through wrappers.
 - Do not add defensive nil checks for required constructor-injected dependencies. If a required Fx service is missing, fail fast instead of silently degrading; model truly optional dependencies explicitly.
 - Codex ACP defaults to the user's Codex OAuth credentials. Never silently pass coordinator provider keys to Codex subprocesses; a provider API key reaches Codex only when the user explicitly selects a non-OpenAI model provider (e.g. OpenRouter) for it.
-- Expose Jaz skills through the ACP prompt catalogue with original paths. Never copy Jaz skills into native CLI profiles or global skill directories.
+- Expose Jaz skills through the ACP prompt catalogue with original paths and native extra-skill-directory configuration where supported. Never copy Jaz skills into native CLI profiles or global skill directories.
 - Target deployments run the Jaz server on a VM and clients on user computers; never assume client-local file paths are visible to the server or agents.
 - Before handing off a completed feature or fix, run a code-review pass; use `thermo-nuclear-code-quality-review` when available.
 - Before reporting a commit that touches constructors or wiring, start the real backend binary against a scratch root and confirm it listens.

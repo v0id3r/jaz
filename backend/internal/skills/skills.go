@@ -88,18 +88,36 @@ func LoadForWorkspaceFiltered(root, workspace string, allowPlugin func(string) b
 	if err != nil {
 		return Catalog{}, err
 	}
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return catalog, nil
-	}
-	for _, dir := range workspaceSkillDirs {
-		local, err := LoadDir(filepath.Join(workspace, dir, userSkillsDir))
+	for _, root := range RootsForWorkspace(root, workspace)[1:] {
+		local, err := LoadDir(root)
 		if err != nil {
 			return Catalog{}, err
 		}
 		catalog.Skills = mergeSkills(catalog.Skills, local)
 	}
 	return catalog, nil
+}
+
+// WorkspaceSkillDirs returns the skill directory names relative to a
+// workspace root; native agents resolve them per session.
+func WorkspaceSkillDirs() []string {
+	out := make([]string, len(workspaceSkillDirs))
+	for i, dir := range workspaceSkillDirs {
+		out[i] = filepath.Join(dir, userSkillsDir)
+	}
+	return out
+}
+
+func RootsForWorkspace(root, workspace string) []string {
+	roots := []string{UserRoot(root)}
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return roots
+	}
+	for _, dir := range WorkspaceSkillDirs() {
+		roots = append(roots, filepath.Join(workspace, dir))
+	}
+	return roots
 }
 
 // LoadDir returns every skill under a folder, at any depth.

@@ -4,7 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/wins/jaz/backend/internal/skills"
 )
 
 func TestKimiBuiltinAgentUsesManagedACP(t *testing.T) {
@@ -153,6 +156,24 @@ func TestProcessEnvPreparesIsolatedKimiProfile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("Kimi profile must not carry a prompt authority shim: %v", err)
 	}
+	if env["KIMI_MCP_TOOL_TIMEOUT_MS"] != "300000" {
+		t.Fatalf("KIMI_MCP_TOOL_TIMEOUT_MS = %q, want 300000", env["KIMI_MCP_TOOL_TIMEOUT_MS"])
+	}
+}
+
+func TestProcessEnvKeepsConfiguredKimiMcpToolTimeout(t *testing.T) {
+	clearHostEnv(t)
+	root := t.TempDir()
+	env, err := NewManager(nil, Config{Root: root}, nil).processEnvPrepared(AgentKimi, AgentConfig{
+		Auth: AgentAuthConfig{Mode: AuthModeJazProfile},
+		Env:  map[string]string{"KIMI_MCP_TOOL_TIMEOUT_MS": "90000"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["KIMI_MCP_TOOL_TIMEOUT_MS"] != "90000" {
+		t.Fatalf("KIMI_MCP_TOOL_TIMEOUT_MS = %q, want user value 90000", env["KIMI_MCP_TOOL_TIMEOUT_MS"])
+	}
 }
 
 func TestKimiJazProfileCannotEscapeRuntimeRoot(t *testing.T) {
@@ -191,6 +212,132 @@ func TestProcessEnvUsesExistingKimiProfile(t *testing.T) {
 	}
 	if env["KIMI_CODE_HOME"] != existing {
 		t.Fatalf("KIMI_CODE_HOME = %q, want %q", env["KIMI_CODE_HOME"], existing)
+	}
+}
+
+func TestProcessEnvExposesJazSkillsToKimi(t *testing.T) {
+	clearHostEnv(t)
+	root, existing, workspace := t.TempDir(), t.TempDir(), t.TempDir()
+	writeKimiCredential(t, existing, `{"access_token":"token"}`)
+	config := `# preserved
+extra_skill_dirs = [
+  "/custom",
+]
+
+` + `default_model = "kimi-code/kimi-for-coding"
+[providers."managed:kimi-code"]
+[models."kimi-code/kimi-for-coding"]
+provider = "managed:kimi-code"
+`
+	if err := os.WriteFile(filepath.Join(existing, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeACPTestSkill(t, root, "alpha")
+	writeACPTestSkill(t, filepath.Join(workspace, ".jaz"), "beta")
+
+	agent := AgentConfig{Auth: AgentAuthConfig{Mode: AuthModeExistingCLI, Path: existing}, Cwd: workspace}
+	if _, err := NewManager(nil, Config{Root: root}, nil).processEnvPrepared(AgentKimi, agent); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(existing, "config.toml")
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(first), "# preserved") || !strings.Contains(string(first), `[providers."managed:kimi-code"]`) {
+		t.Fatalf("unrelated Kimi config changed:\n%s", first)
+	}
+	cfg, ok := readKimiConfig(existing)
+	want := append([]string{"/custom", skills.UserRoot(root)}, skills.WorkspaceSkillDirs()...)
+	if !ok || !reflect.DeepEqual(cfg.ExtraSkillDirs, want) {
+		t.Fatalf("Kimi skill dirs = %#v, want %#v", cfg.ExtraSkillDirs, want)
+	}
+	if _, err := NewManager(nil, Config{Root: root}, nil).processEnvPrepared(AgentKimi, agent); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil || string(second) != string(first) {
+		t.Fatalf("second preparation rewrote Kimi config: %v\n%s", err, second)
+	}
+	if _, err := os.Stat(filepath.Join(existing, "skills", "alpha")); !os.IsNotExist(err) {
+		t.Fatalf("Jaz skill copied to Kimi profile: %v", err)
+	}
+}
+
+func TestEnsureKimiSkillDirsWritesSharedSetToCleanConfig(t *testing.T) {
+	home := t.TempDir()
+	config := `# preserved
+default_model = "kimi-code/kimi-for-coding"
+[providers."managed:kimi-code"]
+[models."kimi-code/kimi-for-coding"]
+provider = "managed:kimi-code"
+`
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureKimiSkillDirs(home, "/jaz/skills", skills.WorkspaceSkillDirs()); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := readKimiConfig(home)
+	want := append([]string{"/jaz/skills"}, skills.WorkspaceSkillDirs()...)
+	if !ok || !reflect.DeepEqual(cfg.ExtraSkillDirs, want) {
+		t.Fatalf("Kimi skill dirs = %#v, want %#v", cfg.ExtraSkillDirs, want)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil || !strings.Contains(string(data), "# preserved") || !strings.Contains(string(data), `[providers."managed:kimi-code"]`) {
+		t.Fatalf("unrelated Kimi config changed: %v\n%s", err, data)
+	}
+}
+
+func TestEnsureKimiSkillDirsRemovesAccumulatedSessionPaths(t *testing.T) {
+	home := t.TempDir()
+	config := `extra_skill_dirs = [
+  "/ws/one/.claude/skills",
+  "/custom",
+  "/ws/two/repo/.jaz/skills",
+  "team/skills",
+  "/ws/one/.agents/skills",
+  "/ws/two/repo/.codex/skills",
+]
+default_model = "kimi-code/kimi-for-coding"
+`
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureKimiSkillDirs(home, "/jaz/skills", skills.WorkspaceSkillDirs()); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := readKimiConfig(home)
+	want := append([]string{"/custom", "team/skills", "/jaz/skills"}, skills.WorkspaceSkillDirs()...)
+	if !ok || !reflect.DeepEqual(cfg.ExtraSkillDirs, want) {
+		t.Fatalf("Kimi skill dirs = %#v, want %#v", cfg.ExtraSkillDirs, want)
+	}
+	if strings.Contains(strings.Join(cfg.ExtraSkillDirs, "\n"), "/ws/") {
+		t.Fatalf("per-session paths remain: %#v", cfg.ExtraSkillDirs)
+	}
+}
+
+func TestEnsureKimiSkillDirsIsIdempotent(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("extra_skill_dirs = [\"/ws/.claude/skills\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureKimiSkillDirs(home, "/jaz/skills", skills.WorkspaceSkillDirs()); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "config.toml")
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureKimiSkillDirs(home, "/jaz/skills", skills.WorkspaceSkillDirs()); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil || string(second) != string(first) {
+		t.Fatalf("second call rewrote Kimi config: %v\n%s", err, second)
 	}
 }
 

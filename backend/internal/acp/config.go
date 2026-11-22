@@ -113,6 +113,7 @@ type Config struct {
 	AgentSource AgentConfigSource
 	Adapters    AdapterResolver
 	Root        string
+	MemoryRoot  string
 	Workspace   string
 	Env         map[string]string
 	// Providers is a static snapshot used by the read-time auth/readiness probes

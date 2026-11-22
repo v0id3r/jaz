@@ -3,22 +3,30 @@ import { pickerEffortOptions, parseModelSelections } from './modelPicker'
 
 const options = (values) => values.map((value) => ({ value, label: value }))
 
-test('picker exposes only five efforts in order without changing provider IDs', () => {
+test('picker keeps every advertised effort in ascending order without changing provider IDs', () => {
   const available = options(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
-  expect(pickerEffortOptions(available).map(({ value }) => value)).toEqual(['low', 'medium', 'high', 'xhigh', 'ultracode'])
+  expect(pickerEffortOptions(available).map(({ value }) => value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
   expect(available).toHaveLength(9)
   expect(pickerEffortOptions(options(['ultra', 'max', 'xhigh', 'high', 'medium', 'low']))).toEqual([
     { value: 'low', label: 'low' },
     { value: 'medium', label: 'medium' },
     { value: 'high', label: 'high' },
     { value: 'xhigh', label: 'Xhigh' },
+    { value: 'max', label: 'max' },
     { value: 'ultra', label: 'Ultracode' },
   ])
-  expect(pickerEffortOptions(options(['ultra', 'ultracode']))).toEqual([{ value: 'ultracode', label: 'Ultracode' }])
+  expect(pickerEffortOptions(options(['ultra', 'ultracode']))).toEqual([
+    { value: 'ultra', label: 'Ultracode' },
+    { value: 'ultracode', label: 'Ultracode' },
+  ])
 })
 
-test('picker only offers efforts the selected model supports, with Max on top where there is no xhigh', () => {
+test('picker offers Kimi-style low/high/max and skips the empty default', () => {
   expect(pickerEffortOptions(options(['max', 'high', 'low'])).map(({ value }) => value)).toEqual(['low', 'high', 'max'])
+  expect(pickerEffortOptions(options(['', 'high', 'max']))).toEqual([
+    { value: 'high', label: 'high' },
+    { value: 'max', label: 'max' },
+  ])
   expect(pickerEffortOptions([])).toEqual([])
 })
 
