@@ -98,6 +98,7 @@ func TestHTTPModuleProvidesRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireRoute(t, routes, "GET /v1/usage/daily")
+	requireRoute(t, routes, "GET /v1/usage/subscriptions/{agent}")
 	requireRoute(t, routes, "GET "+m365copilot.OAuthCallbackPath)
 	requireRoute(t, routes, "POST /v1/filesystem/dirs")
 	requireRoute(t, routes, "GET /v1/usage/models")

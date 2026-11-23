@@ -19,6 +19,7 @@ const grokModelsUpdateMethod = "_x.ai/models/update"
 const advertisedModelWait = 5 * time.Second
 
 type connectionState struct {
+	subscription    subscriptionAccount
 	mu              sync.Mutex
 	job             *jobState
 	auth            *sessionevents.AgentAuthIdentity
@@ -122,7 +123,13 @@ func (s *connectionState) handler(m *Manager, next jsonrpc.Handler) jsonrpc.Hand
 				var update struct {
 					Kind string `json:"sessionUpdate"`
 				}
-				if json.Unmarshal(note.Update, &update) == nil && sessionMetadataUpdate(update.Kind) {
+				if json.Unmarshal(note.Update, &update) != nil {
+					return next.HandleJSONRPC(ctx, req)
+				}
+				if s.subscription.agent != "" && update.Kind == "usage_update" {
+					m.observeClaudeSubscription(s.subscription, note.Update)
+				}
+				if sessionMetadataUpdate(update.Kind) {
 					s.mu.Lock()
 					if s.job == nil {
 						s.pending = append(s.pending, note)

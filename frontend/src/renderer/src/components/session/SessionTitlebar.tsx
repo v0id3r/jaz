@@ -4,6 +4,7 @@ import { Popover } from '@/components/ui/Popover'
 import { SidePanelControl } from '@/components/session/SidePanelControl'
 import type { useSidePanelState } from '@/components/session/SidePanelState'
 import { SidePanelTabs } from '@/components/session/SidePanelTabs'
+import { ThreadSubscriptionUsage } from '@/components/subscriptions/SubscriptionUsage'
 import { TokenStats } from '@/components/session/TokenStats'
 import { RuntimeBadge } from '@/components/sidebar/RuntimeBadge'
 import type { PluginView, Session } from '@/lib/api/types'
@@ -23,6 +24,7 @@ export function SessionTitlebar({ session, isMobile, panel, sideChatAvailable, h
   const [viewsOpen, setViewsOpen] = useState(false)
   const slot = useMemo(() => header ?? <>
     <RuntimeBadge session={session} truncate />
+    <ThreadSubscriptionUsage session={session} />
     <TokenStats session={session} />
   </>, [header, session])
   useTitlebarSlot(slot)
