@@ -273,15 +273,24 @@ func TestVoiceRetryPreservesUnconfirmedDispatch(t *testing.T) {
 	}
 }
 
+const voiceClientDeps = "production voice-client tests require Bun 1.3.5 and frontend dependencies: install Bun, then run bun install --frozen-lockfile --ignore-scripts in frontend"
+
 func runVoiceClient(t *testing.T, origin, session, scenario, reply string) []byte {
 	t.Helper()
 	bun, err := exec.LookPath("bun")
 	if err != nil {
-		t.Fatal("production voice-client tests require Bun 1.3.5 and frontend dependencies: install Bun, then run bun install --frozen-lockfile --ignore-scripts in frontend")
+		t.Fatal(voiceClientDeps)
 	}
 	script, err := filepath.Abs("../../../frontend/src/renderer/src/lib/voice/testdata/admission-client.mjs")
 	if err != nil {
 		t.Fatal(err)
+	}
+	frontend, err := filepath.Abs("../../../frontend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(frontend, "node_modules")); err != nil {
+		t.Fatal(voiceClientDeps)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
