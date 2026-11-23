@@ -16,7 +16,8 @@ func TestSupportedSteerMethod(t *testing.T) {
 		{"native", `{"_meta":{"steering":{"supported":true,"waitForCompletion":true}}}`, steerNative},
 		{"Grok 1.0.25 initialization", `{"_meta":{"grokShell":true,"agentVersion":"1.0.25"}}`, steerGrokInterject},
 		{"unknown agent", `{"agentCapabilities":{"loadSession":true}}`, steerUnsupported},
-		{"prompt queue wins", `{"agentCapabilities":{"_meta":{"claudeCode":{"promptQueueing":true}}},"_meta":{"steering":{"supported":true,"waitForCompletion":true}}}`, steerPromptQueueing},
+		{"native wins over prompt queue", `{"agentCapabilities":{"_meta":{"claudeCode":{"promptQueueing":true}}},"_meta":{"steering":{"supported":true,"waitForCompletion":true}}}`, steerNative},
+		{"prompt queue without native completion", `{"agentCapabilities":{"_meta":{"claudeCode":{"promptQueueing":true}}},"_meta":{"steering":{"supported":true}}}`, steerPromptQueueing},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

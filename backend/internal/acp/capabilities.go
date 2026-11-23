@@ -25,12 +25,12 @@ func supportedSteerMethod(raw json.RawMessage) steerMethod {
 	if json.Unmarshal(raw, &resp) != nil {
 		return steerUnsupported
 	}
-	if resp.AgentCapabilities != nil && metaPromptQueueing(resp.AgentCapabilities.Meta) {
-		return steerPromptQueueing
-	}
 	steering, _ := resp.Meta["steering"].(map[string]any)
 	if boolMeta(steering, "supported") && boolMeta(steering, "waitForCompletion") {
 		return steerNative
+	}
+	if resp.AgentCapabilities != nil && metaPromptQueueing(resp.AgentCapabilities.Meta) {
+		return steerPromptQueueing
 	}
 	if boolMeta(resp.Meta, "grokShell") {
 		return steerGrokInterject
