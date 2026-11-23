@@ -100,7 +100,7 @@ func NewRoutes(deps routeDeps) server.Routes {
 		{Pattern: "POST /v1/sessions/{session}/voice/transcript", Handler: http.HandlerFunc(deps.Voice.Transcript)},
 		{Pattern: "POST /v1/sessions/{session}/voice/diagnostics", Handler: http.HandlerFunc(deps.Voice.Diagnostics)},
 	}
-	routes = append(routes, usageRoutes(deps.Usage)...)
+	routes = append(routes, usageRoutes(deps.Usage, deps.ACP)...)
 	push := mobilepushapi.Handler{Service: deps.Push}
 	routes = append(routes,
 		server.Route{Pattern: "GET /v1/mobile/push", Handler: http.HandlerFunc(push.Status)},
@@ -165,7 +165,7 @@ func feedRoutes(feed feedcore.Service) server.Routes {
 	}
 }
 
-func usageRoutes(usage usagecore.Service) server.Routes {
+func usageRoutes(usage usagecore.Service, agents *acp.Manager) server.Routes {
 	return server.Routes{
 		{
 			Pattern: "GET /v1/usage/daily",
@@ -174,6 +174,10 @@ func usageRoutes(usage usagecore.Service) server.Routes {
 		{
 			Pattern: "GET /v1/usage/models",
 			Handler: usageapi.NewModelsHandler(usage),
+		},
+		{
+			Pattern: "GET /v1/usage/subscriptions/{agent}",
+			Handler: usageapi.NewSubscriptionHandler(agents),
 		},
 	}
 }

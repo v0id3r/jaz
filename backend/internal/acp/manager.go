@@ -130,6 +130,7 @@ type Manager struct {
 	stopLaunches context.CancelFunc
 
 	advertisedModels sync.Map
+	subscriptions    sync.Map
 }
 
 type SpawnRequest struct {
@@ -355,6 +356,7 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 	}
 	promptTracker := newPromptTrackingConn(conn)
 	state := newConnectionState()
+	state.subscription = m.claudeSubscriptionAccount(name, cfg, env)
 	peer := jsonrpc.NewPeer(promptTracker, state.handler(m, handler))
 	ac := &agentConn{state: state, conn: promptTracker, peer: peer, cancel: cancel, closed: runCtx.Done(), stderr: stderr, promptTracker: promptTracker,
 		sandboxed: sandbox.Sandboxes(m.cfg.Launcher, cwd)}

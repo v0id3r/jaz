@@ -18,13 +18,16 @@ type agentMetadataSource interface {
 	MetadataConfig(string) (AgentConfig, bool, error)
 }
 
+func (m *Manager) metadataAgentConfig(agent string) (AgentConfig, bool, error) {
+	if source, ok := m.agents.(agentMetadataSource); ok {
+		return source.MetadataConfig(agent)
+	}
+	return m.configuredAgent(agent)
+}
+
 func (m *Manager) DiscoverModels(ctx context.Context, agent string) (AgentModelCatalog, error) {
 	agent = CanonicalAgentName(agent)
-	lookup := m.agents.AgentConfig
-	if source, ok := m.agents.(agentMetadataSource); ok {
-		lookup = source.MetadataConfig
-	}
-	cfg, ok, err := lookup(agent)
+	cfg, ok, err := m.metadataAgentConfig(agent)
 	if err != nil {
 		return AgentModelCatalog{}, err
 	}

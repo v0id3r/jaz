@@ -5,6 +5,7 @@ import { UsageWindowFilter } from '@/components/settings/UsageWindowFilter'
 import type { UsageWindow } from '@/lib/usageWindow'
 import { CategoryBreakdown } from '@/components/settings/UsageCategoryBreakdown'
 import { ModelBreakdown, UsageShareCharts } from '@/components/settings/UsageModelBreakdown'
+import { SubscriptionUsageSettings } from '@/components/subscriptions/SubscriptionUsage'
 import { SettingsCard } from '@/components/settings/SettingsCard'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { agentSettingsQuery } from '@/lib/api/settings'
@@ -46,11 +47,11 @@ export function UsageSettings() {
 
   return (
     <section className="py-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-ink">Usage</p>
-          <p className="mt-0.5 text-[13px] text-ink-2">Daily input and output tokens across all agent sessions, excluding cache reads.</p>
-        </div>
+      <SubscriptionUsageSettings />
+
+      <div className="mt-6">
+        <h3 className="text-sm font-medium text-ink">Token usage</h3>
+        <p className="mt-0.5 text-[13px] text-ink-2">Daily input and output tokens across all agent sessions, excluding cache reads.</p>
       </div>
 
       <UsageWindowFilter window={window} onChange={setWindow} />
