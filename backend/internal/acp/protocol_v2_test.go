@@ -449,6 +449,27 @@ func TestV2ToolCallCancelUsesTerminal(t *testing.T) {
 	if job.State != acp.StateIdle {
 		t.Fatalf("turn ended %s", job.State)
 	}
+	// The agent reported the killed command's end without an exit code: the
+	// card must not invent exit 0. The exit update precedes the turn's idle,
+	// so the last projection of the call already carries the end.
+	waitForV2Job(t, 10*time.Second, func() bool {
+		events, err := store.LoadSessionEvents(spawned.SessionID)
+		if err != nil {
+			return false
+		}
+		var last *sessionevents.ACPToolCall
+		for _, event := range events {
+			if event.ACP == nil {
+				continue
+			}
+			for _, call := range event.ACP.ToolCalls {
+				if call.ID == "call-t" {
+					last = &call
+				}
+			}
+		}
+		return last != nil && last.Runtime.TerminalExitCode == nil
+	})
 }
 
 // The terminal may advertise its cancel after the tool call already linked

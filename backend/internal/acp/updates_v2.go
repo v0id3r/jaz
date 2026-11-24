@@ -80,7 +80,7 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 	case acpv2.ToolCallContentChunkUpdate:
 		toolEvent = m.appendToolContentV2Locked(job, event, now)
 	case acpv2.TerminalSessionUpdate:
-		m.applyTerminalUpdateV2Locked(job, event.TerminalUpdate, now)
+		m.applyTerminalUpdateV2Locked(job, event.TerminalUpdate, terminalExitReportedV2(raw), now)
 		toolEvent = m.terminalToolEventV2Locked(job, string(event.TerminalID))
 	case acpv2.TerminalOutputChunkUpdate:
 		m.appendTerminalOutputV2Locked(job, string(event.TerminalID), event.Data)
@@ -355,7 +355,20 @@ type terminalStateV2 struct {
 	exited      bool
 }
 
-func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.TerminalUpdate, now time.Time) {
+// terminalExitReportedV2 reports whether a raw terminal_update carries an
+// exit code: the generated type decodes an absent exitCode as zero, and an
+// agent that reports no exit code (a background command's end) must not
+// read as exit 0.
+func terminalExitReportedV2(raw json.RawMessage) bool {
+	var probe struct {
+		ExitStatus *struct {
+			ExitCode *int64 `json:"exitCode"`
+		} `json:"exitStatus"`
+	}
+	return json.Unmarshal(raw, &probe) == nil && probe.ExitStatus != nil && probe.ExitStatus.ExitCode != nil
+}
+
+func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.TerminalUpdate, exitReported bool, now time.Time) {
 	id := string(update.TerminalID)
 	if job.terminalsV2 == nil {
 		job.terminalsV2 = map[string]*terminalStateV2{}
@@ -391,8 +404,10 @@ func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.Termin
 			}
 		}
 		if update.ExitStatus != nil {
-			code := int(update.ExitStatus.ExitCode)
-			call.Runtime.TerminalExitCode = &code
+			if exitReported {
+				code := int(update.ExitStatus.ExitCode)
+				call.Runtime.TerminalExitCode = &code
+			}
 			if update.ExitStatus.Signal != "" {
 				signal := update.ExitStatus.Signal
 				call.Runtime.TerminalExitSignal = &signal
