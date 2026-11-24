@@ -20,6 +20,7 @@ import { FileReaderLinkProvider, MessageMarkdown, PreviewLinkProvider } from '@/
 import { MarkdownArtifactContext } from '@/components/session/MarkdownArtifact'
 import { SessionErrorNotice, type SessionErrorAction } from '@/components/session/SessionErrorNotice'
 import { SessionLivenessIndicator } from '@/components/session/SessionLivenessIndicator'
+import { agentTaskLive } from '@/lib/agentTasks'
 import { GoalStatusBar } from '@/components/session/GoalStatusBar'
 import { PendingSteerBubble } from '@/components/session/PendingSteerBubble'
 import { PendingSessionHistory } from '@/components/session/PendingSessionHistory'
@@ -464,6 +465,7 @@ export function ThreadView({
     panelProgress,
     providerSubagents,
     spawnedThreads,
+    agentTasks,
     sideChatEvents,
     subagentEvents,
   } = derived
@@ -481,6 +483,7 @@ export function ThreadView({
   const isACP = session.runtime === 'acp'
   // Covers turns started elsewhere (parent-triggered, or refresh mid-turn).
   const sessionRunning = queue.sessionRunning
+  const liveBackgroundTasks = agentTasks.filter(agentTaskLive).length
   const pendingSteer = session.pending_steer_message
   const initialUser = pendingOptimisticUserMessage(messages, initialPrompt ?? null)
   const optimisticUser = isACP && live ? liveOptimisticUserMessage(live) : initialUser
@@ -520,6 +523,7 @@ export function ThreadView({
         progress={panelProgress}
         subagents={providerSubagents}
         spawnedThreads={spawnedThreads}
+        tasks={agentTasks}
         working={sessionRunning}
         asking={hasBlockingPendingPermission}
         panel={sidePanel}
@@ -628,6 +632,7 @@ export function ThreadView({
                               activeOperation={detail.data?.acp_active_operation}
                               updatedAt={session.updated_at}
                               lastActivityAt={latestEventTimeISO(lastSessionEventAt, live?.at)}
+                              backgroundTasks={liveBackgroundTasks}
                             />
                           </>
                         ) : live ? (

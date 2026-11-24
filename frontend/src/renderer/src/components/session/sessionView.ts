@@ -9,6 +9,7 @@ import type {
   SessionOverview,
 } from '@/lib/api/types'
 import { applyProviderToolTitleFallbacks, providerSubagentsFromSources } from '@/lib/providerSubagents'
+import { agentTasksFromSources } from '@/lib/agentTasks'
 import { spawnedThreadsFromSources } from '@/lib/spawnedThreads'
 import {
   approvalPlanSurfaceFromEvent,
@@ -358,6 +359,7 @@ export function deriveSessionView(
     planDecisionApproval: latestPlanDecisionSurface?.approval,
     planDecisionIsCurrent: !Number.isNaN(planDecisionAt) && planDecisionAt >= latestUserAt,
     panelProgress: panelProgressEvent ? progressSurfaceFromEvent(panelProgressEvent) : undefined,
+    agentTasks: agentTasksFromSources(overview?.agent_events, [...persistedEvents, ...liveEvents]),
     providerSubagents: providerSubagentsFromSources(overview?.subagents, settledTranscriptEvents),
     spawnedThreads: spawnedThreadsFromSources(
       overview?.threads ?? acpChildren,

@@ -385,6 +385,10 @@ export function cancelSession(id: string): Promise<{ ok: boolean }> {
   return post<{ ok: boolean }>(`/v1/sessions/${id}/cancel`)
 }
 
+export function stopSessionAgentTask(id: string, task: string): Promise<void> {
+  return post<void>(`/v1/sessions/${id}/agent/tasks/${encodeURIComponent(task)}/stop`)
+}
+
 export function clearSessionGoal(id: string): Promise<void> {
   return del<void>(`/v1/sessions/${id}/goal`)
 }

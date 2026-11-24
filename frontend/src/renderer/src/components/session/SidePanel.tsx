@@ -7,6 +7,7 @@ import { ViewPanel } from '@/components/session/ViewPanel'
 import { BrowserPanelSlot } from '@/components/browser/BrowserWorkspace'
 import type { SendMessageHandler, SendMessageOptions } from '@/lib/sendMessage'
 import type { SpawnedThreadView } from '@/lib/spawnedThreads'
+import type { AgentTaskView } from '@/lib/agentTasks'
 import type { TaskSurface } from '@/lib/taskSurface'
 import { CodeDiffPanel } from '@/components/session/CodeDiffPanel'
 import { FileReaderPanel } from '@/components/session/FileReaderPanel'
@@ -28,7 +29,7 @@ function TabBody({ id, active, visible, children }: { id: string; active: boolea
 }
 
 export function SidePanel({
-  session, panel, progress, subagents, spawnedThreads, working, asking,
+  session, panel, progress, subagents, spawnedThreads, tasks, working, asking,
   sideChatAvailable, sideChatEvents, subagentEvents, onAddBrowserAnnotation, onUploadAttachment,
   onSend, onQueuePrompt, onQueueAction, onSendSideChat, overview, overviewLabel, canvas,
 }: {
@@ -38,6 +39,7 @@ export function SidePanel({
   progress?: TaskSurface
   subagents: ProviderSubagentView[]
   spawnedThreads: SpawnedThreadView[]
+  tasks?: AgentTaskView[]
   working: boolean
   asking: boolean
   sideChatAvailable: boolean
@@ -80,6 +82,7 @@ export function SidePanel({
               progress={progress}
               subagents={subagents}
               spawnedThreads={spawnedThreads}
+              tasks={tasks}
               working={working}
               onSend={onSend}
               onQueuePrompt={onQueuePrompt}

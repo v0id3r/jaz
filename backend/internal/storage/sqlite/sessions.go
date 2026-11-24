@@ -586,6 +586,7 @@ func sessionFromDB(row threaddb.Thread) (storage.Session, error) {
 		CompletedTurnStartedAt: msToTime(row.CompletedTurnStartedAtMs),
 		PromptDigest:           row.PromptDigest,
 		Unread:                 row.Unread != 0,
+		BackgroundWork:         row.BackgroundWork != 0,
 	}
 	if session.LastAttentionAt.IsZero() {
 		storage.MarkSessionAttention(&session, storage.SessionAttentionAt(session))

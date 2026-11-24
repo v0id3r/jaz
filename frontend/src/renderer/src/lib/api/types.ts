@@ -79,6 +79,8 @@ export interface Session {
   // Set when a turn completes, cleared by the /seen action; the Feed lists the
   // idle threads carrying it.
   unread?: boolean
+  /** Set while the thread's agent holds a live background task. */
+  background_work?: boolean
   runtime: 'acp'
   runtime_ref?: RuntimeRef
   model_provider?: string

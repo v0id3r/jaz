@@ -25,6 +25,7 @@ import { skillsQuery, type SkillInfo } from '@/lib/api/skills'
 import type { QueuedAction, RepoInfo, Session } from '@/lib/api/types'
 import { writeClipboard } from '@/lib/clipboard'
 import type { ProviderSubagentView } from '@/lib/providerSubagents'
+import type { AgentTaskView } from '@/lib/agentTasks'
 import type { SendMessageHandler } from '@/lib/sendMessage'
 import type { SpawnedThreadView } from '@/lib/spawnedThreads'
 import { taskStepState, type TaskSurface } from '@/lib/taskSurface'
@@ -34,6 +35,7 @@ import { keys } from '@/lib/query/keys'
 import { SidePanelShell } from './SidePanelShell'
 import { encodeMention } from './mentionCodec'
 import { OverviewDisclosureSection, OverviewRuns, SectionHeader } from './OverviewRuns'
+import { BackgroundTasksSection } from './OverviewTasks'
 import { TaskStepIcon } from './TaskStepIcon'
 import { useRepoActions } from './useRepoActions'
 import { RepoStatus } from './RepoStatus'
@@ -43,6 +45,7 @@ export function OverviewPanel({
   progress,
   subagents,
   spawnedThreads,
+  tasks = [],
   working,
   onSend,
   onQueuePrompt,
@@ -53,6 +56,7 @@ export function OverviewPanel({
   progress?: TaskSurface
   subagents: ProviderSubagentView[]
   spawnedThreads: SpawnedThreadView[]
+  tasks?: AgentTaskView[]
   working: boolean
   onSend: SendMessageHandler
   onQueuePrompt: SendMessageHandler
@@ -64,6 +68,7 @@ export function OverviewPanel({
   return (
     <SidePanelShell scroll className="gap-6 px-4 py-4">
       <OverviewRuns threads={spawnedThreads} subagents={subagents} onOpenSubagent={onOpenSubagent} />
+      {tasks.length ? <BackgroundTasksSection session={session} tasks={tasks} /> : null}
       {progress ? <ProgressSection progress={progress} working={working} /> : null}
       {showGit ? <GitSection repo={repo} onQueueAction={onQueueAction} /> : null}
       <ManageSection

@@ -29,6 +29,7 @@ export function SessionLivenessIndicator({
   activeOperation,
   updatedAt,
   lastActivityAt,
+  backgroundTasks = 0,
 }: {
   agent?: string
   running: boolean
@@ -38,6 +39,8 @@ export function SessionLivenessIndicator({
   activeOperation?: string
   updatedAt: string
   lastActivityAt?: string
+  /** Live background tasks an idle thread still waits on. */
+  backgroundTasks?: number
 }) {
   const [, setTick] = useState(0)
   const { signal, ageMs } = deriveSessionRunSignal({
@@ -58,11 +61,14 @@ export function SessionLivenessIndicator({
   const retry = signal === 'offline' ? undefined : retrying
   const alert = stale || Boolean(retry)
   const detail = detailFor(signal, ageMs, Boolean(retry))
-  const label = retry || livenessLabel(agent, activeOperation, stale, activity)
+  const waiting = signal === 'idle' && backgroundTasks > 0
+  const label = retry || (waiting
+    ? backgroundTasks === 1 ? 'Waiting for a background task' : `Waiting for ${backgroundTasks} background tasks`
+    : livenessLabel(agent, activeOperation, stale, activity))
 
   return (
     <AnimatePresence initial={false}>
-      {signal !== 'idle' ? (
+      {signal !== 'idle' || waiting ? (
         <motion.div
           role="status"
           initial={{ opacity: 0, y: 4, scale: 0.98 }}
@@ -70,7 +76,7 @@ export function SessionLivenessIndicator({
           exit={{ opacity: 0, y: 4, scale: 0.98 }}
           transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
           className={`flex w-fit max-w-full items-center gap-1.5 text-sm leading-5 ${
-            alert ? 'text-danger' : 'text-ink-3 live-shimmer'
+            alert ? 'text-danger' : waiting ? 'text-ink-3' : 'text-ink-3 live-shimmer'
           }`}
         >
           {alert ? (

@@ -175,6 +175,9 @@ type Session struct {
 	// took, in the form its turn note writes; empty when unknown.
 	PromptDigest string `json:"prompt_digest,omitempty"`
 	Unread       bool   `json:"unread,omitempty"`
+	// BackgroundWork is set while the thread's agent holds a live background
+	// task, so an idle thread can still say it waits on one.
+	BackgroundWork bool `json:"background_work,omitempty"`
 }
 
 // Owner is the thread a thread works for: the bot whose subtask, group seat
