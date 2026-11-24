@@ -361,6 +361,34 @@ func TestV2BackgroundToolCallCancel(t *testing.T) {
 	})
 }
 
+// A background terminal that outlives its turn keeps its state: the stop
+// offer survives the next turn's start, and the exit the agent reports in a
+// later turn decides the task's end state.
+func TestV2BackgroundTerminalSurvivesTurn(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	defer manager.Close()
+	spawned := spawnV2Session(t, manager, "v2-terminal-survives")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "terminal-background watch")
+	waitTurnV2(t, manager, spawned.SessionID)
+	tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+	if len(tasks) != 1 || tasks[0].ID != "term-1" || !tasks[0].CanStop {
+		t.Fatalf("background tasks = %#v", tasks)
+	}
+
+	sendV2(t, manager, spawned.Slug, "keep-background")
+	waitTurnV2(t, manager, spawned.SessionID)
+	waitForV2Job(t, 10*time.Second, func() bool {
+		tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+		return len(tasks) == 1 && tasks[0].State == "running" && tasks[0].CanStop
+	})
+}
+
 // A background terminal's end state is the one the agent reported: its exit
 // code when it exited, and a neutral ended when it left the list without a
 // reported end.

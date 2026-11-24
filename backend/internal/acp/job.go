@@ -422,7 +422,13 @@ func (j *jobState) beginTurnLocked(completion CompletionMode, stored storage.Tur
 	j.toolByID = make(map[string]sessionevents.ACPToolCall)
 	j.pendingToolUpdateByID = make(map[string]sessionevents.ACPToolCall)
 	j.seenMessagesV2 = nil
-	j.terminalsV2 = nil
+	// A background terminal or cancellable call can outlive its turn: their
+	// state goes when the terminal exits or the call ends, not with the turn.
+	for id, terminal := range j.terminalsV2 {
+		if terminal.exited {
+			delete(j.terminalsV2, id)
+		}
+	}
 	j.terminalTool = nil
 	j.UpdatedAt = now
 	j.LastEventAt = now

@@ -305,6 +305,16 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				})
 				text("a1", "printed")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "keep-background"):
+				// A turn that does not touch the running background terminal:
+				// every state report keeps listing it, as the real adapter's do.
+				state(map[string]any{"state": "running", "background": []any{
+					map[string]any{"type": "terminal", "terminalId": "term-1"},
+				}})
+				text("a1", "still here")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{
+					map[string]any{"type": "terminal", "terminalId": "term-1"},
+				}})
 			case strings.Contains(message, "terminal-exit-zero"):
 				notify(map[string]any{
 					"sessionUpdate": "terminal_update", "terminalId": "term-1",
