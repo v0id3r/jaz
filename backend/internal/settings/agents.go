@@ -263,6 +263,7 @@ func NormalizeAgentDefaults(input AgentDefaults, catalog acp.AgentCatalog, valid
 			ModelProvider:   modelProvider,
 			Model:           model,
 			ReasoningEffort: effort,
+			Protocol:        strings.TrimSpace(current.Protocol),
 			Auth:            auth,
 		}
 	}

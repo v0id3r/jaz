@@ -292,3 +292,16 @@ func TestNativeDefaultModelKeepsReasoningThroughSettingsSave(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeAgentDefaultsKeepsTheACPProtocolVersion(t *testing.T) {
+	input := AgentDefaults{ACP: map[string]ACPAgentDefaults{
+		"claude": {Enabled: true, Protocol: "v2", Auth: acp.AgentAuthConfig{Mode: acp.AuthModeAuto}},
+	}}
+	normalized, err := NormalizeAgentDefaults(input, acp.BuiltinAgents())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.ACP["claude"].Protocol != "v2" {
+		t.Fatalf("protocol = %q, want v2 kept through a settings save", normalized.ACP["claude"].Protocol)
+	}
+}
