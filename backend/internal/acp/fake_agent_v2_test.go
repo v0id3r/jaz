@@ -235,6 +235,8 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			case strings.Contains(message, "terminal-foreground"):
 				heldTerminal = true
 				state(map[string]any{"state": "running", "background": []any{}})
+				// Like the real v2 adapter: the cancel capability lives on the
+				// terminal's update, never duplicated on the tool call.
 				notify(map[string]any{
 					"sessionUpdate": "terminal_update", "terminalId": "term-2",
 					"command": "sleep 60", "capabilities": map[string]any{"cancel": map[string]any{}},
@@ -242,10 +244,22 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				notify(map[string]any{
 					"sessionUpdate": "tool_call_update", "toolCallId": "call-t",
 					"title": "sleep 60", "kind": "execute", "status": "in_progress",
-					"content":      []any{map[string]any{"type": "terminal", "terminalId": "term-2"}},
-					"capabilities": map[string]any{"cancel": map[string]any{}},
+					"content": []any{map[string]any{"type": "terminal", "terminalId": "term-2"}},
 				})
 				text("a1", "waiting on the command")
+			case strings.Contains(message, "terminal-late"):
+				heldTerminal = true
+				state(map[string]any{"state": "running", "background": []any{}})
+				notify(map[string]any{
+					"sessionUpdate": "tool_call_update", "toolCallId": "call-l",
+					"title": "sleep 60", "kind": "execute", "status": "in_progress",
+					"content": []any{map[string]any{"type": "terminal", "terminalId": "term-3"}},
+				})
+				notify(map[string]any{
+					"sessionUpdate": "terminal_update", "terminalId": "term-3",
+					"command": "sleep 60", "capabilities": map[string]any{"cancel": map[string]any{}},
+				})
+				text("a1", "waiting on the late command")
 			case strings.Contains(message, "terminal-output"):
 				state(map[string]any{"state": "running", "background": []any{}})
 				notify(map[string]any{
@@ -288,8 +302,7 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				notify(map[string]any{
 					"sessionUpdate": "tool_call_update", "toolCallId": "call-term",
 					"title": "sleep 60", "kind": "execute", "status": "in_progress",
-					"content":      []any{map[string]any{"type": "terminal", "terminalId": "term-1"}},
-					"capabilities": map[string]any{"cancel": map[string]any{}},
+					"content": []any{map[string]any{"type": "terminal", "terminalId": "term-1"}},
 				})
 				text("a1", "detached")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{

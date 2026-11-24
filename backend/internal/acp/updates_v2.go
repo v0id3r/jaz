@@ -240,6 +240,11 @@ func (m *Manager) recordToolV2Locked(job *jobState, update acpv2.ToolCallUpdate,
 			}
 			job.terminalTool[terminalID] = src.ID
 			src.Runtime.TerminalID = terminalID
+			// A terminal may have advertised its cancel before the call
+			// linked it (see applyTerminalUpdateV2Locked).
+			if terminal := job.terminalsV2[terminalID]; terminal != nil && terminal.cancellable {
+				src.Cancellable = true
+			}
 		}
 	}
 	src.UpdatedAt = now
@@ -372,6 +377,11 @@ func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.Termin
 	if callID := job.terminalTool[id]; callID != "" {
 		call := job.toolByID[callID]
 		call.Runtime.TerminalID = id
+		// A cancellable terminal makes its call cancellable: the cancel goes
+		// to the terminal (see CancelToolCall), but the card offers it.
+		if terminal.cancellable {
+			call.Cancellable = true
+		}
 		if update.Cwd != nil {
 			call.Runtime.TerminalCwd = string(*update.Cwd)
 		}

@@ -380,15 +380,42 @@ func TestV2ToolCallCancelUsesTerminal(t *testing.T) {
 	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
 
 	sendV2(t, manager, spawned.Slug, "terminal-foreground watch")
+	// The cancel capability arrives only on the terminal's update, as the
+	// real adapter sends it, and still marks the call's card cancellable.
 	waitForV2Job(t, 10*time.Second, func() bool {
 		job, err := manager.Status(spawned.SessionID)
-		return err == nil && len(job.ToolCalls) == 1 && job.ToolCalls[0].ID == "call-t" && job.ToolCalls[0].Runtime.TerminalID == "term-2"
+		return err == nil && len(job.ToolCalls) == 1 && job.ToolCalls[0].ID == "call-t" &&
+			job.ToolCalls[0].Runtime.TerminalID == "term-2" && job.ToolCalls[0].Cancellable
 	})
 	if err := manager.CancelToolCall(context.Background(), spawned.SessionID, "call-t"); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	job := waitTurnV2(t, manager, spawned.SessionID)
 	if job.State != acp.StateIdle {
+		t.Fatalf("turn ended %s", job.State)
+	}
+}
+
+// The terminal may advertise its cancel after the tool call already linked
+// it; the call's card becomes cancellable then.
+func TestV2ToolCallCancelLateTerminalCapability(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-tool-cancel-late")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "terminal-late watch")
+	waitForV2Job(t, 10*time.Second, func() bool {
+		job, err := manager.Status(spawned.SessionID)
+		return err == nil && len(job.ToolCalls) == 1 && job.ToolCalls[0].ID == "call-l" && job.ToolCalls[0].Cancellable
+	})
+	if err := manager.CancelToolCall(context.Background(), spawned.SessionID, "call-l"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if job := waitTurnV2(t, manager, spawned.SessionID); job.State != acp.StateIdle {
 		t.Fatalf("turn ended %s", job.State)
 	}
 }
