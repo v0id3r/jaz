@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/log"
 	"github.com/wins/jaz/backend/internal/acp"
+	"github.com/wins/jaz/backend/internal/sessionevents"
 	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
 )
 
@@ -200,11 +201,6 @@ func TestV2SubagentTranscriptSeparate(t *testing.T) {
 	if strings.Contains(job.Assistant, "child findings") || strings.Contains(job.Assistant, "go research") {
 		t.Fatalf("child transcript leaked into parent: %q", job.Assistant)
 	}
-	transcript := manager.SubagentTranscriptForTest("fake-v2-child")
-	joined := strings.Join(transcript, "\n")
-	if !strings.Contains(joined, "child findings") || !strings.Contains(joined, "go research") {
-		t.Fatalf("child transcript = %v", transcript)
-	}
 	events, err := store.LoadSessionEvents(spawned.SessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -212,6 +208,34 @@ func TestV2SubagentTranscriptSeparate(t *testing.T) {
 	if !hasACPMessage(events, "subagent done") || hasACPMessage(events, "child findings") {
 		t.Fatalf("child activity in parent transcript events")
 	}
+	transcript := subagentTranscript(events, "fake-v2-child")
+	if !strings.Contains(transcript, "child findings") || !strings.Contains(transcript, "go research") {
+		t.Fatalf("child transcript = %q", transcript)
+	}
+
+	// The journal keeps the transcript across a Jaz restart.
+	manager.Close()
+	restarted := newV2TestManager(t, store, nil)
+	defer restarted.Close()
+	events, err = store.LoadSessionEvents(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := subagentTranscript(events, "fake-v2-child"); got != transcript {
+		t.Fatalf("child transcript after restart = %q, want %q", got, transcript)
+	}
+}
+
+// subagentTranscript joins the session journal's subagent_message entries of
+// one child, the read side of a subagent transcript.
+func subagentTranscript(events []sessionevents.Event, childID string) string {
+	var lines []string
+	for _, event := range events {
+		if event.Type == sessionevents.TypeSubagentMessage && event.SubagentMessage != nil && event.SubagentMessage.ID == childID {
+			lines = append(lines, event.SubagentMessage.Role+":"+event.SubagentMessage.Content)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func TestV2Cancel(t *testing.T) {

@@ -30,11 +30,3 @@ func (m *Manager) BackgroundTasksForTest(ref string) []sessionevents.AgentTask {
 	return out
 }
 
-// SubagentTranscriptForTest exposes a v2 child session's recorded transcript.
-func (m *Manager) SubagentTranscriptForTest(childID string) []string {
-	var out []string
-	for _, entry := range m.subagentTranscriptV2(childID) {
-		out = append(out, entry.Kind+":"+entry.Text)
-	}
-	return out
-}

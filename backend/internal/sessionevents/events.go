@@ -27,6 +27,7 @@ const (
 	TypeMCPApp           = "mcp_app"
 	TypeSideChatMessage  = "side_chat_message"
 	TypeProviderSubagent = "provider_subagent"
+	TypeSubagentMessage  = "subagent_message"
 	TypeGoalUpdate       = "goal_update"
 	TypeGoalClear        = "goal_clear"
 	TypeACPMessage       = "acp_message"
@@ -64,6 +65,7 @@ type Event struct {
 	AgentSession     *AgentSession          `json:"agent_session,omitempty"`
 	AgentTask        *AgentTask             `json:"agent_task,omitempty"`
 	ProviderSubagent *ProviderSubagentEvent `json:"provider_subagent,omitempty"`
+	SubagentMessage  *SubagentMessageEvent   `json:"subagent_message,omitempty"`
 	At               time.Time              `json:"at"`
 	ProjectionKey    string                 `json:"projection_key,omitempty"`
 	ProjectionOp     string                 `json:"projection_op,omitempty"`
@@ -79,6 +81,17 @@ type SideChatEvent struct {
 	Status          string                          `json:"status,omitempty"`
 	Contexts        []messagepayload.MessageContext `json:"contexts,omitempty"`
 	Attachments     []messagepayload.Attachment     `json:"attachments,omitempty"`
+}
+
+// SubagentMessageEvent is one transcript entry of a provider subagent's own
+// session. It is stored in the parent session's journal, apart from the
+// parent's feed: a subagent transcript is the journal's subagent_message
+// events with that subagent's ID.
+type SubagentMessageEvent struct {
+	ID      string `json:"id"`
+	Role    string `json:"role"`
+	Content string `json:"content,omitempty"`
+	Status  string `json:"status,omitempty"`
 }
 
 type ProviderSubagentEvent struct {

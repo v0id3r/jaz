@@ -10,22 +10,15 @@ import (
 )
 
 // subagentLinkV2 is one child session a v2 agent announced with
-// subagent_update. The child's transcript is kept here, apart from the parent
-// thread's feed; a dedicated UI for it is a later step.
+// subagent_update. The child's transcript lives in the parent session's
+// journal as subagent_message events, apart from the parent thread's feed.
 type subagentLinkV2 struct {
-	parentID   string
-	agent      string
-	id         string
-	title      string
-	task       string
-	state      string
-	transcript []subagentTranscriptEntryV2
-}
-
-type subagentTranscriptEntryV2 struct {
-	Kind string    `json:"kind"`
-	Text string    `json:"text"`
-	At   time.Time `json:"at"`
+	parentID string
+	agent    string
+	id       string
+	title    string
+	task     string
+	state    string
 }
 
 type subagentRegistryV2 struct {
@@ -118,8 +111,9 @@ func subagentPanelRecordV2(link *subagentLinkV2) sessionevents.ProviderSubagentE
 	}
 }
 
-// applySubagentChildUpdateV2 records a child session's own updates in its
-// link, apart from the parent thread's transcript.
+// applySubagentChildUpdateV2 records a child session's own updates as
+// subagent_message events of the parent's journal, apart from the parent
+// thread's feed, so the transcript survives a Jaz restart.
 func (m *Manager) applySubagentChildUpdateV2(childID string, raw json.RawMessage) {
 	link := m.subagentsV2.lookup(childID)
 	if link == nil {
@@ -129,52 +123,42 @@ func (m *Manager) applySubagentChildUpdateV2(childID string, raw json.RawMessage
 	if err != nil {
 		return
 	}
-	entry := subagentTranscriptEntryV2{At: time.Now().UTC()}
-	republish := false
+	entry := &sessionevents.SubagentMessageEvent{ID: childID}
 	switch event := update.(type) {
 	case acpv2.AgentMessageChunkUpdate:
-		entry.Kind, entry.Text = "assistant", acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
+		entry.Role, entry.Content = "assistant", acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
 	case acpv2.AgentMessageUpdate:
-		entry.Kind, entry.Text = "assistant", acpv2.TextFromContent(event.Content)
+		entry.Role, entry.Content = "assistant", acpv2.TextFromContent(event.Content)
 	case acpv2.AgentThoughtChunkUpdate:
-		entry.Kind, entry.Text = "thought", acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
+		entry.Role, entry.Content = "thought", acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
 	case acpv2.SessionMessageUpdate:
-		entry.Kind, entry.Text = "message", acpv2.TextFromContent(event.Content)
+		entry.Role, entry.Content = "user", acpv2.TextFromContent(event.Content)
 	case acpv2.SessionMessageChunkUpdate:
-		entry.Kind, entry.Text = "message", acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
+		entry.Role, entry.Content = "user", acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
 	case acpv2.ToolCallUpdateSessionUpdate:
-		entry.Kind = "tool"
-		entry.Text = event.Title
+		entry.Role, entry.Content = "tool", event.Title
 		if event.Status != nil {
-			entry.Text += " (" + string(*event.Status) + ")"
+			entry.Status = string(*event.Status)
 		}
 	case acpv2.StateSessionUpdate:
+		m.subagentsV2.mu.Lock()
 		link.state = event.State
-		republish = true
-	default:
-		return
-	}
-	m.subagentsV2.mu.Lock()
-	if entry.Text != "" || entry.Kind == "tool" {
-		link.transcript = append(link.transcript, entry)
-	}
-	record := subagentPanelRecordV2(link)
-	m.subagentsV2.mu.Unlock()
-	if republish {
+		record := subagentPanelRecordV2(link)
+		m.subagentsV2.mu.Unlock()
 		if parent := m.jobByID(link.parentID); parent != nil {
 			m.publishProviderSubagents(parent.eventView(), []sessionevents.ProviderSubagentEvent{record})
 		}
+		return
+	default:
+		return
 	}
-}
-
-// subagentTranscriptV2 returns the child's recorded transcript; the read side
-// for a dedicated UI.
-func (m *Manager) subagentTranscriptV2(childID string) []subagentTranscriptEntryV2 {
-	link := m.subagentsV2.lookup(childID)
-	if link == nil {
-		return nil
+	if entry.Content == "" && entry.Role != "tool" {
+		return
 	}
-	m.subagentsV2.mu.Lock()
-	defer m.subagentsV2.mu.Unlock()
-	return append([]subagentTranscriptEntryV2(nil), link.transcript...)
+	m.recordAndPublishDirect(sessionevents.Event{
+		SessionID:       link.parentID,
+		Type:            sessionevents.TypeSubagentMessage,
+		SubagentMessage: entry,
+		At:              time.Now().UTC(),
+	})
 }
