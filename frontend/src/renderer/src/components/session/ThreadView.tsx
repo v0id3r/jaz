@@ -435,6 +435,11 @@ export function ThreadView({
     [data, events.data, overviewData],
   )
   const canvasChat = useCanvasChat(canvas, Boolean(derived?.hasBlockingPendingPermission), isMobile)
+  const subagentEvents = derived?.subagentEvents
+  const subagentTranscriptAccess = useMemo<SubagentTranscriptAccess>(() => ({
+    open: sidePanel.openSubagent,
+    transcripts: new Set((subagentEvents ?? []).flatMap((event) => event.subagent_message?.id ? [event.subagent_message.id] : [])),
+  }), [sidePanel.openSubagent, subagentEvents])
   if (detail.isPending) {
     return <PendingSessionHistory sessionId={sessionId} initialPrompt={initialPrompt} />
   }
@@ -475,12 +480,7 @@ export function ThreadView({
     spawnedThreads,
     agentTasks,
     sideChatEvents,
-    subagentEvents,
   } = derived
-  const subagentTranscriptAccess = useMemo<SubagentTranscriptAccess>(() => ({
-    open: sidePanel.openSubagent,
-    transcripts: new Set(subagentEvents.flatMap((event) => event.subagent_message?.id ? [event.subagent_message.id] : [])),
-  }), [sidePanel.openSubagent, subagentEvents])
   const showPlanDecision = Boolean(
     latestPlanDecisionSurface?.awaitingApproval &&
       planDecisionApproval &&
@@ -541,7 +541,7 @@ export function ThreadView({
         panel={sidePanel}
         sideChatAvailable={sideChatAvailable}
         sideChatEvents={sideChatEvents}
-        subagentEvents={subagentEvents}
+        subagentEvents={derived.subagentEvents}
         overview={details?.({ agentSession: derived.agentSession, working: sessionRunning, threads: spawnedThreads, subagents: providerSubagents })}
         overviewLabel={overviewLabel}
         onAddBrowserAnnotation={composerContexts.addBrowserAnnotation}
