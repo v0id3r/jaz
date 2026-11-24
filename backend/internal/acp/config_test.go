@@ -1102,6 +1102,19 @@ func TestAutoAuthMethodSelectsConfiguredEnvVarForGenericAgent(t *testing.T) {
 	}
 }
 
+func TestAutoAuthMethodSelectsEnvVarThroughV2Initialize(t *testing.T) {
+	raw := normalizeInitializeV2([]byte(`{
+		"protocolVersion": 2,
+		"capabilities": {"session": {}},
+		"authMethods": [{"methodId": "openrouter", "type": "env_var", "name": "OpenRouter", "vars": [{"name": "OPENROUTER_API_KEY"}]}]
+	}`))
+	method, missing := autoAuthMethod(AgentOpenCode, raw, map[string]string{"OPENROUTER_API_KEY": "key"})
+
+	if method != "openrouter" || len(missing) != 0 {
+		t.Fatalf("method=%q missing=%v", method, missing)
+	}
+}
+
 func TestAutoAuthMethodReportsMissingEnvVars(t *testing.T) {
 	raw := []byte(`{"authMethods": [{"type": "env_var", "id": "openrouter", "vars": [{"name": "OPENROUTER_API_KEY"}]}]}`)
 	method, missing := autoAuthMethod(AgentOpenCode, raw, nil)

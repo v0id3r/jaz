@@ -64,10 +64,7 @@ func normalizeInitializeV2(raw json.RawMessage) json.RawMessage {
 			} `json:"session"`
 			Meta map[string]any `json:"_meta"`
 		} `json:"capabilities"`
-		AuthMethods []struct {
-			MethodID string `json:"methodId"`
-			Name     string `json:"name"`
-		} `json:"authMethods"`
+		AuthMethods []map[string]any `json:"authMethods"`
 		Meta json.RawMessage `json:"_meta"`
 	}
 	if json.Unmarshal(raw, &resp) != nil || resp.Capabilities == nil {
@@ -107,11 +104,13 @@ func normalizeInitializeV2(raw json.RawMessage) json.RawMessage {
 		out["_meta"] = resp.Meta
 	}
 	if len(resp.AuthMethods) > 0 {
-		methods := make([]map[string]any, 0, len(resp.AuthMethods))
 		for _, method := range resp.AuthMethods {
-			methods = append(methods, map[string]any{"id": method.MethodID, "name": method.Name})
+			if id, ok := method["methodId"]; ok {
+				method["id"] = id
+				delete(method, "methodId")
+			}
 		}
-		out["authMethods"] = methods
+		out["authMethods"] = resp.AuthMethods
 	}
 	normalized, err := json.Marshal(out)
 	if err != nil {
