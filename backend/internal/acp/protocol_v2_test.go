@@ -268,6 +268,39 @@ func subagentTranscript(events []sessionevents.Event, childID string) string {
 	return strings.Join(lines, "\n")
 }
 
+// A worker thread shown in its parent's feed publishes its subagent's
+// transcript to the parent's journal too, next to the subagent's card.
+func TestV2SubagentTranscriptReachesParentVisibleSurface(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	parent := spawnV2Session(t, manager, "v2-parent")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	worker, err := manager.Spawn(ctx, acp.SpawnRequest{ACPAgent: "fake", Slug: "v2-worker", ParentID: parent.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = manager.Cancel(context.Background(), worker.SessionID) }()
+
+	if _, err := manager.Send(ctx, acp.SendRequest{Session: worker.SessionID, Message: "use a subagent", Completion: acp.CompletionInline, ParentVisible: true}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnV2(t, manager, worker.SessionID)
+
+	for _, session := range []string{worker.SessionID, parent.SessionID} {
+		events, err := store.LoadSessionEvents(session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if transcript := subagentTranscript(events, "fake-v2-child"); !strings.Contains(transcript, "child findings") {
+			t.Fatalf("session %s transcript = %q", session, transcript)
+		}
+	}
+}
+
 // A child session whose state the agent reports as unknown gives the panel
 // no failure: unknown is not a made-up terminal result.
 func TestV2SubagentUnknownStateIsNotFailure(t *testing.T) {

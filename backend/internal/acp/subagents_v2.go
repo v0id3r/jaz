@@ -156,10 +156,22 @@ func (m *Manager) applySubagentChildUpdateV2(childID string, raw json.RawMessage
 	if entry.Content == "" && entry.Role != "tool" {
 		return
 	}
-	m.recordAndPublishDirect(sessionevents.Event{
-		SessionID:       link.parentID,
-		Type:            sessionevents.TypeSubagentMessage,
-		SubagentMessage: entry,
-		At:              time.Now().UTC(),
-	})
+	// The transcript goes to the same journals as the subagent's card, so a
+	// parent-visible thread can open it too.
+	sessionIDs := []string{link.parentID}
+	if parent := m.jobByID(link.parentID); parent != nil {
+		sessionIDs = surfaceSessionIDs(parent.eventView())
+	}
+	now := time.Now().UTC()
+	events := make([]sessionevents.Event, 0, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		message := *entry
+		events = append(events, sessionevents.Event{
+			SessionID:       sessionID,
+			Type:            sessionevents.TypeSubagentMessage,
+			SubagentMessage: &message,
+			At:              now,
+		})
+	}
+	m.recordAndPublishEventListDirect(events)
 }
