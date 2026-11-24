@@ -26,6 +26,7 @@ import {
   type WebResult,
 } from './toolPresentation'
 import { EditDiffBlock, hasInlineDiff } from './EditDiffBlock'
+import { ToolCancelButton } from './ToolCancel'
 import { hasToolRawDetails, ToolRawDetails } from './ToolRawDetails'
 import { normalized } from './TranscriptUtils'
 
@@ -124,13 +125,14 @@ export const ToolCallDetail = memo(function ToolCallDetail({
   const running = active && isRunningToolStatus(call.status)
   return (
     <div className="relative min-w-0">
-      <button
-        type="button"
-        disabled={!expandable}
-        aria-expanded={expandable ? open : undefined}
-        onClick={() => setOpen((value) => !value)}
-        className="group flex min-h-8 w-full min-w-0 items-center gap-1.5 rounded-control text-left transition-colors duration-150 enabled:hover:text-ink disabled:cursor-default"
-      >
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          disabled={!expandable}
+          aria-expanded={expandable ? open : undefined}
+          onClick={() => setOpen((value) => !value)}
+          className="group flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-control text-left transition-colors duration-150 enabled:hover:text-ink disabled:cursor-default"
+        >
         <ToolActivityReveal reveal={reveal} className="flex min-w-0 items-center gap-1.5">
           <span className="relative z-[1] flex size-5 shrink-0 items-center justify-center rounded-full bg-bg text-ink-3">
             <Icon size={12} aria-hidden />
@@ -152,7 +154,9 @@ export const ToolCallDetail = memo(function ToolCallDetail({
           ) : null}
           {running ? <LoaderCircle className="size-3 shrink-0 animate-spin text-running" aria-hidden /> : null}
         </ToolActivityReveal>
-      </button>
+        </button>
+        <ToolCancelButton call={call} active={active} />
+      </div>
       <Collapse open={open && expandable} className="w-full">
         <HumanToolPreview call={call} category={presentation.category} preview={presentation.preview} />
         <ToolRawDetails input={call.raw_input} output={presentation.output} />

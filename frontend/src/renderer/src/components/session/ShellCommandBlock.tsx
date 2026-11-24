@@ -2,6 +2,7 @@ import { LoaderCircle } from 'lucide-react'
 import { memo } from 'react'
 import type { ACPToolCall } from '@/lib/api/types'
 import { ToolActivityReveal } from '@/components/session/ToolActivityReveal'
+import { ToolCancelButton } from '@/components/session/ToolCancel'
 import { isRunningToolStatus, toolCallCategory, toolCallPresentation } from './toolPresentation'
 import { normalized } from './TranscriptUtils'
 
@@ -37,7 +38,8 @@ export const ShellCommandBlock = memo(function ShellCommandBlock({
   return (
     <div className="w-full overflow-hidden rounded-card border border-border">
       <div className="bg-surface px-2.5 py-1.5">
-        <ToolActivityReveal reveal={reveal && !command.includes('\n')} wide className="flex items-start gap-2">
+        <div className="flex items-start gap-1">
+          <ToolActivityReveal reveal={reveal && !command.includes('\n')} wide className="flex min-w-0 flex-1 items-start gap-2">
           <span className="mt-px shrink-0 font-mono text-[12px] leading-relaxed text-ink-3 select-none" aria-hidden>
             $
           </span>
@@ -58,7 +60,9 @@ export const ShellCommandBlock = memo(function ShellCommandBlock({
           ) : failed ? (
             <span className="mt-px shrink-0 text-[11px] text-danger">failed</span>
           ) : null}
-        </ToolActivityReveal>
+          </ToolActivityReveal>
+          <ToolCancelButton call={call} active={active} />
+        </div>
         {description ? <p className="mt-1 pl-3.5 text-[11px] text-ink-3">{description}</p> : null}
       </div>
       {output ? (

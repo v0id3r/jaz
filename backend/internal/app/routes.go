@@ -80,6 +80,7 @@ func NewRoutes(deps routeDeps) server.Routes {
 		{Pattern: "PUT /v1/sessions/{session}/agent/config", Handler: http.HandlerFunc(deps.AgentSession.SetConfig)},
 		{Pattern: "PUT /v1/sessions/{session}/mcp/discovery", Handler: http.HandlerFunc(deps.AgentSession.SetMCPDiscovery)},
 		{Pattern: "POST /v1/sessions/{session}/agent/tasks/{task}/stop", Handler: http.HandlerFunc(deps.AgentSession.StopTask)},
+		{Pattern: "POST /v1/sessions/{session}/agent/tools/{tool}/cancel", Handler: http.HandlerFunc(deps.AgentSession.CancelTool)},
 		{Pattern: "POST /v1/sessions/{session}/agent/input", Handler: http.HandlerFunc(deps.AgentSession.Input)},
 		{Pattern: "GET /v1/sessions/{session}/messages", Handler: deps.SessionMessages},
 		{Pattern: "GET /v1/sessions/{session}/overview", Handler: deps.SessionOverview},

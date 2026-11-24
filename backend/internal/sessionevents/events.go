@@ -534,18 +534,22 @@ type PlanEntry struct {
 type ACPPlanEntry = PlanEntry
 
 type ACPToolCall struct {
-	ID        string            `json:"id"`
-	Title     string            `json:"title,omitempty"`
-	Status    string            `json:"status,omitempty"`
-	Kind      string            `json:"kind,omitempty"`
-	ToolName  string            `json:"tool_name,omitempty"`
-	Content   []ACPToolContent  `json:"content,omitempty"`
-	Locations []ACPToolLocation `json:"locations,omitempty"`
-	RawInput  map[string]any    `json:"raw_input,omitempty"`
-	RawOutput json.RawMessage   `json:"raw_output,omitempty"`
-	Runtime   ACPToolRuntime    `json:"runtime,omitzero"`
-	StartedAt time.Time         `json:"started_at,omitzero"`
-	UpdatedAt time.Time         `json:"updated_at,omitzero"`
+	ID       string `json:"id"`
+	Title    string `json:"title,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	ToolName string `json:"tool_name,omitempty"`
+	// Cancellable marks a call the agent offered to cancel on its own
+	// (ACP v2 tool-call cancel capability), so the UI can stop the one call
+	// without cancelling the turn.
+	Cancellable bool              `json:"cancellable,omitempty"`
+	Content     []ACPToolContent  `json:"content,omitempty"`
+	Locations   []ACPToolLocation `json:"locations,omitempty"`
+	RawInput    map[string]any    `json:"raw_input,omitempty"`
+	RawOutput   json.RawMessage   `json:"raw_output,omitempty"`
+	Runtime     ACPToolRuntime    `json:"runtime,omitzero"`
+	StartedAt   time.Time         `json:"started_at,omitzero"`
+	UpdatedAt   time.Time         `json:"updated_at,omitzero"`
 }
 
 type ACPToolLocation struct {

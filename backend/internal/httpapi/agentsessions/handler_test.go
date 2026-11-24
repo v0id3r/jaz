@@ -61,6 +61,32 @@ func (r *runtimeStub) StopBackgroundTask(_ context.Context, session, id string) 
 	return r.err
 }
 
+func (r *runtimeStub) CancelToolCall(_ context.Context, session, id string) error {
+	r.session, r.id = session, id
+	return r.err
+}
+
+func TestCancelToolRoutesToTheRuntime(t *testing.T) {
+	for _, failure := range []struct {
+		err    error
+		status int
+	}{
+		{nil, http.StatusOK},
+		{errors.New("tool call is not cancellable"), http.StatusConflict},
+	} {
+		runtime := &runtimeStub{err: failure.err}
+		handler := NewHandler(runtime)
+		request := httptest.NewRequest(http.MethodPost, "/", nil)
+		request.SetPathValue("session", "thread-1")
+		request.SetPathValue("tool", "call-9")
+		response := httptest.NewRecorder()
+		handler.CancelTool(response, request)
+		if response.Code != failure.status || runtime.session != "thread-1" || runtime.id != "call-9" {
+			t.Fatalf("cancel tool = %d, %#v", response.Code, runtime)
+		}
+	}
+}
+
 func (r *runtimeStub) Input(_ context.Context, request acp.SteerRequest) (acp.Job, error) {
 	r.session, r.value = request.Session, request.Message
 	r.contexts = request.Contexts

@@ -17,6 +17,7 @@ type Runtime interface {
 	SetSessionConfig(context.Context, string, string, string) error
 	SetDeferredMCPTools(context.Context, string, bool) error
 	StopBackgroundTask(context.Context, string, string) error
+	CancelToolCall(context.Context, string, string) error
 	Input(context.Context, acp.SteerRequest) (acp.Job, error)
 }
 
@@ -68,6 +69,15 @@ func (h *Handler) SetConfig(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) StopTask(w http.ResponseWriter, r *http.Request) {
 	if err := h.runtime.StopBackgroundTask(r.Context(), r.PathValue("session"), r.PathValue("task")); err != nil {
+		httpapi.WriteError(w, http.StatusConflict, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, struct{}{})
+}
+
+// CancelTool stops one running tool call without cancelling its turn.
+func (h *Handler) CancelTool(w http.ResponseWriter, r *http.Request) {
+	if err := h.runtime.CancelToolCall(r.Context(), r.PathValue("session"), r.PathValue("tool")); err != nil {
 		httpapi.WriteError(w, http.StatusConflict, err)
 		return
 	}

@@ -229,6 +229,7 @@ func (m *Manager) recordToolV2Locked(job *jobState, update acpv2.ToolCallUpdate,
 			job.cancellableToolsV2 = map[string]bool{}
 		}
 		job.cancellableToolsV2[src.ID] = true
+		src.Cancellable = true
 	}
 	for _, content := range update.Content {
 		if terminalID := toolContentTerminalID(content); terminalID != "" {

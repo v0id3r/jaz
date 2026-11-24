@@ -389,6 +389,10 @@ export function stopSessionAgentTask(id: string, task: string): Promise<void> {
   return post<void>(`/v1/sessions/${id}/agent/tasks/${encodeURIComponent(task)}/stop`)
 }
 
+export function cancelSessionTool(id: string, tool: string): Promise<void> {
+  return post<void>(`/v1/sessions/${id}/agent/tools/${encodeURIComponent(tool)}/cancel`)
+}
+
 export function clearSessionGoal(id: string): Promise<void> {
   return del<void>(`/v1/sessions/${id}/goal`)
 }

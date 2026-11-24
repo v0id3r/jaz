@@ -46,6 +46,7 @@ func mergeToolCall(dst *sessionevents.ACPToolCall, src sessionevents.ACPToolCall
 	if src.ToolName != "" {
 		dst.ToolName = src.ToolName
 	}
+	dst.Cancellable = dst.Cancellable || src.Cancellable
 	if len(src.Content) > 0 {
 		dst.Content = src.Content
 	}

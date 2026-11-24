@@ -223,3 +223,43 @@ func (m *Manager) stopBackgroundTaskV2(ctx context.Context, job *jobState, task 
 	}
 	return fmt.Errorf("background task %q of type %q is not stoppable", task.ID, task.Type)
 }
+
+// CancelToolCall cancels one running tool call through the v2 cancel request
+// of the entity that runs it — its terminal when the call runs in one, else
+// the call itself — and leaves the turn running.
+func (m *Manager) CancelToolCall(ctx context.Context, session, toolCallID string) error {
+	job, err := m.job(session)
+	if err != nil {
+		return err
+	}
+	job.mu.RLock()
+	call, exists := job.toolByID[toolCallID]
+	cancellable := job.cancellableToolsV2[toolCallID]
+	terminalID := call.Runtime.TerminalID
+	terminal := job.terminalsV2[terminalID]
+	terminalStoppable := terminal != nil && terminal.cancellable && !terminal.exited
+	protocol := job.protocol
+	job.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("tool call %q is unknown", toolCallID)
+	}
+	if protocol != protocolV2 || (!cancellable && !terminalStoppable) {
+		return fmt.Errorf("tool call %q is not cancellable", toolCallID)
+	}
+	peer := m.peer(job.ID)
+	if peer == nil {
+		return fmt.Errorf("agent connection is unavailable")
+	}
+	if terminalStoppable {
+		_, err := peer.Call(ctx, acpv2.AgentMethodTerminalCancel, acpv2.CancelTerminalRequest{
+			SessionID:  acpv2.SessionID(job.ACPSession),
+			TerminalID: acpv2.TerminalID(terminalID),
+		})
+		return err
+	}
+	_, err = peer.Call(ctx, acpv2.AgentMethodToolCallCancel, acpv2.CancelToolCallRequest{
+		SessionID:  acpv2.SessionID(job.ACPSession),
+		ToolCallID: acpv2.ToolCallID(toolCallID),
+	})
+	return err
+}

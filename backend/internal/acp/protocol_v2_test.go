@@ -290,8 +290,63 @@ func TestV2BackgroundTerminalStopAfterTurn(t *testing.T) {
 	})
 }
 
-func TestV2SubagentTranscriptSeparate(t *testing.T) {
+// A v2 agent that offers per-call cancellation gets a tool_call/cancel for
+// the one call, and the turn the call held ends without a session cancel.
+func TestV2ToolCallCancel(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-tool-cancel")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "cancellable-tool please")
+	waitForV2Job(t, 10*time.Second, func() bool {
+		job, err := manager.Status(spawned.SessionID)
+		return err == nil && len(job.ToolCalls) == 1 && job.ToolCalls[0].ID == "call-c" && job.ToolCalls[0].Cancellable
+	})
+	if err := manager.CancelToolCall(context.Background(), spawned.SessionID, "nope"); err == nil {
+		t.Fatal("cancelling an unknown tool call succeeded")
+	}
+	if err := manager.CancelToolCall(context.Background(), spawned.SessionID, "call-c"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle || !strings.Contains(job.Assistant, "tool cancelled") {
+		t.Fatalf("turn ended %s with %q", job.State, job.Assistant)
+	}
+	if job.ToolCalls[0].Status != "failed" {
+		t.Fatalf("cancelled tool call = %#v", job.ToolCalls[0])
+	}
+}
+
+// A tool call running in a cancellable terminal cancels through
+// terminal/cancel, the request of the entity that runs it.
+func TestV2ToolCallCancelUsesTerminal(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-tool-cancel-terminal")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "terminal-foreground watch")
+	waitForV2Job(t, 10*time.Second, func() bool {
+		job, err := manager.Status(spawned.SessionID)
+		return err == nil && len(job.ToolCalls) == 1 && job.ToolCalls[0].ID == "call-t" && job.ToolCalls[0].Runtime.TerminalID == "term-2"
+	})
+	if err := manager.CancelToolCall(context.Background(), spawned.SessionID, "call-t"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle {
+		t.Fatalf("turn ended %s", job.State)
+	}
+}
+
+func TestV2SubagentTranscriptSeparate(t *testing.T) {	store, err := jsonstore.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

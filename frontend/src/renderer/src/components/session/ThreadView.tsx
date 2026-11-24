@@ -29,6 +29,7 @@ import { SessionTitlebar } from '@/components/session/SessionTitlebar'
 import { SidePanelDrawer } from '@/components/session/SidePanelDrawer'
 import { useSidePanelState } from '@/components/session/SidePanelState'
 import { ThinkingBlock } from '@/components/session/ThinkingBlock'
+import { ToolCancelContext } from '@/components/session/ToolCancel'
 import { ThreadFindBar } from '@/components/session/ThreadFindBar'
 import { ThreadOutline } from '@/components/session/ThreadOutline'
 import { ToolCalls } from '@/components/session/ToolCalls'
@@ -49,6 +50,7 @@ import { voiceAvailableQuery } from '@/lib/api/liveVoice'
 import {
   answerSessionInteractiveResponse,
   cancelSession,
+  cancelSessionTool,
   clearSessionGoal,
   sendSessionSideChat,
   sessionEventsQuery,
@@ -299,6 +301,11 @@ export function ThreadView({
     return () => cancelAnimationFrame(frame)
   }, [revealedMessageSeq, pauseFollowing, scrollToMessage])
 
+  const cancelTool = useCallback(
+    (toolCallId: string) => cancelSessionTool(sessionId, toolCallId),
+    [sessionId],
+  )
+
   const stopSession = useCallback(() => {
     // The turn runs detached server-side; clear local optimistic state now.
     abortLiveMessage()
@@ -545,6 +552,7 @@ export function ThreadView({
   return (
     <MCPAppThreadContext value={appThread}>
     <MarkdownArtifactContext value={markdownArtifacts}>
+    <ToolCancelContext value={cancelTool}>
     <FileReaderLinkProvider sessionId={session.id} documentPath={session.runtime_ref?.cwd ? `${session.runtime_ref.cwd}/` : undefined} onOpen={sidePanel.openFile}>
       <PreviewLinkProvider onOpen={sidePanel.openPreview}>
         {/* Phone: the closed side panel slides off to the right (translateX 100%);
@@ -770,6 +778,7 @@ export function ThreadView({
         </FileDropScope>
       </PreviewLinkProvider>
     </FileReaderLinkProvider>
+    </ToolCancelContext>
     </MarkdownArtifactContext>
     </MCPAppThreadContext>
   )

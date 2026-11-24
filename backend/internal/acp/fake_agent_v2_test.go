@@ -75,6 +75,7 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 	}
 
 	var heldPrompt bool
+	var heldTerminal bool
 	for {
 		msg, err := conn.Receive(ctx)
 		if err != nil {
@@ -148,7 +149,24 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				"sessionUpdate": "terminal_update", "terminalId": req.TerminalID,
 				"exitStatus": map[string]any{"exitCode": nil, "signal": nil},
 			})
-			state(map[string]any{"state": "idle", "background": []any{}})
+			if heldTerminal {
+				heldTerminal = false
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			} else {
+				state(map[string]any{"state": "idle", "background": []any{}})
+			}
+		case "tool_call/cancel":
+			var req struct {
+				ToolCallID string `json:"toolCallId"`
+			}
+			_ = json.Unmarshal(msg.Params, &req)
+			answer(*msg.ID, map[string]any{})
+			notify(map[string]any{
+				"sessionUpdate": "tool_call_update", "toolCallId": req.ToolCallID,
+				"status": "failed",
+			})
+			text("a1", "tool cancelled")
+			state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
 		case "session/prompt":
 			prompts++
 			var req struct {
@@ -163,6 +181,14 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			}
 			answer(*msg.ID, map[string]any{"messageId": "user-1"})
 			switch {
+			case strings.Contains(message, "cancellable-tool"):
+				state(map[string]any{"state": "running", "background": []any{}})
+				notify(map[string]any{
+					"sessionUpdate": "tool_call_update", "toolCallId": "call-c",
+					"title": "Long task", "kind": "execute", "status": "in_progress",
+					"capabilities": map[string]any{"cancel": map[string]any{}},
+				})
+				text("a1", "running the long task")
 			case strings.Contains(message, "hold"):
 				if !heldPrompt {
 					heldPrompt = true
@@ -194,6 +220,20 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				state(map[string]any{"state": "running", "background": []any{}})
 				text("a2", "build finished")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "terminal-foreground"):
+				heldTerminal = true
+				state(map[string]any{"state": "running", "background": []any{}})
+				notify(map[string]any{
+					"sessionUpdate": "terminal_update", "terminalId": "term-2",
+					"command": "sleep 60", "capabilities": map[string]any{"cancel": map[string]any{}},
+				})
+				notify(map[string]any{
+					"sessionUpdate": "tool_call_update", "toolCallId": "call-t",
+					"title": "sleep 60", "kind": "execute", "status": "in_progress",
+					"content":      []any{map[string]any{"type": "terminal", "terminalId": "term-2"}},
+					"capabilities": map[string]any{"cancel": map[string]any{}},
+				})
+				text("a1", "waiting on the command")
 			case strings.Contains(message, "terminal-background"):
 				notify(map[string]any{
 					"sessionUpdate": "terminal_update", "terminalId": "term-1",
