@@ -54,12 +54,30 @@ test('the overview lists live background tasks with a stop action', () => {
   expect(markup).not.toContain('Stop Task b')
 })
 
-test('a task whose connection was lost offers no stop', () => {
+test('a task whose connection was lost offers no stop and no success claim', () => {
   const markup = render(createElement(BackgroundTasksSection, {
     session,
-    tasks: [task('a', 'running', { connection_lost: true })],
+    // A live task keeps the section expanded so the rows render.
+    tasks: [task('live', 'running'), task('a', 'running', { connection_lost: true })],
   }))
   expect(markup).not.toContain('Stop Task a')
+  expect(markup).not.toContain('Finished')
+  expect(markup).toContain('Connection lost')
+})
+
+test('only a completed task shows as finished; stopped and unknown stay honest', () => {
+  const markup = render(createElement(BackgroundTasksSection, {
+    session,
+    tasks: [
+      task('live', 'running'),
+      task('done', 'completed', { can_stop: false }),
+      task('stopped', 'stopped', { can_stop: false }),
+      task('failed', 'failed', { can_stop: false }),
+    ],
+  }))
+  expect(markup.match(/Finished/g)).toHaveLength(1)
+  expect(markup).toContain('Stopped')
+  expect(markup).toContain('Failed')
 })
 
 test('an idle thread waiting on background tasks says so', () => {

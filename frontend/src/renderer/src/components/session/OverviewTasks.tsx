@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, CircleAlert, LoaderCircle, Square } from 'lucide-react'
+import { Check, CircleAlert, CircleHelp, LoaderCircle, Square } from 'lucide-react'
 import { useState } from 'react'
 import { useToast } from '@/components/ui/toast'
 import { stopSessionAgentTask } from '@/lib/api/sessions'
@@ -22,10 +22,33 @@ function TaskStatus({ task }: { task: AgentTaskView }) {
       </span>
     )
   }
-  const failed = task.state === 'failed'
-  const Icon = failed ? CircleAlert : Check
+  // A task whose agent connection died has no known outcome; only a reported
+  // completion earns the green check.
+  if (task.connection_lost) {
+    return (
+      <span className="inline-flex size-5 shrink-0 items-center justify-center text-ink-3" title="Connection lost — outcome unknown">
+        <CircleHelp size={14} aria-hidden />
+      </span>
+    )
+  }
+  if (task.state === 'failed') {
+    return (
+      <span className="inline-flex size-5 shrink-0 items-center justify-center text-danger" title="Failed">
+        <CircleAlert size={14} aria-hidden />
+      </span>
+    )
+  }
+  if (task.state === 'stopped' || task.state === 'cancelled' || task.state === 'canceled') {
+    return (
+      <span className="inline-flex size-5 shrink-0 items-center justify-center text-ink-3" title="Stopped">
+        <Square size={11} aria-hidden />
+      </span>
+    )
+  }
+  const completed = task.state === 'completed'
+  const Icon = completed ? Check : CircleHelp
   return (
-    <span className={`inline-flex size-5 shrink-0 items-center justify-center ${failed ? 'text-danger' : 'text-ok'}`} title={failed ? 'Failed' : 'Finished'}>
+    <span className={`inline-flex size-5 shrink-0 items-center justify-center ${completed ? 'text-ok' : 'text-ink-3'}`} title={completed ? 'Finished' : task.state || 'Ended'}>
       <Icon size={14} aria-hidden />
     </span>
   )
