@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
+	acpv2 "github.com/gluonfield/acp-transport/acp/v2"
 	"github.com/gluonfield/acp-transport/jsonrpc"
-	"github.com/wins/jaz/backend/internal/acp/acpv2"
 	"github.com/wins/jaz/backend/internal/promptmodule"
 	"github.com/wins/jaz/backend/internal/storage"
 )
@@ -24,12 +24,8 @@ const steerV2Prompt steerMethod = "acp-v2/session/prompt"
 var errProtocolV2Rejected = errors.New("acp agent does not speak protocol v2")
 
 func (m *Manager) protocolV2Enabled(name string) bool {
-	for _, agent := range m.cfg.ProtocolV2 {
-		if CanonicalAgentName(agent) == CanonicalAgentName(name) {
-			return true
-		}
-	}
-	return false
+	cfg, ok, err := m.configuredAgent(name)
+	return err == nil && ok && cfg.ProtocolV2
 }
 
 func (c *agentConn) steerMethod() steerMethod {

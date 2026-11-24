@@ -18,11 +18,14 @@ const (
 )
 
 type ACPAgentDefaults struct {
-	Enabled         bool                `json:"enabled"`
-	ModelProvider   string              `json:"model_provider,omitempty"`
-	Model           string              `json:"model,omitempty"`
-	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
-	Auth            acp.AgentAuthConfig `json:"auth,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	ModelProvider   string `json:"model_provider,omitempty"`
+	Model           string `json:"model,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Protocol is the ACP protocol version the agent's connections
+	// negotiate: "" or "v1" (the default), or "v2".
+	Protocol string              `json:"protocol,omitempty"`
+	Auth     acp.AgentAuthConfig `json:"auth,omitempty"`
 }
 
 type AgentDefaults struct {
@@ -375,6 +378,7 @@ func (s *ACPConfigSource) agentConfig(name string, enabledOnly bool) (acp.AgentC
 	cfg.ModelProvider = strings.TrimSpace(agent.ModelProvider)
 	cfg.Model = strings.TrimSpace(agent.Model)
 	cfg.ReasoningEffort = strings.TrimSpace(agent.ReasoningEffort)
+	cfg.ProtocolV2 = strings.TrimSpace(agent.Protocol) == "v2"
 	cfg.Auth = agent.Auth
 	if cfg.UsesModelProvider() {
 		cfg = cfg.NormalizeProviderModel(defaultModelProvider)

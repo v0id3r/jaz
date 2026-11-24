@@ -281,7 +281,14 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 	}
 }
 
+// messagePhase reads the message's phase mark: the jaz key of ACP v2
+// adapters, else the AIR extension of v1.
 func messagePhase(meta map[string]any) string {
+	if jaz, _ := meta["jaz"].(map[string]any); jaz != nil {
+		if phase, _ := jaz["phase"].(string); phase != "" {
+			return phase
+		}
+	}
 	jetbrains, _ := meta["jetbrains"].(map[string]any)
 	air, _ := jetbrains["air"].(map[string]any)
 	phase, _ := air["phase"].(string)

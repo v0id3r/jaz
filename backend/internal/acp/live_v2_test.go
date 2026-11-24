@@ -28,10 +28,8 @@ func TestLiveV2Scenarios(t *testing.T) {
 	}
 	v2 := os.Getenv("ACP_LIVE_V2") == "1"
 	label := agent + "/v1"
-	var protocolV2 []string
 	if v2 {
 		label = agent + "/v2"
-		protocolV2 = []string{agent}
 	}
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {
@@ -42,9 +40,8 @@ func TestLiveV2Scenarios(t *testing.T) {
 		Root:         root,
 		Workspace:    cwd,
 		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
-		ProtocolV2:   protocolV2,
 		Agents: map[string]AgentConfig{
-			agent: {Command: command, Env: liveAgentEnv()},
+			agent: {ProtocolV2: v2, Command: command, Env: liveAgentEnv()},
 		},
 	}, log.New(os.Stderr))
 
@@ -102,9 +99,8 @@ func TestLiveV2Scenarios(t *testing.T) {
 		Root:         root,
 		Workspace:    cwd,
 		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
-		ProtocolV2:   protocolV2,
 		Agents: map[string]AgentConfig{
-			agent: {Command: command, Env: liveAgentEnv()},
+			agent: {ProtocolV2: v2, Command: command, Env: liveAgentEnv()},
 		},
 	}, log.New(os.Stderr))
 	defer restarted.Close()

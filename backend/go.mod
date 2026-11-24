@@ -140,3 +140,5 @@ tool (
 replace github.com/gluonfield/jazmem => github.com/v0id3r/jazmem v0.0.0-20261110063224-28fcc321f7eb
 
 replace modernc.org/sqlite => github.com/v0id3r/sqlite v0.0.0-20261101100032-9178724cd8ae
+
+replace github.com/gluonfield/acp-transport => github.com/v0id3r/acp-transport v0.0.0-20261124080005-ff4d0d02e77f

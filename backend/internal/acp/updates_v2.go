@@ -8,8 +8,8 @@ import (
 	"time"
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
+	acpv2 "github.com/gluonfield/acp-transport/acp/v2"
 	"github.com/gluonfield/acp-transport/jsonrpc"
-	"github.com/wins/jaz/backend/internal/acp/acpv2"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/storage"
 )

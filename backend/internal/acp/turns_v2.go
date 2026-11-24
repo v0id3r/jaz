@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
+	acpv2 "github.com/gluonfield/acp-transport/acp/v2"
 	"github.com/gluonfield/acp-transport/jsonrpc"
-	"github.com/wins/jaz/backend/internal/acp/acpv2"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 )
 
@@ -73,14 +73,11 @@ func (m *Manager) endWorkV2(job *jobState, event acpv2.StateUpdateEvent) {
 	go m.completePromptCall(done, job, event.StopReason, failure)
 }
 
-// failureFromStateV2 reads the failure an idle error report carries: the
-// adapter's session failure metadata when it sends one, else the error
-// object. The v2 error carries no retry offer, so these failures do not
-// schedule Jaz-side retries.
+// failureFromStateV2 reads the failure an idle report carries: the adapter's
+// session failure metadata when it sends one (with the retry offers that
+// schedule Jaz-side retries, like on v1), else the error object of an error
+// stop reason.
 func failureFromStateV2(event acpv2.StateUpdateEvent) *sessionFailure {
-	if event.StopReason != "error" && event.Error == nil {
-		return nil
-	}
 	if event.Meta != nil {
 		raw, err := json.Marshal(event.Meta)
 		if err == nil {
@@ -91,6 +88,9 @@ func failureFromStateV2(event acpv2.StateUpdateEvent) *sessionFailure {
 				}
 			}
 		}
+	}
+	if event.StopReason != "error" && event.Error == nil {
+		return nil
 	}
 	failure := &sessionFailure{Title: "agent run failed"}
 	if event.Error != nil {

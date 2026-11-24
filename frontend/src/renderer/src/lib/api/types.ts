@@ -1266,6 +1266,8 @@ export interface ACPAgentDefaults {
   model_provider?: string
   model?: string
   reasoning_effort?: string
+  /** ACP protocol version the agent's connections negotiate; unset is v1 */
+  protocol?: 'v1' | 'v2'
   auth?: ACPAgentAuth
 }
 

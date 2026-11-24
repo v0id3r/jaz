@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wins/jaz/backend/internal/acp/acpv2"
+	acpv2 "github.com/gluonfield/acp-transport/acp/v2"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 )
 

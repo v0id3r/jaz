@@ -19,12 +19,12 @@ func newV2TestManager(t *testing.T, store *jsonstore.Store, extraEnv map[string]
 		Root:         t.TempDir(),
 		Workspace:    t.TempDir(),
 		SystemPrompt: staticPrompt("skill prompt"),
-		ProtocolV2:   []string{"fake"},
 		Agents: map[string]acp.AgentConfig{
 			"fake": {
-				Command: os.Args[0],
-				Args:    []string{"-test.run=TestFakeACPAgentV2Process"},
-				Env:     fakeV2ManagerConfig(t, extraEnv),
+				ProtocolV2: true,
+				Command:    os.Args[0],
+				Args:       []string{"-test.run=TestFakeACPAgentV2Process"},
+				Env:        fakeV2ManagerConfig(t, extraEnv),
 			},
 		},
 	}, log.New(io.Discard))
@@ -255,6 +255,47 @@ func TestV2FailureEndsTurn(t *testing.T) {
 	}
 	if !strings.Contains(job.Error, "provider exploded") {
 		t.Fatalf("error = %q", job.Error)
+	}
+}
+
+func TestV2SessionFailureRetryHint(t *testing.T) {
+	acp.SetProviderRetryDelays(t, time.Millisecond)
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-overload")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	// The failure's retry action continues the turn, and the continuation
+	// prompt ("Continue from where you left off.") gets the fake's answer.
+	sendV2(t, manager, spawned.Slug, "overload please")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle || job.Assistant != "hello world" {
+		t.Fatalf("retried turn ended %s with %q", job.State, job.Assistant)
+	}
+}
+
+func TestV2MessagePhaseKeepsCommentaryOutOfResult(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-phased")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "phased reply")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle {
+		t.Fatalf("turn ended %s", job.State)
+	}
+	if job.Result != "final answer" {
+		t.Fatalf("result = %q", job.Result)
+	}
+	if job.Assistant != "checking thingsfinal answer" {
+		t.Fatalf("assistant = %q", job.Assistant)
 	}
 }
 

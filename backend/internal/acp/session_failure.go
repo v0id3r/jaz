@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -28,6 +29,9 @@ type sessionFailureMeta struct {
 			SessionFailure *sessionFailure `json:"sessionFailure"`
 		} `json:"air"`
 	} `json:"jetbrains"`
+	Jaz struct {
+		SessionFailure *sessionFailure `json:"sessionFailure"`
+	} `json:"jaz"`
 }
 
 // providerRetryDelays are the waits before each continuation Jaz sends after
@@ -35,9 +39,9 @@ type sessionFailureMeta struct {
 var providerRetryDelays = []time.Duration{15 * time.Second, time.Minute, 4 * time.Minute}
 
 // terminal is the failure that ended a turn; AIR reads an absent severity as
-// an error.
+// an error. The jaz namespace is the ACP v2 carrier of the same record.
 func (m sessionFailureMeta) terminal() *sessionFailure {
-	failure := m.Jetbrains.Air.SessionFailure
+	failure := cmp.Or(m.Jaz.SessionFailure, m.Jetbrains.Air.SessionFailure)
 	if failure == nil || failure.Severity == "warning" {
 		return nil
 	}
