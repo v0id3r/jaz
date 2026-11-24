@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -129,7 +130,7 @@ func TestV2SessionGetsHTTPMCPServers(t *testing.T) {
 				Command:    os.Args[0],
 				Args:       []string{"-test.run=TestFakeACPAgentV2Process"},
 				Env: map[string]string{
-					"JAZ_FAKE_ACP_V2_AGENT": "1",
+					"JAZ_FAKE_ACP_V2_AGENT":   "1",
 					"JAZ_FAKE_ACP_EXPECT_MCP": "1",
 				},
 			},
@@ -285,6 +286,18 @@ func TestV2BackgroundWork(t *testing.T) {
 	if len(tasks) != 1 || tasks[0].ID != "bg-1" || tasks[0].State != "running" || !tasks[0].CanStop {
 		t.Fatalf("background tasks = %#v", tasks)
 	}
+	// The published record the Overview reads carries the name and the stop
+	// offer the tool call brought after the task's first report.
+	waitForV2Job(t, 10*time.Second, func() bool {
+		events, err := store.LoadSessionEvents(spawned.SessionID)
+		if err != nil {
+			return false
+		}
+		return slices.ContainsFunc(events, func(event sessionevents.Event) bool {
+			task := event.AgentTask
+			return task != nil && task.ID == "bg-1" && task.Name == "Watch build" && task.CanStop
+		})
+	})
 
 	sendV2(t, manager, spawned.Slug, "background-finish now")
 	waitTurnV2(t, manager, spawned.SessionID)
@@ -380,7 +393,8 @@ func TestV2ToolCallCancelUsesTerminal(t *testing.T) {
 	}
 }
 
-func TestV2SubagentTranscriptSeparate(t *testing.T) {	store, err := jsonstore.New(t.TempDir())
+func TestV2SubagentTranscriptSeparate(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

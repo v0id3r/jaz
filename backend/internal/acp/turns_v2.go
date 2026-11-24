@@ -128,20 +128,25 @@ func (m *Manager) applyBackgroundV2(job *jobState, event acpv2.StateUpdateEvent)
 		}
 		seen[id] = true
 		task := job.backgroundTasks[id]
+		previous := task
 		fresh := task.ID == ""
 		task.ID = id
 		task.ConnectionLost = false
 		if fresh {
-			task.Name = backgroundWorkNameV2Locked(job, item)
 			task.Type = item.Type
 			task.State = "running"
+		}
+		// The name and the stop offer can arrive with the work's tool call or
+		// terminal, after the task's first report.
+		if task.Name == "" {
+			task.Name = backgroundWorkNameV2Locked(job, item)
 		}
 		task.CanStop = backgroundWorkStoppableV2Locked(job, item)
 		if task.State != "running" {
 			task.State = "running"
 		}
 		job.backgroundTasks[id] = task
-		if fresh {
+		if fresh || task != previous {
 			changed = append(changed, task)
 		}
 	}
