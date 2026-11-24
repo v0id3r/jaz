@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/log"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wins/jaz/backend/internal/mcpconfig"
+	"github.com/wins/jaz/backend/internal/sessionevents"
 	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
 )
 
@@ -362,4 +363,116 @@ func liveAgentEnv() map[string]string {
 		return nil
 	}
 	return env
+}
+
+// TestLiveBackgroundStop drives a real adapter through the Overview's
+// background-task stop: the task must end stopped, not completed, and the
+// background command's tool call must hold a final status. ACP_LIVE_V2=1
+// runs it on v2, otherwise on v1.
+func TestLiveBackgroundStop(t *testing.T) {
+	agent := os.Getenv("ACP_LIVE_AGENT")
+	command := os.Getenv("ACP_LIVE_AGENT_COMMAND")
+	root := os.Getenv("ACP_LIVE_ROOT")
+	if agent == "" || command == "" || root == "" {
+		t.Skip("ACP_LIVE_AGENT, ACP_LIVE_AGENT_COMMAND and ACP_LIVE_ROOT are required")
+	}
+	v2 := os.Getenv("ACP_LIVE_V2") == "1"
+	label := agent + "/v1"
+	if v2 {
+		label = agent + "/v2"
+	}
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{
+		Root:         root,
+		Workspace:    t.TempDir(),
+		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
+		Agents: map[string]AgentConfig{
+			agent: {
+				ProtocolV2: v2,
+				Command:    command,
+				Env:        liveAgentEnv(),
+				Model:      os.Getenv("ACP_LIVE_MODEL"),
+			},
+		},
+	}, log.New(os.Stderr))
+	defer manager.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	spawned, err := manager.Spawn(ctx, SpawnRequest{ACPAgent: agent, Slug: "live-stop-" + label})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if _, err := manager.Send(ctx, SendRequest{Session: spawned.SessionID, Message: "Start this as a background task without waiting for it: sleep 120 && echo jaz-bg-done. Then immediately reply with exactly: started", Completion: CompletionInline}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	job, err := manager.Wait(ctx, WaitRequest{Session: spawned.SessionID, Timeout: 3 * time.Minute})
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	t.Logf("[%s] turn: state=%s assistant=%q tools=%s", label, job.State, truncateRunes(job.Assistant, 120), toolCallSummary(job))
+	var taskID, toolCallID string
+	for _, task := range manager.BackgroundTasksForTest(spawned.SessionID) {
+		if task.CanStop && task.State == "running" {
+			taskID, toolCallID = task.ID, task.ToolCallID
+			break
+		}
+	}
+	if taskID == "" {
+		t.Fatalf("[%s] no stoppable background task: %s", label, backgroundTaskSummary(manager, spawned.SessionID))
+	}
+	t.Logf("[%s] stopping %s at %s", label, taskID, time.Now().UTC().Format("15:04:05.000"))
+	if err := manager.StopBackgroundTask(ctx, spawned.SessionID, taskID); err != nil {
+		t.Fatalf("[%s] stop %s: %v", label, taskID, err)
+	}
+	var final string
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, task := range manager.BackgroundTasksForTest(spawned.SessionID) {
+			if task.ID == taskID && task.State != "running" && task.State != "paused" {
+				final = task.State
+			}
+		}
+		if final != "" {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Logf("[%s] task %s ended %q: %s", label, taskID, final, backgroundTaskSummary(manager, spawned.SessionID))
+	if final != "stopped" {
+		t.Errorf("[%s] stopped task ended %q, want stopped", label, final)
+	}
+	// The background command's tool call must not stay open after the stop:
+	// the journal's last projection of it holds a final status.
+	events, err := store.LoadSessionEvents(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last *sessionevents.ACPToolCall
+	for _, event := range events {
+		if event.ACP == nil {
+			continue
+		}
+		for _, call := range event.ACP.ToolCalls {
+			if call.ID == taskID || call.ID == toolCallID || call.Runtime.TerminalID == taskID {
+				last = &call
+				t.Logf("[%s] projection at %s: status=%s exit=%v", label, event.At.Format("15:04:05.000"), call.Status, call.Runtime.TerminalExitCode)
+			}
+		}
+	}
+	if last == nil {
+		t.Fatalf("[%s] no tool call projection for %s", label, taskID)
+	}
+	t.Logf("[%s] tool call %s: status=%s exit=%v signal=%v", label, last.ID, last.Status, last.Runtime.TerminalExitCode, last.Runtime.TerminalExitSignal)
+	if last.Status == "pending" || last.Status == "in_progress" {
+		t.Errorf("[%s] tool call %s stayed %s after the stop", label, last.ID, last.Status)
+	}
+	if v2 && last.Runtime.TerminalExitCode != nil && *last.Runtime.TerminalExitCode == 0 && last.Runtime.TerminalExitSignal == nil && final == "stopped" {
+		// v2 reports a background command's end with an empty exitStatus; Jaz
+		// must not read it as exit 0. (v1's adapter sends an explicit
+		// exit_code 0 with the backgrounded result itself.)
+		t.Errorf("[%s] killed command shows exit 0", label)
+	}
 }
