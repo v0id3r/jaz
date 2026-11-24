@@ -224,8 +224,16 @@ func TestLiveV2Scenarios(t *testing.T) {
 		t.Fatalf("[%s] resumed mcp wait: %v", label, err)
 	}
 	t.Logf("[%s] resumed mcp: state=%s assistant=%s", label, resumedMCP.State, truncateRunes(resumedMCP.Assistant, 200))
-	if !strings.Contains(resumedMCP.Assistant, "mcp-echo:again") {
-		t.Errorf("[%s] resumed session did not see the MCP server added while Jaz was down: %q", label, truncateRunes(resumedMCP.Assistant, 200))
+	// A cheap model may reuse the first server's argument; the check is that
+	// the new server's tool was callable at all.
+	resumedMCPSeen := strings.Contains(resumedMCP.Assistant, "mcp-echo:again")
+	for _, call := range resumedMCP.ToolCalls {
+		if strings.Contains(call.Title, "live_echo_two") {
+			resumedMCPSeen = true
+		}
+	}
+	if !resumedMCPSeen {
+		t.Errorf("[%s] resumed session did not see the MCP server added while Jaz was down: %q (%s)", label, truncateRunes(resumedMCP.Assistant, 200), toolCallSummary(resumedMCP))
 	}
 	if resumed.State != StateIdle {
 		t.Errorf("[%s] resumed turn state: %s (%s)", label, resumed.State, resumed.Error)
@@ -262,6 +270,117 @@ func runSteerScenario(t *testing.T, ctx context.Context, manager *Manager, sessi
 	if steered.State != StateIdle {
 		t.Errorf("[%s] steered turn state: %s", label, steered.State)
 	}
+}
+
+// TestLiveBackgroundOutcomes drives a real v2 adapter through the three
+// background-task endings the client must not guess: a command that exits on
+// its own with code 0 and with a nonzero code, a task that outlives its turn
+// and keeps its stop offer, and a stop from the client. ACP_LIVE_V2=1 and
+// ACP_LIVE_AGENT/ACP_LIVE_AGENT_COMMAND/ACP_LIVE_ROOT as in
+// TestLiveV2Scenarios.
+func TestLiveBackgroundOutcomes(t *testing.T) {
+	agent := os.Getenv("ACP_LIVE_AGENT")
+	command := os.Getenv("ACP_LIVE_AGENT_COMMAND")
+	root := os.Getenv("ACP_LIVE_ROOT")
+	if agent == "" || command == "" || root == "" || os.Getenv("ACP_LIVE_V2") != "1" {
+		t.Skip("ACP_LIVE_AGENT, ACP_LIVE_AGENT_COMMAND, ACP_LIVE_ROOT and ACP_LIVE_V2=1 are required")
+	}
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{
+		Root:         root,
+		Workspace:    t.TempDir(),
+		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
+		Agents: map[string]AgentConfig{
+			agent: {
+				ProtocolV2: true,
+				Command:    command,
+				Env:        liveAgentEnv(),
+				Model:      os.Getenv("ACP_LIVE_MODEL"),
+			},
+		},
+	}, log.New(os.Stderr))
+	defer manager.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	spawned, err := manager.Spawn(ctx, SpawnRequest{ACPAgent: agent, Slug: "live-outcomes-" + agent})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	turn := func(name, message string) {
+		t.Helper()
+		if _, err := manager.Send(ctx, SendRequest{Session: spawned.SessionID, Message: message, Completion: CompletionInline}); err != nil {
+			t.Fatalf("[%s] %s send: %v", agent, name, err)
+		}
+		if _, err := manager.Wait(ctx, WaitRequest{Session: spawned.SessionID, Timeout: 3 * time.Minute}); err != nil {
+			t.Fatalf("[%s] %s wait: %v", agent, name, err)
+		}
+	}
+	seen := map[string]bool{}
+	waitState := func(name, want string) {
+		t.Helper()
+		deadline := time.Now().Add(90 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, task := range manager.BackgroundTasksForTest(spawned.SessionID) {
+				if seen[task.ID] {
+					continue
+				}
+				if task.State == want {
+					seen[task.ID] = true
+					return
+				}
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+		t.Errorf("[%s] %s: tasks = %s, want a new task in state %s", agent, name, backgroundTaskSummary(manager, spawned.SessionID), want)
+	}
+
+	// The command must outlive the agent's own yield window, and run as the
+	// tool's own session: a shell-detached one (`&`, nohup) is invisible to
+	// the adapter. A cheap model needs to be told so.
+	background := "Use your shell tool to start this command as a long-running task and do not wait for it; run it exactly as given, without nohup, &, disown or redirections, so it stays the tool's own running session: %s. Then immediately reply with exactly: started"
+	turn("exit-zero", fmt.Sprintf(background, "sleep 30 && exit 0"))
+	waitState("exit-zero", "completed")
+
+	turn("exit-nonzero", fmt.Sprintf(background, "sleep 30 && exit 7"))
+	waitState("exit-nonzero", "failed")
+
+	turn("survivor", fmt.Sprintf(background, "sleep 300"))
+	if taskID := stoppableBackgroundTask(manager, spawned.SessionID); taskID == "" {
+		t.Fatalf("[%s] survivor: no stoppable background task: %s", agent, backgroundTaskSummary(manager, spawned.SessionID))
+	}
+	turn("between", "Reply with exactly: ok")
+	if taskID := stoppableBackgroundTask(manager, spawned.SessionID); taskID == "" {
+		t.Errorf("[%s] survivor lost its stop offer across a turn: %s", agent, backgroundTaskSummary(manager, spawned.SessionID))
+	} else if err := manager.StopBackgroundTask(ctx, spawned.SessionID, taskID); err != nil {
+		t.Errorf("[%s] survivor stop: %v", agent, err)
+	} else {
+		deadline := time.Now().Add(90 * time.Second)
+		for time.Now().Before(deadline) {
+			stopped := false
+			for _, task := range manager.BackgroundTasksForTest(spawned.SessionID) {
+				if task.ID == taskID && task.State == "stopped" {
+					stopped = true
+				}
+			}
+			if stopped {
+				break
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+		found := false
+		for _, task := range manager.BackgroundTasksForTest(spawned.SessionID) {
+			if task.ID == taskID && task.State == "stopped" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("[%s] survivor stop: tasks = %s, want %s stopped", agent, backgroundTaskSummary(manager, spawned.SessionID), taskID)
+		}
+	}
+	t.Logf("[%s] final tasks: %s", agent, backgroundTaskSummary(manager, spawned.SessionID))
 }
 
 func stoppableBackgroundTask(manager *Manager, session string) string {
