@@ -1152,23 +1152,37 @@ func validateFakeProxyAndJaztools(rawServers []json.RawMessage) error {
 	}
 	proxy, ok := servers["jaz_mcp"]
 	proxyURL, _, _ := strings.Cut(proxy.URL, "?")
-	if !ok || proxy.Type != "http" || proxyURL != "http://127.0.0.1:5299/mcp/proxy" {
+	base := cmp.Or(os.Getenv("JAZ_FAKE_ACP_MCP_BASE"), "http://127.0.0.1:5299")
+	if !ok || proxy.Type != "http" || proxyURL != base+"/mcp/proxy" {
 		return fmt.Errorf("unexpected mcp proxy %#v", proxy)
 	}
-	if len(proxy.Headers) != 1 ||
-		!strings.EqualFold(proxy.Headers[0].Name, mcpsession.HeaderName) ||
-		strings.TrimSpace(proxy.Headers[0].Value) == "" {
-		return fmt.Errorf("proxy must expose only a resolved session header, got %#v", proxy.Headers)
+	if err := validateFakeMCPHeaders("proxy", proxy.Headers); err != nil {
+		return err
 	}
 	jaz, ok := servers["jaztools"]
 	jazURL, _, _ := strings.Cut(jaz.URL, "?")
-	if !ok || jaz.Type != "http" || jazURL != "http://127.0.0.1:5299/mcp/jaztools" {
+	if !ok || jaz.Type != "http" || jazURL != base+"/mcp/jaztools" {
 		return fmt.Errorf("unexpected jaztools server %#v", jaz)
 	}
-	if len(jaz.Headers) != 1 ||
-		!strings.EqualFold(jaz.Headers[0].Name, mcpsession.HeaderName) ||
-		strings.TrimSpace(jaz.Headers[0].Value) == "" {
-		return fmt.Errorf("jaztools must expose only a resolved session header, got %#v", jaz.Headers)
+	return validateFakeMCPHeaders("jaztools", jaz.Headers)
+}
+
+// validateFakeMCPHeaders requires the resolved session header and no
+// unresolved template values; a stand with API auth on also sends its
+// Authorization header.
+func validateFakeMCPHeaders(name string, headers []struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}) error {
+	session := false
+	for _, header := range headers {
+		if strings.TrimSpace(header.Value) == "" || strings.Contains(header.Value, "${") {
+			return fmt.Errorf("%s header %s is unresolved: %#v", name, header.Name, headers)
+		}
+		session = session || strings.EqualFold(header.Name, mcpsession.HeaderName)
+	}
+	if !session {
+		return fmt.Errorf("%s must expose the resolved session header, got %#v", name, headers)
 	}
 	return nil
 }
