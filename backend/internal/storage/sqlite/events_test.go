@@ -608,6 +608,33 @@ func TestTextAppendDoesNotDecodePreviousPayload(t *testing.T) {
 	}
 }
 
+func TestSubagentMessageSurvivesStorageRoundTrip(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(storage.CreateSession{Slug: "subagent-message"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendSessionEvents(session.ID,
+		sessionevents.Event{Type: sessionevents.TypeSubagentMessage, SubagentMessage: &sessionevents.SubagentMessageEvent{
+			ID: "child-1", Role: "assistant", Content: "the answer is 4",
+		}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.LoadSessionEvents(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].SubagentMessage == nil ||
+		events[0].SubagentMessage.ID != "child-1" || events[0].SubagentMessage.Content != "the answer is 4" {
+		t.Fatalf("stored subagent message = %#v", events)
+	}
+}
+
 func TestSessionEventsProjectSparseProviderSubagentUpdates(t *testing.T) {
 	store, err := New(t.TempDir())
 	if err != nil {

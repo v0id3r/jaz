@@ -309,6 +309,19 @@ func (e *Event) NormalizePayload() {
 			e.ProviderSubagent = &subagent
 			e.Content = ""
 		}
+	case TypeSubagentMessage:
+		if e.SubagentMessage != nil {
+			e.Content = ""
+			return
+		}
+		if e.Content == "" {
+			return
+		}
+		var message SubagentMessageEvent
+		if err := json.Unmarshal([]byte(e.Content), &message); err == nil && message.ID != "" {
+			e.SubagentMessage = &message
+			e.Content = ""
+		}
 	case TypeSideChatMessage:
 		if e.SideChat != nil {
 			e.Content = ""
@@ -367,6 +380,8 @@ func (e Event) StorageContent() string {
 		return encodeContent(e.Content, e.MCPApp)
 	case TypeProviderSubagent:
 		return encodeContent(e.Content, e.ProviderSubagent)
+	case TypeSubagentMessage:
+		return encodeContent(e.Content, e.SubagentMessage)
 	case TypeSideChatMessage:
 		return encodeContent(e.Content, e.SideChat)
 	case TypeGoalUpdate:
