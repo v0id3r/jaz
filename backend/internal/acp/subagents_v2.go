@@ -95,7 +95,8 @@ func subagentPanelRecordV2(link *subagentLinkV2) sessionevents.ProviderSubagentE
 	case "idle":
 		status = sessionevents.SubagentCompleted
 	case "unknown":
-		status = sessionevents.SubagentFailed
+		// No information is not a failure: report no change.
+		status = ""
 	}
 	summary := link.task
 	if summary == "" {

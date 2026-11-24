@@ -268,6 +268,39 @@ func subagentTranscript(events []sessionevents.Event, childID string) string {
 	return strings.Join(lines, "\n")
 }
 
+// A child session whose state the agent reports as unknown gives the panel
+// no failure: unknown is not a made-up terminal result.
+func TestV2SubagentUnknownStateIsNotFailure(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-subagent-unknown")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "subagent-unknown please")
+	waitTurnV2(t, manager, spawned.SessionID)
+	events, err := store.LoadSessionEvents(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statuses []sessionevents.ProviderSubagentStatus
+	for _, event := range events {
+		if event.Type == sessionevents.TypeProviderSubagent && event.ProviderSubagent != nil {
+			statuses = append(statuses, event.ProviderSubagent.Status)
+		}
+	}
+	if len(statuses) == 0 {
+		t.Fatal("no subagent panel records")
+	}
+	for _, status := range statuses {
+		if status == sessionevents.SubagentFailed {
+			t.Fatalf("unknown child state reported as failed: %v", statuses)
+		}
+	}
+}
+
 func TestV2Cancel(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {

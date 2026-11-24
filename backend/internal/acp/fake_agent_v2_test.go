@@ -209,6 +209,17 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{
 					map[string]any{"type": "tool_call", "toolCallId": "bg-1"},
 				}})
+			case strings.Contains(message, "subagent-unknown"):
+				state(map[string]any{"state": "running", "background": []any{}})
+				notify(map[string]any{
+					"sessionUpdate": "subagent_update",
+					"sessionId":     childID,
+					"title":         "researcher",
+					"state":         map[string]any{"state": "running"},
+				})
+				notifyChild(map[string]any{"sessionUpdate": "state_update", "state": "unknown"})
+				text("a1", "lost track")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
 			case strings.Contains(message, "subagent"):
 				state(map[string]any{"state": "running", "background": []any{}})
 				notify(map[string]any{
