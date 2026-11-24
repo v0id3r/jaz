@@ -99,7 +99,7 @@
     },
     "kimi": {
       "repo": "v0id3r/kimi-code",
-      "tag": "v2.7.2-jaz.1",
+      "tag": "v2.7.2-jaz.2",
       "assets": {
         "darwin-arm64": {
           "name": "kimi-code-darwin-arm64.zip",
