@@ -95,11 +95,11 @@
       }
     },
     "claude": {
-      "version": "0.109.1-jaz.3",
+      "version": "0.111.0-jaz.1",
       "assets": {
         "linux-x64": {
-          "url": "https://github.com/v0id3r/claude-agent-acp/releases/download/v0.109.1-jaz.3/claude-agent-acp-0.109.1-jaz.3-linux-x64.tar.gz",
-          "sha256": "3ecbf615c401bc1c5e65174cbd75907b33e95df478463442d48902bcf65550cd",
+          "url": "https://github.com/v0id3r/claude-agent-acp/releases/download/v0.111.0-jaz.1/claude-agent-acp-0.111.0-jaz.1-linux-x64.tar.gz",
+          "sha256": "c7415020ee38d9c7673dd53140911f936caca05f8edb86f4b1b0c15f6944683e",
           "binary": "claude-agent-acp",
           "env": {
             "CLAUDE_CODE_EXECUTABLE": "claude"
@@ -108,36 +108,36 @@
       }
     },
     "kimi": {
-      "version": "2.7.2-jaz.2",
+      "version": "2.7.2-jaz.3",
       "assets": {
         "darwin-arm64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.2/kimi-code-darwin-arm64.zip",
-          "sha256": "d2dee5707a7334a7eef0405ff152c8aa79fa05c22026e75a15aa060599630e4c",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-darwin-arm64.zip",
+          "sha256": "3fe45afb4d19d8b30c5352bd9a29d0a4d26be81277db244e14203ef4dcf43da4",
           "binary": "kimi"
         },
         "darwin-x64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.2/kimi-code-darwin-x64.zip",
-          "sha256": "e7ff46f69acddb105cdd27755c0618d9adf502de7a9ea849d70ccb62132d1000",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-darwin-x64.zip",
+          "sha256": "b8b75b988c80f0dfb06ec59fa93f7a1cd24ba9f47cef6ee762a55650480fd9f6",
           "binary": "kimi"
         },
         "linux-arm64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.2/kimi-code-linux-arm64.zip",
-          "sha256": "d5e1a0f1243b275d5b0fa3f15307168158c08db862fbb6a22332e3f134d7c114",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-linux-arm64.zip",
+          "sha256": "8d69319525bd5508a5d86106673e21a18a43c76f83e6d255a6ce536857925516",
           "binary": "kimi"
         },
         "linux-x64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.2/kimi-code-linux-x64.zip",
-          "sha256": "7253bf8e07b9e574f44dffc9ea7abff346172edb45492ba6501aa70cd0a34619",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-linux-x64.zip",
+          "sha256": "64b514048e639121405ae8fab50d239ec3e488b28a084afb2c1e4e72ed46a42c",
           "binary": "kimi"
         },
         "win32-arm64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.2/kimi-code-win32-arm64.zip",
-          "sha256": "18dfe0e3653f9a54b8b3f97664d68f7b21f9180b87dc9fd8d31aae5b169eee45",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-win32-arm64.zip",
+          "sha256": "b63329435724aa9874dae75b38bc090517b93f3e18a070d1d483d7b47328f8ee",
           "binary": "kimi.exe"
         },
         "win32-x64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.2/kimi-code-win32-x64.zip",
-          "sha256": "163a4886856587bcfdf038c7708d617e108234364a310b2e504ace0f4511638e",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-win32-x64.zip",
+          "sha256": "320f80ae7a5e832f1bf10686baceb3a007ce43feb9d667ae06ff9e71747bfa64",
           "binary": "kimi.exe"
         }
       }

@@ -86,10 +86,10 @@
     },
     "claude": {
       "repo": "v0id3r/claude-agent-acp",
-      "tag": "v0.109.1-jaz.3",
+      "tag": "v0.111.0-jaz.1",
       "assets": {
         "linux-x64": {
-          "name": "claude-agent-acp-0.109.1-jaz.3-linux-x64.tar.gz",
+          "name": "claude-agent-acp-0.111.0-jaz.1-linux-x64.tar.gz",
           "binary": "claude-agent-acp",
           "env": {
             "CLAUDE_CODE_EXECUTABLE": "claude"
@@ -99,7 +99,7 @@
     },
     "kimi": {
       "repo": "v0id3r/kimi-code",
-      "tag": "v2.7.2-jaz.2",
+      "tag": "v2.7.2-jaz.3",
       "assets": {
         "darwin-arm64": {
           "name": "kimi-code-darwin-arm64.zip",
