@@ -41,7 +41,13 @@ func TestLiveV2Scenarios(t *testing.T) {
 		Workspace:    cwd,
 		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
 		Agents: map[string]AgentConfig{
-			agent: {ProtocolV2: v2, Command: command, Env: liveAgentEnv()},
+			agent: {
+				ProtocolV2:      v2,
+				Command:         command,
+				Env:             liveAgentEnv(),
+				Model:           os.Getenv("ACP_LIVE_MODEL"),
+				ReasoningEffort: os.Getenv("ACP_LIVE_EFFORT"),
+			},
 		},
 	}, log.New(os.Stderr))
 
@@ -118,7 +124,13 @@ func TestLiveV2Scenarios(t *testing.T) {
 		Workspace:    cwd,
 		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
 		Agents: map[string]AgentConfig{
-			agent: {ProtocolV2: v2, Command: command, Env: liveAgentEnv()},
+			agent: {
+				ProtocolV2:      v2,
+				Command:         command,
+				Env:             liveAgentEnv(),
+				Model:           os.Getenv("ACP_LIVE_MODEL"),
+				ReasoningEffort: os.Getenv("ACP_LIVE_EFFORT"),
+			},
 		},
 	}, log.New(os.Stderr))
 	defer restarted.Close()
