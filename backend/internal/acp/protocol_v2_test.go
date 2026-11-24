@@ -331,6 +331,28 @@ func TestV2SessionFailureRetryHint(t *testing.T) {
 	}
 }
 
+// A provider failure the agent already retried itself (its warning preceded
+// the error) must not get a Jaz-side continuation.
+func TestV2ProviderRetryWarningSkipsJazRetry(t *testing.T) {
+	acp.SetProviderRetryDelays(t, time.Millisecond)
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-overload-warned")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "overload-warned please")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateFailed {
+		t.Fatalf("warned turn ended %s with %q", job.State, job.Assistant)
+	}
+	if !strings.Contains(job.Error, "Overloaded") {
+		t.Fatalf("error = %q", job.Error)
+	}
+}
+
 func TestV2MessagePhaseKeepsCommentaryOutOfResult(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {

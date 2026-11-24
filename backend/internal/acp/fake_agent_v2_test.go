@@ -238,6 +238,23 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			case strings.Contains(message, "fail"):
 				state(map[string]any{"state": "running", "background": []any{}})
 				state(map[string]any{"state": "idle", "stopReason": "error", "error": map[string]any{"code": -32603, "message": "provider exploded"}})
+			case strings.Contains(message, "overload-warned"):
+				state(map[string]any{"state": "running", "background": []any{}})
+				notify(map[string]any{
+					"sessionUpdate": "session_info_update",
+					"_meta": map[string]any{"jaz": map[string]any{"sessionFailure": map[string]any{
+						"id": "turn-1:retry", "category": "service",
+						"severity": "warning", "title": "API Error: 529 Overloaded",
+					}}},
+				})
+				state(map[string]any{
+					"state": "idle", "stopReason": "error",
+					"error": map[string]any{"code": -32603, "message": "Internal error: API Error: 529 Overloaded"},
+					"_meta": map[string]any{"jaz": map[string]any{"sessionFailure": map[string]any{
+						"id": "turn-1:error", "revision": 1, "category": "service",
+						"severity": "error", "title": "API Error: 529 Overloaded", "actions": []any{"retry"},
+					}}},
+				})
 			case strings.Contains(message, "overload"):
 				state(map[string]any{"state": "running", "background": []any{}})
 				state(map[string]any{

@@ -57,22 +57,21 @@ func (f sessionFailure) message() string {
 
 // sessionWarning is the warning record a session_info_update of the turn
 // carries: the provider retrying a failure of its category itself, or a
-// notice. A side chat's records are its own, not the turn's.
-func sessionWarning(jobID string, update acpschema.DecodedSessionUpdate, raw json.RawMessage) *sessionFailure {
-	info, ok := update.(acpschema.SessionInfoSessionUpdate)
-	if !ok {
+// notice. A side chat's records are its own, not the turn's. v1 and v2 share
+// the record; the jaz namespace is the v2 carrier.
+func sessionWarning(jobID string, meta map[string]any) *sessionFailure {
+	if _, side := sideChatScopeFromMeta(meta, jobID); side {
 		return nil
 	}
-	if _, side := sideChatScopeFromMeta(info.Meta, jobID); side {
+	raw, err := json.Marshal(meta)
+	if err != nil {
 		return nil
 	}
-	var record struct {
-		Meta sessionFailureMeta `json:"_meta"`
-	}
+	var record sessionFailureMeta
 	if json.Unmarshal(raw, &record) != nil {
 		return nil
 	}
-	if failure := record.Meta.Jetbrains.Air.SessionFailure; failure != nil && failure.Severity == "warning" {
+	if failure := cmp.Or(record.Jaz.SessionFailure, record.Jetbrains.Air.SessionFailure); failure != nil && failure.Severity == "warning" {
 		return failure
 	}
 	return nil

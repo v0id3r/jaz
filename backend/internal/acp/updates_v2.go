@@ -35,6 +35,8 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 	var thoughtMessageID string
 	var toolEvent *sessionevents.ACPToolCall
 	var attention bool
+	var warning *sessionFailure
+	var planned bool
 	now := time.Now().UTC()
 	job.mu.Lock()
 	switch event := update.(type) {
@@ -85,12 +87,19 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 	case acpv2.PlanSessionUpdate:
 		m.confirmPromptV2Locked(job)
 		publishACP, attention = applyPlanV2Locked(job, event)
+		planned = publishACP
 	case acpv2.PlanRemovedSessionUpdate:
 		if len(job.Plan) > 0 {
 			job.Plan = sessionevents.PlanCleared
 			publishACP = true
 		}
 	case acpv2.SessionInfoSessionUpdate:
+		warning = sessionWarning(job.ID, event.Meta)
+		if warning != nil && warning.notice() {
+			messageChunk = "Warning: " + warning.message() + "\n\n"
+			job.appendAssistantLocked(messageChunk)
+			job.endReplyLocked()
+		}
 		if nextTitle := strings.TrimSpace(event.Title); nextTitle != "" && !job.promptWrapped {
 			currentTitle = job.Title
 			title = nextTitle
@@ -109,6 +118,24 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 			messageID = ""
 			job.appendAssistantLocked(messageChunk)
 			job.endReplyLocked()
+		}
+	}
+	if job.turn != nil {
+		progress := warning == nil && (messageChunk != "" || thoughtChunk != "" || toolEvent != nil || planned)
+		job.turn.trackProviderRetries(warning, progress)
+		retrying := warning != nil && !warning.notice()
+		if progress {
+			job.turn.agentFailure = nil
+		}
+		if progress || retrying {
+			nextError := ""
+			if retrying {
+				nextError = warning.message()
+			}
+			if job.Error != nextError {
+				job.Error = nextError
+				publishACP = true
+			}
 		}
 	}
 	job.UpdatedAt = now

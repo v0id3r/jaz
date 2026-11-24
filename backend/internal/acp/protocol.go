@@ -105,7 +105,10 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 	if err != nil {
 		return
 	}
-	warning := sessionWarning(job.ID, update, raw)
+	var warning *sessionFailure
+	if info, ok := update.(acpschema.SessionInfoSessionUpdate); ok {
+		warning = sessionWarning(job.ID, info.Meta)
+	}
 	if warning != nil && warning.notice() {
 		update = noticeMessage(*warning)
 	}
