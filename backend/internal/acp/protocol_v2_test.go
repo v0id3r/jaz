@@ -268,6 +268,28 @@ func TestV2SteeringJoinsTurn(t *testing.T) {
 	}
 }
 
+// A prompt that reaches the agent while a cycle it started on its own runs
+// waits in its queue: that cycle's idle ends no turn of the client's, and
+// the prompt's own idle does.
+func TestV2QueuedPromptOutlivesForeignIdle(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-queued")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "queued-race")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle || job.StopReason != "end_turn" {
+		t.Fatalf("state=%s stop=%s err=%s", job.State, job.StopReason, job.Error)
+	}
+	if !strings.Contains(job.Assistant, "queued answer") {
+		t.Fatalf("the foreign cycle's idle ended the turn early: assistant = %q", job.Assistant)
+	}
+}
+
 func TestV2BackgroundWork(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {

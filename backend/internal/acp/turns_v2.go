@@ -66,6 +66,13 @@ func (m *Manager) endWorkV2(job *jobState, event acpv2.StateUpdateEvent) {
 		return
 	}
 	run := turn.agentRun
+	if !run && (len(turn.prompts) > 0 || turn.unsent > 0) {
+		// The turn's prompt is not inserted yet (the v2 ack comes at
+		// insertion): this idle ends work the agent ran on its own before the
+		// prompt, not the turn. The turn's own idle follows the insertion.
+		job.mu.Unlock()
+		return
+	}
 	turn.agentRun = false
 	done := turn.done
 	job.mu.Unlock()

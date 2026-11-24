@@ -193,6 +193,20 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			if len(req.Prompt) > 0 {
 				message = req.Prompt[0].Text
 			}
+			if strings.Contains(message, "queued-race") {
+				// Like the real adapter's queued prompt: a cycle the agent ran
+				// on its own ends first, and the prompt's ack (its insertion)
+				// and own turn follow after a pause.
+				state(map[string]any{"state": "running", "background": []any{}})
+				text("a0", "notification cycle")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+				time.Sleep(300 * time.Millisecond)
+				answer(*msg.ID, map[string]any{"messageId": "user-1"})
+				state(map[string]any{"state": "running", "background": []any{}})
+				text("a1", "queued answer")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+				continue
+			}
 			answer(*msg.ID, map[string]any{"messageId": "user-1"})
 			switch {
 			case strings.Contains(message, "cancellable-tool"):
