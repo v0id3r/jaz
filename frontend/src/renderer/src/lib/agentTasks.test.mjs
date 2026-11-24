@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { agentTaskLive, agentTasksFromSources } from './agentTasks'
+import { agentTaskLive, agentTasksFromSources, tasksSectionOpen } from './agentTasks'
 
 function taskEvent(id, state, at, extra = {}) {
   return {
@@ -37,6 +37,18 @@ describe('agentTasksFromSources', () => {
       { session_id: 'thread', type: 'agent_task', agent_task: { name: 'nameless' }, at: '2026-11-24T10:00:00Z' },
     ])
     expect(tasks).toEqual([])
+  })
+})
+
+describe('tasksSectionOpen', () => {
+  test('a newly live task opens the section', () => {
+    expect(tasksSectionOpen(false, false, true)).toBe(true)
+  })
+
+  test('otherwise the person\'s choice stands', () => {
+    expect(tasksSectionOpen(false, true, true)).toBe(false) // closed by hand while live
+    expect(tasksSectionOpen(true, true, false)).toBe(true) // all finished, left open
+    expect(tasksSectionOpen(false, false, false)).toBe(false)
   })
 })
 

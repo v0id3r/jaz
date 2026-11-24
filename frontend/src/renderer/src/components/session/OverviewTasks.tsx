@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, CircleAlert, CircleHelp, LoaderCircle, Square } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useToast } from '@/components/ui/toast'
 import { stopSessionAgentTask } from '@/lib/api/sessions'
 import type { Session } from '@/lib/api/types'
-import { agentTaskLive, type AgentTaskView } from '@/lib/agentTasks'
+import { agentTaskLive, tasksSectionOpen, type AgentTaskView } from '@/lib/agentTasks'
 import { relativeTime } from '@/lib/format/time'
 import { keys } from '@/lib/query/keys'
 import { OverviewDisclosureSection } from './OverviewRuns'
@@ -89,10 +89,15 @@ function TaskRow({ session, task }: { session: Session; task: AgentTaskView }) {
   )
 }
 
-/** The agent's background tasks: open while any is live, finished ones folded away. */
+/** The agent's background tasks: opens when a task goes live, finished ones folded away. */
 export function BackgroundTasksSection({ session, tasks }: { session: Session; tasks: AgentTaskView[] }) {
-  const [open, setOpen] = useState(tasks.some(agentTaskLive))
   const live = tasks.filter(agentTaskLive).length
+  const [open, setOpen] = useState(live > 0)
+  const wasLive = useRef(live > 0)
+  useEffect(() => {
+    setOpen((current) => tasksSectionOpen(current, wasLive.current, live > 0))
+    wasLive.current = live > 0
+  }, [live])
   return (
     <OverviewDisclosureSection
       title="Background tasks"

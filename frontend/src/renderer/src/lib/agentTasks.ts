@@ -11,6 +11,12 @@ export function agentTaskLive(task: AgentTask): boolean {
   return (task.state === 'running' || task.state === 'paused') && !task.connection_lost
 }
 
+/** The section's open state after the live-task count changes: a newly live
+ * task opens it; otherwise the person's choice stands. */
+export function tasksSectionOpen(open: boolean, wasLive: boolean, live: boolean): boolean {
+  return live && !wasLive ? true : open
+}
+
 /** The session's background tasks from the overview's stored events and the
  * live stream, one row per task, live first and then latest report first. */
 export function agentTasksFromSources(
