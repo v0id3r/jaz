@@ -329,6 +329,17 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				})
 				text("a1", "the command failed")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "terminal-codex-stop"):
+				// The Codex adapter's shape of a client-requested stop.
+				notify(map[string]any{
+					"sessionUpdate": "terminal_update", "terminalId": "term-1",
+					"exitStatus": map[string]any{
+						"exitCode": nil, "signal": nil,
+						"_meta": map[string]any{"codex": map[string]any{"reason": "stopped"}},
+					},
+				})
+				text("a1", "the command was stopped")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
 			case strings.Contains(message, "terminal-vanish"):
 				text("a1", "the command is gone")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})

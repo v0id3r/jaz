@@ -377,9 +377,15 @@ func terminalExitV2(raw json.RawMessage) (reported bool, exitCode *int64, reason
 	if json.Unmarshal(raw, &probe) != nil || probe.ExitStatus == nil {
 		return false, nil, ""
 	}
-	claudeCode, _ := probe.ExitStatus.Meta["claudeCode"].(map[string]any)
-	reason, _ = claudeCode["reason"].(string)
-	return true, probe.ExitStatus.ExitCode, reason
+	// The adapters namespace their metadata: claudeCode for Claude, codex for Codex.
+	for _, key := range []string{"claudeCode", "codex"} {
+		if meta, _ := probe.ExitStatus.Meta[key].(map[string]any); meta != nil {
+			if reason, _ := meta["reason"].(string); reason != "" {
+				return true, probe.ExitStatus.ExitCode, reason
+			}
+		}
+	}
+	return true, probe.ExitStatus.ExitCode, ""
 }
 
 func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.TerminalUpdate, exitReported bool, exitCode *int64, reason string, now time.Time) {

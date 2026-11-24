@@ -398,6 +398,7 @@ func TestV2BackgroundTerminalOutcomes(t *testing.T) {
 	}{
 		{"exit zero", "terminal-exit-zero", "completed"},
 		{"exit nonzero", "terminal-exit-nonzero", "failed"},
+		{"codex stop", "terminal-codex-stop", "stopped"},
 		{"no reported end", "terminal-vanish", "ended"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
