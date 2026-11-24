@@ -666,7 +666,7 @@ func (m *Manager) startSession(ctx context.Context, created createdSession, stat
 	}
 	ac.state.attach(m, job, cfg)
 	m.trackPromptSends(ac, job)
-	m.log.Info("spawned agent session", "agent", job.ACPAgent, "session", job.ID, "acp_session", job.ACPSession)
+	m.log.Info("spawned agent session", "agent", job.ACPAgent, "session", job.ID, "acp_session", job.ACPSession, "protocol", job.protocol)
 	return job, nil
 }
 

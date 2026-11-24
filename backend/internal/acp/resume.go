@@ -183,7 +183,7 @@ func (m *Manager) resumeLocked(ctx context.Context, ref string) (_ *jobState, er
 	ac.state.attach(m, job, cfg)
 	m.restoreSessionControls(ctx, job, overview)
 	m.log.Info("resumed agent session", "agent", job.ACPAgent, "session", job.ID,
-		"acp_session", acpSessionID, "loaded", loaded)
+		"acp_session", acpSessionID, "loaded", loaded, "protocol", job.protocol)
 	return job, nil
 }
 
