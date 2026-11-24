@@ -29,4 +29,3 @@ func (m *Manager) BackgroundTasksForTest(ref string) []sessionevents.AgentTask {
 	}
 	return out
 }
-
