@@ -65,7 +65,7 @@ type Event struct {
 	AgentSession     *AgentSession          `json:"agent_session,omitempty"`
 	AgentTask        *AgentTask             `json:"agent_task,omitempty"`
 	ProviderSubagent *ProviderSubagentEvent `json:"provider_subagent,omitempty"`
-	SubagentMessage  *SubagentMessageEvent   `json:"subagent_message,omitempty"`
+	SubagentMessage  *SubagentMessageEvent  `json:"subagent_message,omitempty"`
 	At               time.Time              `json:"at"`
 	ProjectionKey    string                 `json:"projection_key,omitempty"`
 	ProjectionOp     string                 `json:"projection_op,omitempty"`
