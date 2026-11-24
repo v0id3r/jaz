@@ -368,6 +368,15 @@ func NewACPConfig(cfg Config, store *sqlitestore.Store, workspace Workspace, mem
 	cfg.ACP.Launcher = launch
 	// Agents of mesh-only networks are admitted by their session certificate.
 	cfg.ACP.SandboxMCPWithoutKey = len(cfg.Identity.Mesh.Require) > 0
+	// Pilot opt-in: JAZ_ACP_PROTOCOL_V2=claude,codex negotiates ACP v2 with
+	// those agents; everything else stays at v1.
+	if value := strings.TrimSpace(os.Getenv("JAZ_ACP_PROTOCOL_V2")); value != "" {
+		for _, name := range strings.Split(value, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				cfg.ACP.ProtocolV2 = append(cfg.ACP.ProtocolV2, name)
+			}
+		}
+	}
 	promptBuilder := loops.RuntimePromptBuilder{Repo: store, PromptExtras: []func(loops.Loop, loops.Run) string{bots.RoutineInstructions(store)}}
 	if widgetService != nil {
 		promptBuilder.PromptExtras = append(promptBuilder.PromptExtras, widgetService.LoopPromptExtra)

@@ -413,7 +413,7 @@ func (m *Manager) reserveSteer(job *jobState, req SteerRequest, contexts []stora
 		User:          req.FromUser,
 	}
 	update.NotifyParent = update.ParentVisible && job.turn.completion.propagates() && !session.Turn.PlanRequested
-	queued := job.steerMethod == steerPromptQueueing
+	queued := job.steerMethod == steerPromptQueueing || job.steerMethod == steerV2Prompt
 	// A queued prompt waits for the agent to take it in, and a restart before
 	// then would lose it, so the turn keeps it until then. The agent's own
 	// run reports no take-in, so a steer into it is not kept.
@@ -438,7 +438,11 @@ func (m *Manager) reserveSteer(job *jobState, req SteerRequest, contexts []stora
 	if req.ParentVisible {
 		job.ParentVisible = true
 	}
-	job.turn.promptCalls++
+	// A v2 turn ends on the agent's idle report, not on a prompt response, so
+	// its steers stay outside the prompt-call count.
+	if job.steerMethod != steerV2Prompt {
+		job.turn.promptCalls++
+	}
 	if queued {
 		job.turn.unsent++
 	}
@@ -479,6 +483,8 @@ func (m *Manager) runSteerCallAfterHandoff(ctx context.Context, job *jobState, s
 	switch method {
 	case steerPromptQueueing:
 		m.runPromptCall(ctx, job, done, prompt)
+	case steerV2Prompt:
+		m.runPromptCallV2(ctx, job, done, prompt)
 	case steerNative:
 		m.runNativeSteerCall(ctx, job, done, prompt)
 	case steerGrokInterject:

@@ -38,6 +38,10 @@ func (m *Manager) runPrompt(ctx context.Context, job *jobState, prompt acpschema
 }
 
 func (m *Manager) runPromptCall(ctx context.Context, job *jobState, done chan struct{}, req acpschema.PromptRequest) {
+	if job.protocol == protocolV2 {
+		m.runPromptCallV2(ctx, job, done, req)
+		return
+	}
 	peer := m.peer(job.ID)
 	if peer == nil {
 		m.failPromptCall(done, job, fmt.Errorf("acp peer is not active"))

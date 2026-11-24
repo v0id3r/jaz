@@ -1,0 +1,315 @@
+package acp_test
+
+import (
+	"context"
+	"io"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/log"
+	"github.com/wins/jaz/backend/internal/acp"
+	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
+)
+
+func newV2TestManager(t *testing.T, store *jsonstore.Store, extraEnv map[string]string) *acp.Manager {
+	t.Helper()
+	return acp.NewManager(store, acp.Config{
+		Root:         t.TempDir(),
+		Workspace:    t.TempDir(),
+		SystemPrompt: staticPrompt("skill prompt"),
+		ProtocolV2:   []string{"fake"},
+		Agents: map[string]acp.AgentConfig{
+			"fake": {
+				Command: os.Args[0],
+				Args:    []string{"-test.run=TestFakeACPAgentV2Process"},
+				Env:     fakeV2ManagerConfig(t, extraEnv),
+			},
+		},
+	}, log.New(io.Discard))
+}
+
+func spawnV2Session(t *testing.T, manager *acp.Manager, slug string) acp.SpawnResult {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	spawned, err := manager.Spawn(ctx, acp.SpawnRequest{ACPAgent: "fake", Slug: slug})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spawned
+}
+
+func sendV2(t *testing.T, manager *acp.Manager, session, message string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := manager.Send(ctx, acp.SendRequest{Session: session, Message: message, Completion: acp.CompletionInline}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitTurnV2(t *testing.T, manager *acp.Manager, session string) acp.Job {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	job, err := manager.Wait(ctx, acp.WaitRequest{Session: session, Timeout: 15 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return job
+}
+
+func waitV2Idle(t *testing.T, manager *acp.Manager, session string) acp.Job {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := manager.Status(session)
+		if err == nil && job.State != acp.StateRunning && job.State != acp.StateStarting {
+			return job
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	job, _ := manager.Status(session)
+	t.Fatalf("session %s still %s", session, job.State)
+	return job
+}
+
+func TestV2SimpleTurn(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-simple")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "say hello")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle || job.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("turn ended %s/%s", job.State, job.StopReason)
+	}
+	if job.Assistant != "hello world" {
+		t.Fatalf("assistant = %q", job.Assistant)
+	}
+	status, err := manager.Status(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Modes.PlanModeID != "plan" {
+		t.Fatalf("plan mode from mode config option not detected: %#v", status.Modes)
+	}
+	if status.Model != "fake-large" {
+		t.Fatalf("model = %q", status.Model)
+	}
+}
+
+func TestV2ToolTurn(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-tool")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "run a tool")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if len(job.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %#v", job.ToolCalls)
+	}
+	call := job.ToolCalls[0]
+	if call.ID != "call-1" || call.Title != "Read file" || call.Status != "completed" || call.Kind != "read" {
+		t.Fatalf("tool call = %#v", call)
+	}
+	if job.Assistant != "tool done" {
+		t.Fatalf("assistant = %q", job.Assistant)
+	}
+}
+
+func TestV2SteeringJoinsTurn(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-steer")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "hold the turn")
+	waitForV2Job(t, 10*time.Second, func() bool {
+		job, err := manager.Status(spawned.SessionID)
+		return err == nil && job.State == acp.StateRunning
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := manager.Steer(ctx, acp.SteerRequest{Session: spawned.Slug, Message: "steer-done now"}); err != nil {
+		t.Fatal(err)
+	}
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle {
+		t.Fatalf("steered turn ended %s", job.State)
+	}
+	if !strings.Contains(job.Assistant, "working on it") {
+		t.Fatalf("assistant = %q", job.Assistant)
+	}
+}
+
+func TestV2BackgroundWork(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-background")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "background watch")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle {
+		t.Fatalf("turn ended %s", job.State)
+	}
+	tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+	if len(tasks) != 1 || tasks[0].ID != "bg-1" || tasks[0].State != "running" || !tasks[0].CanStop {
+		t.Fatalf("background tasks = %#v", tasks)
+	}
+
+	sendV2(t, manager, spawned.Slug, "background-finish now")
+	waitTurnV2(t, manager, spawned.SessionID)
+	waitForV2Job(t, 10*time.Second, func() bool {
+		tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+		return len(tasks) == 1 && tasks[0].State == "completed"
+	})
+}
+
+func TestV2SubagentTranscriptSeparate(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-subagent")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "use a subagent")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.Assistant != "subagent done" {
+		t.Fatalf("parent assistant = %q", job.Assistant)
+	}
+	if strings.Contains(job.Assistant, "child findings") || strings.Contains(job.Assistant, "go research") {
+		t.Fatalf("child transcript leaked into parent: %q", job.Assistant)
+	}
+	transcript := manager.SubagentTranscriptForTest("fake-v2-child")
+	joined := strings.Join(transcript, "\n")
+	if !strings.Contains(joined, "child findings") || !strings.Contains(joined, "go research") {
+		t.Fatalf("child transcript = %v", transcript)
+	}
+	events, err := store.LoadSessionEvents(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasACPMessage(events, "subagent done") || hasACPMessage(events, "child findings") {
+		t.Fatalf("child activity in parent transcript events")
+	}
+}
+
+func TestV2Cancel(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-cancel")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "hold the turn")
+	waitForV2Job(t, 10*time.Second, func() bool {
+		job, err := manager.Status(spawned.SessionID)
+		return err == nil && job.State == acp.StateRunning
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := manager.Cancel(ctx, spawned.Slug); err != nil {
+		t.Fatal(err)
+	}
+	job := waitV2Idle(t, manager, spawned.SessionID)
+	if job.State != acp.StateCancelled {
+		t.Fatalf("cancelled turn ended %s (%s)", job.State, job.StopReason)
+	}
+}
+
+func TestV2FailureEndsTurn(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-fail")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "fail now")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateFailed {
+		t.Fatalf("failed turn ended %s", job.State)
+	}
+	if !strings.Contains(job.Error, "provider exploded") {
+		t.Fatalf("error = %q", job.Error)
+	}
+}
+
+func TestV2ResumeAfterRestart(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-resume")
+
+	sendV2(t, manager, spawned.Slug, "say hello")
+	if job := waitTurnV2(t, manager, spawned.SessionID); job.State != acp.StateIdle {
+		t.Fatalf("turn ended %s", job.State)
+	}
+	manager.Close()
+
+	restarted := newV2TestManager(t, store, nil)
+	defer func() { _, _ = restarted.Cancel(context.Background(), spawned.SessionID) }()
+	sendV2(t, restarted, spawned.Slug, "say hello again")
+	job := waitTurnV2(t, restarted, spawned.SessionID)
+	if job.State != acp.StateIdle || job.Assistant != "hello world" {
+		t.Fatalf("resumed turn: %s %q", job.State, job.Assistant)
+	}
+	messages, err := store.LoadMessages(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two user prompts; a replayed resume would duplicate them.
+	if len(messages) != 2 {
+		t.Fatalf("stored user messages after resume = %d, want 2", len(messages))
+	}
+	events, err := store.LoadSessionEvents(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countACPMessage(events, "hello world"); got != 2 {
+		t.Fatalf("assistant replies after resume = %d, want 2", got)
+	}
+}
+
+func TestV2FallbackToV1(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, map[string]string{"JAZ_FAKE_ACP_V2_DECLINE": "1"})
+	spawned := spawnV2Session(t, manager, "v2-decline")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	job, err := manager.Status(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != acp.StateIdle {
+		t.Fatalf("fallback session state = %s", job.State)
+	}
+}

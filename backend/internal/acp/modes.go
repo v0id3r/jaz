@@ -3,10 +3,12 @@ package acp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
 	"github.com/gluonfield/acp-transport/jsonrpc"
+	"github.com/wins/jaz/backend/internal/sessionevents"
 )
 
 func modeStateFromACP(state *acpschema.SessionModeState) ModeState {
@@ -52,8 +54,8 @@ func (m *Manager) prepareModeForTurn(ctx context.Context, job *jobState, planReq
 		if err := m.ensureTurnMode(ctx, job, baselineModeID(job.ACPAgent, modes)); err != nil {
 			return err
 		}
-		value := "default"
 		job.mu.RLock()
+		value := baselineModeConfigValue(job.ACPAgent, job.agentSession.ConfigOptions, modes.planConfigID)
 		for _, option := range job.agentSession.ConfigOptions {
 			if option.ID == modes.planConfigID && option.UserValue != nil {
 				value = *option.UserValue
@@ -145,4 +147,31 @@ func (m *Manager) setSessionMode(ctx context.Context, peer *jsonrpc.Peer, sessio
 		return fmt.Errorf("set acp session %q mode: %w", modeID, err)
 	}
 	return nil
+}
+
+// baselineModeConfigValue picks the mode config option's baseline value: the
+// agent's full-auto mode by the same priority session modes use, else
+// "default". v2 exposes plan and permissions as one mode option, so the
+// baseline is a value of that option rather than a session mode.
+func baselineModeConfigValue(agent string, options []sessionevents.AgentConfigOption, configID string) string {
+	for _, option := range options {
+		if option.ID != configID {
+			continue
+		}
+		values := make([]string, 0, len(option.Options))
+		for _, value := range option.Options {
+			values = append(values, value.Value)
+		}
+		for _, want := range baselineModePriority[CanonicalAgentName(agent)] {
+			if slices.Contains(values, want) {
+				return want
+			}
+		}
+		for _, want := range defaultBaselineModePriority {
+			if slices.Contains(values, want) {
+				return want
+			}
+		}
+	}
+	return "default"
 }

@@ -111,6 +111,7 @@ type jobState struct {
 	Job
 
 	projectPath            string
+	protocol               int
 	mu                     sync.RWMutex
 	sendMu                 sync.Mutex
 	turnMu                 sync.Mutex
@@ -126,6 +127,10 @@ type jobState struct {
 	toolByID               map[string]sessionevents.ACPToolCall
 	pendingToolUpdateByID  map[string]sessionevents.ACPToolCall
 	subagentToolIDs        map[string]struct{}
+	seenMessagesV2         map[string]bool
+	cancellableToolsV2     map[string]bool
+	terminalsV2            map[string]*terminalStateV2
+	terminalTool           map[string]string
 	deferredToolIDs        map[string]struct{}
 	savedAssistantLen      int
 	usage                  usageAccumulator
@@ -416,6 +421,10 @@ func (j *jobState) beginTurnLocked(completion CompletionMode, stored storage.Tur
 	j.ParentVisible = stored.ParentVisible
 	j.toolByID = make(map[string]sessionevents.ACPToolCall)
 	j.pendingToolUpdateByID = make(map[string]sessionevents.ACPToolCall)
+	j.seenMessagesV2 = nil
+	j.cancellableToolsV2 = nil
+	j.terminalsV2 = nil
+	j.terminalTool = nil
 	j.UpdatedAt = now
 	j.LastEventAt = now
 	j.LastToolAt = time.Time{}
@@ -427,7 +436,12 @@ func (j *jobState) beginTurnLocked(completion CompletionMode, stored storage.Tur
 // before then is the turn's: the Claude adapter holds a turn's answer until
 // the background subagents it started have reported.
 func (j *jobState) endingLocked() bool {
-	return j.finishing != nil || j.turn != nil && !j.turn.agentRun && j.turn.unsent == 0 && len(j.turn.prompts) == 0
+	if j.finishing != nil {
+		return true
+	}
+	// A v2 turn ends on the agent's idle report, not on prompt delivery, so
+	// answered prompts do not mark it ending.
+	return j.turn != nil && !j.turn.agentRun && j.protocol != protocolV2 && j.turn.unsent == 0 && len(j.turn.prompts) == 0
 }
 
 func (j *jobState) discardTurnResult() {

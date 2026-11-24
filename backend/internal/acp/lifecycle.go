@@ -146,6 +146,7 @@ func (m *Manager) acquireSessionProcess(ctx context.Context, job *jobState) (*jo
 }
 
 func (m *Manager) teardown(id string) {
+	m.subagentsV2.dropParent(id)
 	if job := m.jobByID(id); job != nil {
 		m.withACPTranscriptBarrier(job.eventView(), nil)
 	}

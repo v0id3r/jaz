@@ -107,6 +107,7 @@ type Manager struct {
 	turnReaders       map[string]int
 	pendingDiscard    map[string]*jobState
 	used              map[string]struct{}
+	subagentsV2       *subagentRegistryV2
 
 	pendingPermission map[string]*pendingPermission
 	permissionMu      sync.Mutex
@@ -267,6 +268,7 @@ func NewManager(store Store, cfg Config, logger *log.Logger) *Manager {
 		projections:       make(map[string]*eventProjection),
 		resumeLocks:       sessionlock.New(),
 		inputLocks:        sessionlock.New(),
+		subagentsV2:       newSubagentRegistryV2(),
 	}
 }
 
@@ -288,6 +290,7 @@ type agentConn struct {
 	cancel        context.CancelFunc
 	closed        <-chan struct{}
 	initRaw       json.RawMessage
+	protocol      int
 	stderr        *processStderrTail
 	promptTracker *promptTrackingConn
 	// sandboxed agents run in the sandbox, outside Jaz's network namespace.
@@ -323,7 +326,11 @@ func (m *Manager) connect(ctx context.Context, name string, cfg AgentConfig, cwd
 	return m.connectWithHandler(ctx, name, cfg, cwd, artifactSurface, mcpServerPolicy, systemPromptExtensions, jsonrpc.HandlerFunc(m.handleJSONRPC))
 }
 
-func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg AgentConfig, cwd, artifactSurface, mcpServerPolicy string, systemPromptExtensions promptmodule.Modules, handler jsonrpc.Handler) (_ *agentConn, err error) {
+func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg AgentConfig, cwd, artifactSurface, mcpServerPolicy string, systemPromptExtensions promptmodule.Modules, handler jsonrpc.Handler) (*agentConn, error) {
+	return m.connectProtocol(ctx, name, cfg, cwd, artifactSurface, mcpServerPolicy, systemPromptExtensions, handler, true)
+}
+
+func (m *Manager) connectProtocol(ctx context.Context, name string, cfg AgentConfig, cwd, artifactSurface, mcpServerPolicy string, systemPromptExtensions promptmodule.Modules, handler jsonrpc.Handler, allowV2 bool) (_ *agentConn, err error) {
 	modelMetadata, err := m.resolveCodexCustomProviderModelMetadata(name, cfg)
 	if err != nil {
 		return nil, err
@@ -372,37 +379,16 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 		}
 	}()
 
-	initRaw, err := peer.Call(ctx, acpschema.AgentMethodInitialize, acpschema.InitializeRequest{
-		ProtocolVersion: acpschema.ProtocolVersion(acpschema.ProtocolVersionNumber),
-		ClientInfo: &acpschema.Implementation{
-			Name:    "jaz",
-			Title:   "Jaz",
-			Version: "0.1.0",
-		},
-		ClientCapabilities: &acpschema.ClientCapabilities{
-			Meta: map[string]any{
-				"terminal-auth":         true,
-				"terminal_output_delta": true,
-				"jetbrains":             map[string]any{"air": map[string]any{"version": 1, "capabilities": []string{"asyncTasks", "recommendedValue", "sessionFailure"}}},
-				"jaz.dev/widget":        map[string]any{"version": 1},
-			},
-			FS: &acpschema.FileSystemCapabilities{
-				ReadTextFile:  true,
-				WriteTextFile: true,
-			},
-			Elicitation: &acpschema.ElicitationCapabilities{Form: &acpschema.ElicitationFormCapabilities{}},
-		},
-	})
+	initRaw, protocol, err := m.initializeConn(ctx, peer, name, stderr, allowV2)
 	if err != nil {
-		return nil, fmt.Errorf("initialize acp agent: %w", withProcessStderr(err, stderr))
+		if errors.Is(err, errProtocolV2Rejected) {
+			m.log.Info("acp agent did not take protocol v2; reconnecting at v1", "agent", name)
+			ac.close()
+			return m.connectProtocol(ctx, name, cfg, cwd, artifactSurface, mcpServerPolicy, systemPromptExtensions, handler, false)
+		}
+		return nil, err
 	}
-	var initialized acpschema.InitializeResponse
-	if err := json.Unmarshal(initRaw, &initialized); err != nil {
-		return nil, fmt.Errorf("decode acp initialization: %w", err)
-	}
-	if initialized.ProtocolVersion != acpschema.ProtocolVersion(acpschema.ProtocolVersionNumber) {
-		return nil, fmt.Errorf("unsupported acp protocol version %d", initialized.ProtocolVersion)
-	}
+	ac.protocol = protocol
 	state.initialized(initRaw)
 	methodID, missingAuth := autoAuthMethod(name, initRaw, env)
 	if methodID != "" {
@@ -507,6 +493,9 @@ func withSignInHint(err error) error {
 }
 
 func (m *Manager) newACPSession(ctx context.Context, ac *agentConn, agent string, cfg AgentConfig, cwd string, session storage.Session, systemPromptExtensions promptmodule.Modules) (acpSessionInfo, error) {
+	if ac.protocol == protocolV2 {
+		return m.newACPSessionV2(ctx, ac, agent, cfg, cwd, session, systemPromptExtensions)
+	}
 	meta, err := m.sessionMeta(ctx, agent, cfg, cwd, session.RuntimeRef.ArtifactSurface, session.RuntimeRef.MCPServerPolicy, session.SourceType, systemPromptExtensions)
 	if err != nil {
 		return acpSessionInfo{}, err
@@ -625,9 +614,11 @@ func (m *Manager) startSession(ctx context.Context, created createdSession, stat
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProcessLifecycle(req.ACPAgent, cfg, ac.initRaw); err != nil {
-		ac.close()
-		return nil, err
+	if ac.protocol != protocolV2 {
+		if err := validateProcessLifecycle(req.ACPAgent, cfg, ac.initRaw); err != nil {
+			ac.close()
+			return nil, err
+		}
 	}
 	mcpRevision := m.mcpRevision()
 	acpSession, err := m.newACPSession(ctx, ac, req.ACPAgent, cfg, absCwd, session, req.SystemPromptExtensions)
@@ -655,7 +646,8 @@ func (m *Manager) startSession(ctx context.Context, created createdSession, stat
 	process.mcpRefresh = supportedMCPRefresh(ac.initRaw, session.RuntimeRef.MCPServerPolicy)
 	job := newIdleJob(session, req.ACPAgent, acpSessionID, absCwd, modes)
 	job.State = state
-	job.steerMethod = supportedSteerMethod(ac.initRaw)
+	job.protocol = ac.protocol
+	job.steerMethod = ac.steerMethod()
 	if err := m.register(job, process); err != nil {
 		ac.close()
 		return nil, err

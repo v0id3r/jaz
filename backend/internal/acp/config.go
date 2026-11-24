@@ -140,6 +140,9 @@ type Config struct {
 	// SandboxMCPWithoutKey leaves the backend key out of the MCP servers of
 	// sandboxed agents, which Jaz admits by their session certificate.
 	SandboxMCPWithoutKey bool
+	// ProtocolV2 names the agents whose connections negotiate ACP v2; every
+	// other agent stays at v1.
+	ProtocolV2 []string
 }
 
 type AgentConfig struct {

@@ -130,9 +130,11 @@ func (m *Manager) resumeLocked(ctx context.Context, ref string) (_ *jobState, er
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProcessLifecycle(agentName, cfg, ac.initRaw); err != nil {
-		ac.close()
-		return nil, err
+	if ac.protocol != protocolV2 {
+		if err := validateProcessLifecycle(agentName, cfg, ac.initRaw); err != nil {
+			ac.close()
+			return nil, err
+		}
 	}
 	mcpRevision := m.mcpRevision()
 	acpSessionID, modes, loaded, err := m.restoreACPSession(ctx, ac, agentName, session, cfg, cwd, mcpServerPolicy, systemPromptExtensions)
@@ -166,7 +168,8 @@ func (m *Manager) resumeLocked(ctx context.Context, ref string) (_ *jobState, er
 			job.backgroundTasks[event.AgentTask.ID] = *event.AgentTask
 		}
 	}
-	job.steerMethod = supportedSteerMethod(ac.initRaw)
+	job.protocol = ac.protocol
+	job.steerMethod = ac.steerMethod()
 	m.trackPromptSends(ac, job)
 	process := newAgentProcess(ac)
 	process.mcpPolicy = mcpServerPolicy
@@ -199,6 +202,9 @@ func (m *Manager) resumeSystemPromptExtensions(session storage.Session) (promptm
 // registered after the legacy session/load fallback so its replay is dropped.
 func (m *Manager) restoreACPSession(ctx context.Context, ac *agentConn, agentName string, session storage.Session, cfg AgentConfig, cwd, mcpServerPolicy string, systemPromptExtensions promptmodule.Modules) (string, ModeState, bool, error) {
 	agentName = CanonicalAgentName(agentName)
+	if ac.protocol == protocolV2 {
+		return m.restoreACPSessionV2(ctx, ac, agentName, session, cfg, cwd, mcpServerPolicy, systemPromptExtensions)
+	}
 	storedID := session.RuntimeRef.SessionID
 	restoreMethod := sessionRestoreMethod(ac.initRaw)
 	if storedID != "" {

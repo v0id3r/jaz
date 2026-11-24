@@ -148,6 +148,9 @@ func (m *Manager) StopBackgroundTask(ctx context.Context, session, taskID string
 	if !exists || !task.CanStop || task.ConnectionLost {
 		return fmt.Errorf("background task %q is not stoppable", taskID)
 	}
+	if job.protocol == protocolV2 {
+		return m.stopBackgroundTaskV2(ctx, job, task)
+	}
 	peer := m.peer(job.ID)
 	if peer == nil {
 		return fmt.Errorf("agent connection is unavailable")

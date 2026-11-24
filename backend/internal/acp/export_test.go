@@ -3,6 +3,8 @@ package acp
 import (
 	"testing"
 	"time"
+
+	"github.com/wins/jaz/backend/internal/sessionevents"
 )
 
 // SetProviderRetryDelays shortens the waits before a failed turn's
@@ -11,4 +13,28 @@ func SetProviderRetryDelays(t testing.TB, delays ...time.Duration) {
 	previous := providerRetryDelays
 	providerRetryDelays = delays
 	t.Cleanup(func() { providerRetryDelays = previous })
+}
+
+// BackgroundTasksForTest exposes the job's background task records.
+func (m *Manager) BackgroundTasksForTest(ref string) []sessionevents.AgentTask {
+	job, err := m.job(ref)
+	if err != nil {
+		return nil
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	out := make([]sessionevents.AgentTask, 0, len(job.backgroundTasks))
+	for _, task := range job.backgroundTasks {
+		out = append(out, task)
+	}
+	return out
+}
+
+// SubagentTranscriptForTest exposes a v2 child session's recorded transcript.
+func (m *Manager) SubagentTranscriptForTest(childID string) []string {
+	var out []string
+	for _, entry := range m.subagentTranscriptV2(childID) {
+		out = append(out, entry.Kind+":"+entry.Text)
+	}
+	return out
 }

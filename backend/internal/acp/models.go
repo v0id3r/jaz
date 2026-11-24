@@ -324,13 +324,16 @@ type sessionModelState struct {
 type sessionConfigOptionsState struct {
 	configOptionsPresent bool
 	planConfigID         string
-	modelOptions         []string
-	currentModel         string
-	defaultModel         string
-	effortConfigPresent  bool
-	effortConfigID       string
-	effortOptions        []string
-	effortPriority       int
+	// modeConfigID is the select option of category "mode", v2's replacement
+	// for session modes.
+	modeConfigID        string
+	modelOptions        []string
+	currentModel        string
+	defaultModel        string
+	effortConfigPresent bool
+	effortConfigID      string
+	effortOptions       []string
+	effortPriority      int
 }
 
 // setConfiguredSessionModel checks the configured model against the agent's
@@ -398,11 +401,12 @@ func (m *Manager) setConfiguredSessionModel(ctx context.Context, peer *jsonrpc.P
 }
 
 func setSessionConfigOption(ctx context.Context, peer *jsonrpc.Peer, sessionID acpschema.SessionID, configID, value string) (json.RawMessage, error) {
-	return peer.Call(ctx, acpschema.AgentMethodSessionSetConfigOption, acpschema.SetSessionConfigOptionRequest{
+	raw, err := peer.Call(ctx, acpschema.AgentMethodSessionSetConfigOption, acpschema.SetSessionConfigOptionRequest{
 		SessionID: sessionID,
 		ConfigID:  acpschema.SessionConfigID(configID),
 		Value:     acpschema.EncodeSessionConfigValue(acpschema.SessionConfigValueID(value)),
 	})
+	return normalizeConfigOptionsV2(raw), err
 }
 
 func (m *Manager) setConfiguredReasoningEffort(ctx context.Context, peer *jsonrpc.Peer, agentName string, sessionID acpschema.SessionID, effort, configID string) (json.RawMessage, error) {
@@ -476,7 +480,16 @@ func (m *Manager) configuredModeState(
 		}
 		ac.state.configResponse(session.response.SessionID, effortRaw)
 	}
-	return m.initializeModeState(ctx, peer, agentName, session)
+	modes, err := m.initializeModeState(ctx, peer, agentName, session)
+	if err != nil {
+		return modes, err
+	}
+	// v2 has no session modes; plan rides the mode config option instead.
+	if ac.protocol == protocolV2 && modes.planConfigID == "" && session.configOptions.modeConfigID != "" {
+		modes.PlanModeID = "plan"
+		modes.planConfigID = session.configOptions.modeConfigID
+	}
+	return modes, nil
 }
 
 func (m *Manager) applyConfiguredReasoningEffort(
@@ -549,6 +562,9 @@ func parseSessionConfigOptions(raw json.RawMessage) sessionConfigOptionsState {
 	}
 	for _, option := range options {
 		category := strings.TrimSpace(option.Category)
+		if category == string(acpschema.SessionConfigOptionCategoryMode) && state.modeConfigID == "" {
+			state.modeConfigID = option.ID
+		}
 		switch {
 		case option.ID == sessionConfigCollaborationMode:
 			values := parseConfigOptionValues(option.Options)

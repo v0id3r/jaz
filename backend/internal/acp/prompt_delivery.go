@@ -47,6 +47,11 @@ func (m *Manager) promptSent(job *jobState) {
 func (m *Manager) dropTakenSteersLocked(job *jobState) {
 	turn := job.turn
 	untaken := turn.unsent + max(len(turn.prompts)-1, 0)
+	if job.protocol == protocolV2 {
+		// A v2 agent acknowledges each prompt as it takes it in, so every
+		// prompt without its ack is still untaken.
+		untaken = turn.unsent + len(turn.prompts)
+	}
 	if turn.kept <= untaken {
 		return
 	}
