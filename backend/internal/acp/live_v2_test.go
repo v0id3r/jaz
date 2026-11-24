@@ -44,7 +44,7 @@ func TestLiveV2Scenarios(t *testing.T) {
 		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
 		ProtocolV2:   protocolV2,
 		Agents: map[string]AgentConfig{
-			agent: {Command: command},
+			agent: {Command: command, Env: liveAgentEnv()},
 		},
 	}, log.New(os.Stderr))
 
@@ -86,24 +86,8 @@ func TestLiveV2Scenarios(t *testing.T) {
 		t.Logf("[%s] tool calls: %s", label, toolCallSummary(tool))
 	}
 
-	if _, err := manager.Send(ctx, SendRequest{Session: spawned.SessionID, Message: "Count from 1 to 30, one short message per number, slowly.", Completion: CompletionInline}); err != nil {
-		t.Fatalf("[%s] steer setup: %v", label, err)
-	}
-	time.Sleep(4 * time.Second)
-	steerCtx, steerCancel := context.WithTimeout(ctx, 30*time.Second)
-	_, steerErr := manager.Steer(steerCtx, SteerRequest{Session: spawned.SessionID, Message: "Stop counting. Reply with exactly: steered"})
-	steerCancel()
-	if steerErr != nil {
-		t.Logf("[%s] steer: unsupported or refused: %v", label, steerErr)
-	} else {
-		steered, err := manager.Wait(ctx, WaitRequest{Session: spawned.SessionID, Timeout: 3 * time.Minute})
-		if err != nil {
-			t.Fatalf("[%s] steer wait: %v", label, err)
-		}
-		t.Logf("[%s] steer result: state=%s assistant=%s", label, steered.State, truncateRunes(steered.Assistant, 300))
-		if steered.State != StateIdle {
-			t.Errorf("[%s] steered turn state: %s", label, steered.State)
-		}
+	if os.Getenv("ACP_LIVE_SKIP_STEER") == "" {
+		runSteerScenario(t, ctx, manager, spawned.SessionID, label)
 	}
 
 	turn("background", "Start this as a background task without waiting for it: sleep 20 && echo jaz-bg-done. Then immediately reply with exactly: started")
@@ -120,7 +104,7 @@ func TestLiveV2Scenarios(t *testing.T) {
 		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
 		ProtocolV2:   protocolV2,
 		Agents: map[string]AgentConfig{
-			agent: {Command: command},
+			agent: {Command: command, Env: liveAgentEnv()},
 		},
 	}, log.New(os.Stderr))
 	defer restarted.Close()
@@ -137,6 +121,35 @@ func TestLiveV2Scenarios(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(resumed.Assistant), "done") {
 		t.Logf("[%s] resume answer did not recall 'done': %q", label, resumed.Assistant)
+	}
+}
+
+func runSteerScenario(t *testing.T, ctx context.Context, manager *Manager, sessionID, label string) {
+	if _, err := manager.Send(ctx, SendRequest{Session: sessionID, Message: "Run this exact shell command with your shell tool: sleep 20. When it finishes, reply with exactly: unstopped", Completion: CompletionInline}); err != nil {
+		t.Fatalf("[%s] steer setup: %v", label, err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if job, err := manager.Status(sessionID); err == nil && job.State == StateRunning {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	time.Sleep(2 * time.Second)
+	steerCtx, steerCancel := context.WithTimeout(ctx, 30*time.Second)
+	_, steerErr := manager.Steer(steerCtx, SteerRequest{Session: sessionID, Message: "Skip the rest and reply with exactly: steered"})
+	steerCancel()
+	if steerErr != nil {
+		t.Logf("[%s] steer: unsupported or refused: %v", label, steerErr)
+		return
+	}
+	steered, err := manager.Wait(ctx, WaitRequest{Session: sessionID, Timeout: 3 * time.Minute})
+	if err != nil {
+		t.Fatalf("[%s] steer wait: %v", label, err)
+	}
+	t.Logf("[%s] steer result: state=%s assistant=%s", label, steered.State, truncateRunes(steered.Assistant, 300))
+	if steered.State != StateIdle {
+		t.Errorf("[%s] steered turn state: %s", label, steered.State)
 	}
 }
 
@@ -195,4 +208,19 @@ type livePrompt string
 
 func (p livePrompt) ACPPromptForContext(context.Context, string, string) (string, error) {
 	return string(p), nil
+}
+
+// liveAgentEnv forwards adapter runtime pointers such as CODEX_PATH into the
+// agent's scrubbed environment.
+func liveAgentEnv() map[string]string {
+	env := map[string]string{}
+	for _, key := range []string{"CODEX_PATH"} {
+		if value := os.Getenv(key); value != "" {
+			env[key] = value
+		}
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
