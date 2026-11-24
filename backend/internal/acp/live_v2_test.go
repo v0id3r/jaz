@@ -65,6 +65,7 @@ func TestLiveV2Scenarios(t *testing.T) {
 		}
 		t.Logf("[%s] %s: state=%s stop=%s err=%q in %s", label, name, job.State, job.StopReason, job.Error, time.Since(start).Round(time.Second))
 		t.Logf("[%s] %s assistant: %s", label, name, truncateRunes(job.Assistant, 300))
+		t.Logf("[%s] %s result: %s", label, name, truncateRunes(job.Result, 300))
 		return job
 	}
 
@@ -87,13 +88,30 @@ func TestLiveV2Scenarios(t *testing.T) {
 		runSteerScenario(t, ctx, manager, spawned.SessionID, label)
 	}
 
-	turn("background", "Start this as a background task without waiting for it: sleep 20 && echo jaz-bg-done. Then immediately reply with exactly: started")
+	turn("background", "Start this as a background task without waiting for it: sleep 60 && echo jaz-bg-done. Then immediately reply with exactly: started")
 	t.Logf("[%s] background tasks after turn: %s", label, backgroundTaskSummary(manager, spawned.SessionID))
+	if taskID := stoppableBackgroundTask(manager, spawned.SessionID); taskID != "" {
+		if err := manager.StopBackgroundTask(ctx, spawned.SessionID, taskID); err != nil {
+			t.Errorf("[%s] stop background task %s: %v", label, taskID, err)
+		} else {
+			t.Logf("[%s] stopped background task %s: %s", label, taskID, backgroundTaskSummary(manager, spawned.SessionID))
+		}
+	} else {
+		t.Logf("[%s] no stoppable background task reported", label)
+	}
 
-	subagent := turn("subagent", "Use your subagent/task tool once: ask a subagent what 2+2 is. Then reply with just the number.")
+	subagent := turn("subagent", "Use your subagent/task tool once: ask a subagent what 2+2 is and wait for its reply. Then reply with just the number the subagent gave you.")
 	t.Logf("[%s] subagent turn state=%s; subagent records: %s", label, subagent.State, providerSubagentSummary(manager, store, spawned.SessionID))
+	subagentEntries := len(subagentTranscriptEvents(store, spawned.SessionID))
+	t.Logf("[%s] subagent transcript entries in the journal: %d", label, subagentEntries)
+	if v2 && subagentEntries == 0 {
+		t.Errorf("[%s] no subagent_message events in the journal", label)
+	}
 
 	manager.Close()
+	if after := len(subagentTranscriptEvents(store, spawned.SessionID)); after != subagentEntries {
+		t.Errorf("[%s] subagent transcript entries after restart: %d, want %d", label, after, subagentEntries)
+	}
 
 	restarted := NewManager(store, Config{
 		Root:         root,
@@ -147,6 +165,35 @@ func runSteerScenario(t *testing.T, ctx context.Context, manager *Manager, sessi
 	if steered.State != StateIdle {
 		t.Errorf("[%s] steered turn state: %s", label, steered.State)
 	}
+}
+
+func stoppableBackgroundTask(manager *Manager, session string) string {
+	job, err := manager.job(session)
+	if err != nil {
+		return ""
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	for id, task := range job.backgroundTasks {
+		if task.CanStop && task.State == "running" {
+			return id
+		}
+	}
+	return ""
+}
+
+func subagentTranscriptEvents(store *jsonstore.Store, session string) []string {
+	events, err := store.LoadSessionEvents(session)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, event := range events {
+		if event.Type == "subagent_message" && event.SubagentMessage != nil {
+			out = append(out, event.SubagentMessage.Role+":"+event.SubagentMessage.Content)
+		}
+	}
+	return out
 }
 
 func truncateRunes(text string, limit int) string {
@@ -210,7 +257,7 @@ func (p livePrompt) ACPPromptForContext(context.Context, string, string) (string
 // agent's scrubbed environment.
 func liveAgentEnv() map[string]string {
 	env := map[string]string{}
-	for _, key := range []string{"CODEX_PATH"} {
+	for _, key := range []string{"CODEX_PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR"} {
 		if value := os.Getenv(key); value != "" {
 			env[key] = value
 		}

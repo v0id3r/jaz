@@ -46,7 +46,11 @@ func (m *Manager) applyStateUpdateV2(job *jobState, update acpv2.StateSessionUpd
 		m.takeIn(job, finished)
 	case "idle":
 		m.takeIn(job, finished)
-		m.endWorkV2(job, event)
+		// An idle without a stop reason only reports the background list (a
+		// background task ended while no turn ran); it ends no turn.
+		if event.StopReason != "" || event.Error != nil {
+			m.endWorkV2(job, event)
+		}
 	case "unknown":
 	}
 }
