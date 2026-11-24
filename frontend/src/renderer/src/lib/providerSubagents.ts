@@ -41,6 +41,24 @@ function providerSubagentKey(event: SessionEvent): string {
   return event.projection_key || `provider_subagent:${subagent.provider ?? ''}:${subagent.id}`
 }
 
+export type SubagentTranscriptEntry = { role: string; content: string; status?: string }
+
+/** One subagent's transcript from the session journal's subagent_message events, consecutive text chunks of one role coalesced. */
+export function subagentTranscriptEntries(events: SessionEvent[], subagent: string): SubagentTranscriptEntry[] {
+  const entries: SubagentTranscriptEntry[] = []
+  for (const event of events) {
+    const message = event.subagent_message
+    if (event.type !== 'subagent_message' || !message || message.id !== subagent) continue
+    const last = entries[entries.length - 1]
+    if (last && last.role === message.role && message.role !== 'tool' && !message.status && !last.status) {
+      last.content += message.content ?? ''
+    } else {
+      entries.push({ role: message.role, content: message.content ?? '', ...(message.status ? { status: message.status } : {}) })
+    }
+  }
+  return entries
+}
+
 export function looksLikeOpaqueToolID(text: string): boolean {
   return /^(?:toolu_|call_|tool[-_])[A-Za-z0-9_-]+$/.test(text)
 }

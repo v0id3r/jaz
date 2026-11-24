@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { providerSubagentsFromSources, subagentRunning } from './providerSubagents'
+import { providerSubagentsFromSources, subagentRunning, subagentTranscriptEntries } from './providerSubagents'
 
 function subagent(owner, name) {
   return {
@@ -119,5 +119,32 @@ describe('provider subagent projections', () => {
 
     expect(subagents.map((item) => item.id)).toEqual(['newcomer', 'reader', 'closer', 'checker', 'writer'])
     expect(subagents.filter(subagentRunning).map((item) => item.id)).toEqual(['newcomer', 'reader'])
+  })
+})
+
+describe('subagent transcript entries', () => {
+  const entry = (id, role, content, status) => ({
+    session_id: 'parent',
+    type: 'subagent_message',
+    subagent_message: { id, role, content, ...(status ? { status } : {}) },
+    at: '2026-11-24T08:00:00Z',
+  })
+
+  test('keeps one subagent\'s entries, coalescing consecutive chunks of a role', () => {
+    const entries = subagentTranscriptEntries([
+      entry('child-1', 'user', 'go research'),
+      entry('child-2', 'assistant', 'other child'),
+      entry('child-1', 'assistant', 'child '),
+      entry('child-1', 'assistant', 'findings'),
+      entry('child-1', 'tool', 'Bash', 'completed'),
+      entry('child-1', 'assistant', 'done'),
+    ], 'child-1')
+
+    expect(entries).toEqual([
+      { role: 'user', content: 'go research' },
+      { role: 'assistant', content: 'child findings' },
+      { role: 'tool', content: 'Bash', status: 'completed' },
+      { role: 'assistant', content: 'done' },
+    ])
   })
 })

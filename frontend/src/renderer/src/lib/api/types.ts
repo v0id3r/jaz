@@ -1016,7 +1016,18 @@ export interface SessionEvent {
   agent_session?: AgentSessionState
   agent_task?: AgentTask
   provider_subagent?: ProviderSubagentEvent
+  subagent_message?: SubagentMessageEvent
   at: string
+}
+
+/** One transcript entry of a provider subagent's own session, kept in the parent session's journal. */
+export interface SubagentMessageEvent {
+  /** The subagent's (child) session id. */
+  id: string
+  role: 'user' | 'assistant' | 'thought' | 'tool' | string
+  content?: string
+  /** The tool call's status, for role 'tool'. */
+  status?: string
 }
 
 export interface AgentFile {

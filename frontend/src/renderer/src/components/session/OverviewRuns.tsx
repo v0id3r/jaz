@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleAlert,
   LoaderCircle,
+  PanelRight,
   type LucideIcon,
 } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
@@ -37,14 +38,16 @@ const THREAD_STATUS: Record<ThreadStatus, RunStatus> = {
 export function OverviewRuns({
   threads,
   subagents,
+  onOpenSubagent,
 }: {
   threads: SpawnedThreadView[]
   subagents: ProviderSubagentView[]
+  onOpenSubagent?: (subagent: string, title?: string) => void
 }) {
   return (
     <>
       {threads.length ? <ThreadsSection threads={threads} /> : null}
-      {subagents.length ? <SubagentsSection subagents={subagents} /> : null}
+      {subagents.length ? <SubagentsSection subagents={subagents} onOpenSubagent={onOpenSubagent} /> : null}
     </>
   )
 }
@@ -202,7 +205,7 @@ function RunRowContent({
   )
 }
 
-function SubagentsSection({ subagents }: { subagents: ProviderSubagentView[] }) {
+function SubagentsSection({ subagents, onOpenSubagent }: { subagents: ProviderSubagentView[]; onOpenSubagent?: (subagent: string, title?: string) => void }) {
   const [open, setOpen] = useState(subagents.length <= AUTO_EXPAND_LIMIT)
   return (
     <OverviewDisclosureSection
@@ -213,14 +216,14 @@ function SubagentsSection({ subagents }: { subagents: ProviderSubagentView[] }) 
     >
       <ul className="mt-2 flex flex-col">
         {subagents.map((subagent) => (
-          <SubagentRow key={subagent.key} subagent={subagent} />
+          <SubagentRow key={subagent.key} subagent={subagent} onOpenSubagent={onOpenSubagent} />
         ))}
       </ul>
     </OverviewDisclosureSection>
   )
 }
 
-function SubagentRow({ subagent }: { subagent: ProviderSubagentView }) {
+function SubagentRow({ subagent, onOpenSubagent }: { subagent: ProviderSubagentView; onOpenSubagent?: (subagent: string, title?: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const status = SUBAGENT_STATUS[subagentStatus(subagent)]
   const title = subagentTitle(subagent)
@@ -228,28 +231,41 @@ function SubagentRow({ subagent }: { subagent: ProviderSubagentView }) {
   const prompt = subagent.prompt?.trim() ?? ''
   return (
     <li className="min-w-0 rounded-md">
-      <button
-        type="button"
-        disabled={!prompt}
-        title={prompt ? (expanded ? 'Hide prompt' : 'Show prompt') : undefined}
-        onClick={() => setExpanded((open) => !open)}
-        className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left transition-colors duration-150 enabled:cursor-pointer enabled:hover:bg-surface-2 disabled:cursor-default"
-      >
-        <RunRowContent
-          title={title}
-          detail={detail && detail !== title ? detail : undefined}
-          status={status}
-          trailing={
-            prompt ? (
-              <ChevronDown
-                size={13}
-                className={`shrink-0 text-ink-3 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
-                aria-hidden
-              />
-            ) : null
-          }
-        />
-      </button>
+      <div className="flex items-center">
+        <button
+          type="button"
+          disabled={!prompt}
+          title={prompt ? (expanded ? 'Hide prompt' : 'Show prompt') : undefined}
+          onClick={() => setExpanded((open) => !open)}
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left transition-colors duration-150 enabled:cursor-pointer enabled:hover:bg-surface-2 disabled:cursor-default"
+        >
+          <RunRowContent
+            title={title}
+            detail={detail && detail !== title ? detail : undefined}
+            status={status}
+            trailing={
+              prompt ? (
+                <ChevronDown
+                  size={13}
+                  className={`shrink-0 text-ink-3 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
+                  aria-hidden
+                />
+              ) : null
+            }
+          />
+        </button>
+        {onOpenSubagent ? (
+          <button
+            type="button"
+            title="Open transcript"
+            aria-label={`Open the transcript of ${title}`}
+            onClick={() => onOpenSubagent(subagent.id, title)}
+            className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md text-ink-3 transition-colors duration-150 hover:bg-surface-2 hover:text-ink"
+          >
+            <PanelRight size={13} aria-hidden />
+          </button>
+        ) : null}
+      </div>
       {expanded && prompt ? (
         <p className="ml-7 max-h-28 overflow-y-auto whitespace-pre-wrap px-1 pb-1 text-[11px] leading-snug text-ink-3">
           {prompt}

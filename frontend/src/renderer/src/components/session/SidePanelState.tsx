@@ -161,6 +161,9 @@ export function useSidePanelState(sessionId: string, { sideChatAvailable = false
       openTab({ id: `file:${ref.path}`, kind: 'file', file: { ...ref, location: ref.location && { ...ref.location } } })
     }
   }, [browsers, entrypoints, openTab, sessionId])
+  const openSubagent = useCallback((subagent: string, title?: string) => {
+    openTab({ id: `subagent:${subagent}`, kind: 'subagent', subagent, title })
+  }, [openTab])
   const openFile = useCallback((file: string | FileReference) => {
     const ref = typeof file === 'string' ? resolveFileLink(file) : file
     if (!ref) return false
@@ -248,7 +251,7 @@ export function useSidePanelState(sessionId: string, { sideChatAvailable = false
     containerRef, open, mode, tabs, activeTab,
     resize, resizing, setResizing, width, widthStyle, minWidth, maxWidth,
     resizable: mode === 'tabs',
-    toggleMode, close, selectTab, reorderTabs, addTab, duplicateTab, closeTab, registerCloseGuard, openFile, openPreview, openApp, openView,
+    toggleMode, close, selectTab, reorderTabs, addTab, duplicateTab, closeTab, registerCloseGuard, openFile, openPreview, openApp, openView, openSubagent,
   }
 }
 

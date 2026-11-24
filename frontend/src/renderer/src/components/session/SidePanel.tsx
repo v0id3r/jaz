@@ -12,6 +12,7 @@ import { CodeDiffPanel } from '@/components/session/CodeDiffPanel'
 import { FileReaderPanel } from '@/components/session/FileReaderPanel'
 import { OverviewPanel } from '@/components/session/OverviewPanel'
 import { SideChatPanel } from '@/components/session/SideChatPanel'
+import { SubagentTranscriptPanel } from '@/components/session/SubagentTranscriptPanel'
 import { TerminalPanel } from '@/components/session/TerminalPanel'
 import { SidePanelControl } from '@/components/session/SidePanelControl'
 import { SidePanelTabMenu, SidePanelTabs } from '@/components/session/SidePanelTabs'
@@ -28,7 +29,7 @@ function TabBody({ id, active, visible, children }: { id: string; active: boolea
 
 export function SidePanel({
   session, panel, progress, subagents, spawnedThreads, working, asking,
-  sideChatAvailable, sideChatEvents, onAddBrowserAnnotation, onUploadAttachment,
+  sideChatAvailable, sideChatEvents, subagentEvents, onAddBrowserAnnotation, onUploadAttachment,
   onSend, onQueuePrompt, onQueueAction, onSendSideChat, overview, overviewLabel, canvas,
 }: {
   session: Session
@@ -41,6 +42,7 @@ export function SidePanel({
   asking: boolean
   sideChatAvailable: boolean
   sideChatEvents: SessionEvent[]
+  subagentEvents: SessionEvent[]
   onAddBrowserAnnotation?: (annotation: BrowserAnnotation, screenshot?: Attachment) => void
   onUploadAttachment?: (file: File) => Promise<Attachment>
   onSend: SendMessageHandler
@@ -82,6 +84,7 @@ export function SidePanel({
               onSend={onSend}
               onQueuePrompt={onQueuePrompt}
               onQueueAction={onQueueAction}
+              onOpenSubagent={panel.openSubagent}
             />
           )}
         </div>
@@ -115,6 +118,8 @@ export function SidePanel({
                 </SidePanelCloseGuard>
               ) : tab.kind === 'diff' ? (
                 <CodeDiffPanel sessionId={session.id} visible={visible} />
+              ) : tab.kind === 'subagent' ? (
+                <SubagentTranscriptPanel subagent={tab.subagent} title={tab.title} events={subagentEvents} visible={visible} />
               ) : tab.kind === 'app' ? (
                 <MCPAppFrame app={tab.app} file={tab.file} call={tab.call} active={visible} />
               ) : tab.kind === 'view' ? (

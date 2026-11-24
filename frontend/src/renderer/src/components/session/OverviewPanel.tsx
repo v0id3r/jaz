@@ -47,6 +47,7 @@ export function OverviewPanel({
   onSend,
   onQueuePrompt,
   onQueueAction,
+  onOpenSubagent,
 }: {
   session: Session
   progress?: TaskSurface
@@ -56,12 +57,13 @@ export function OverviewPanel({
   onSend: SendMessageHandler
   onQueuePrompt: SendMessageHandler
   onQueueAction: (action: QueuedAction, label: string) => Promise<void>
+  onOpenSubagent?: (subagent: string, title?: string) => void
 }) {
   const repo = useRepoActions(session)
   const showGit = Boolean(repo.cwd && (repo.info?.git || repo.info?.worktree_missing || repo.error))
   return (
     <SidePanelShell scroll className="gap-6 px-4 py-4">
-      <OverviewRuns threads={spawnedThreads} subagents={subagents} />
+      <OverviewRuns threads={spawnedThreads} subagents={subagents} onOpenSubagent={onOpenSubagent} />
       {progress ? <ProgressSection progress={progress} working={working} /> : null}
       {showGit ? <GitSection repo={repo} onQueueAction={onQueueAction} /> : null}
       <ManageSection

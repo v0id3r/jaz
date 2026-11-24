@@ -22,6 +22,7 @@ export function sessionEventPlacement(event: SessionEvent): SessionEventPlacemen
     case 'agent_session':
     case 'agent_task':
     case 'provider_subagent':
+    case 'subagent_message':
       return 'overview'
     case 'goal_update':
     case 'goal_clear':

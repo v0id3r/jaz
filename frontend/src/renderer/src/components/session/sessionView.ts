@@ -324,6 +324,7 @@ export function deriveSessionView(
   const sideChatEvents = coalesceSessionEvents(
     [...persistedEvents, ...liveEvents].filter((event) => sessionEventPlacement(event) === 'side_chat'),
   )
+  const subagentEvents = [...persistedEvents, ...liveEvents].filter((event) => event.type === 'subagent_message')
   // The snapshot says no agent has received the claimed prompt yet; the
   // agent's first streamed event for this session ends that wait.
   const agentStarting = acpState === 'starting' && !liveEvents.some((event) => event.acp?.id === session.id)
@@ -341,6 +342,7 @@ export function deriveSessionView(
     suggestedPrompt: serverEvents.findLast((event) => event.acp?.id === session.id)?.acp?.suggested_prompt,
     transcriptEvents: settledTranscriptEvents,
     sideChatEvents,
+    subagentEvents,
     displayEvents,
     latestUserAt,
     activity,

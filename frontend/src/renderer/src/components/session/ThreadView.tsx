@@ -465,6 +465,7 @@ export function ThreadView({
     providerSubagents,
     spawnedThreads,
     sideChatEvents,
+    subagentEvents,
   } = derived
   const showPlanDecision = Boolean(
     latestPlanDecisionSurface?.awaitingApproval &&
@@ -524,6 +525,7 @@ export function ThreadView({
         panel={sidePanel}
         sideChatAvailable={sideChatAvailable}
         sideChatEvents={sideChatEvents}
+        subagentEvents={subagentEvents}
         overview={details?.({ agentSession: derived.agentSession, working: sessionRunning, threads: spawnedThreads, subagents: providerSubagents })}
         overviewLabel={overviewLabel}
         onAddBrowserAnnotation={composerContexts.addBrowserAnnotation}

@@ -1,4 +1,4 @@
-import { Copy, PencilRuler, FileSpreadsheet, FileText, FileType, FolderGit2, Globe, LayoutDashboard, MessageCirclePlus, Plus, RotateCw, Terminal, X, type LucideIcon } from 'lucide-react'
+import { Bot, Copy, PencilRuler, FileSpreadsheet, FileText, FileType, FolderGit2, Globe, LayoutDashboard, MessageCirclePlus, Plus, RotateCw, Terminal, X, type LucideIcon } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { motion, Reorder } from 'motion/react'
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -21,7 +21,7 @@ const MENU_TYPES = {
   diff: { label: 'Code diff', icon: FolderGit2 },
 }
 
-const TAB_TYPES = { ...MENU_TYPES, canvas: { label: 'Canvas', icon: PencilRuler } }
+const TAB_TYPES = { ...MENU_TYPES, canvas: { label: 'Canvas', icon: PencilRuler }, subagent: { label: 'Subagent', icon: Bot } }
 
 function KindIcon({ kind, path = '' }: { kind: keyof typeof TAB_TYPES; path?: string }) {
   const spreadsheet = isSpreadsheetPath(path)
@@ -117,7 +117,7 @@ export function SidePanelTabs({ tabs, activeId, sideChatAvailable, onSelect, onR
     <div className="flex h-9 min-w-0 flex-1 items-center gap-1 px-1 pointer-coarse:h-11">
       <Reorder.Group as="div" axis="x" values={tabs.map((tab) => tab.id)} onReorder={onReorder} layoutScroll ref={list} role="tablist" aria-label="Side panel tabs" className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [-webkit-app-region:no-drag]">
         {tabs.map((tab, index) => {
-          const label = tab.kind === 'app' ? tab.file?.name ?? tab.app.title : tab.kind === 'view' ? tab.view.title : TAB_TYPES[tab.kind].label
+          const label = tab.kind === 'app' ? tab.file?.name ?? tab.app.title : tab.kind === 'view' ? tab.view.title : tab.kind === 'subagent' ? tab.title?.trim() || TAB_TYPES.subagent.label : TAB_TYPES[tab.kind].label
           const target = browsers.find((browser) => browser.id === tab.id)?.target
           const title = tab.kind === 'file' ? tab.file?.path.split(/[\\/]/).pop() || label : target?.title || target?.displayUrl || label
           const active = activeId === tab.id
