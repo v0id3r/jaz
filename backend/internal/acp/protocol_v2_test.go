@@ -361,6 +361,44 @@ func TestV2BackgroundToolCallCancel(t *testing.T) {
 	})
 }
 
+// A background terminal's end state is the one the agent reported: its exit
+// code when it exited, and a neutral ended when it left the list without a
+// reported end.
+func TestV2BackgroundTerminalOutcomes(t *testing.T) {
+	for _, test := range []struct {
+		name, prompt, want string
+	}{
+		{"exit zero", "terminal-exit-zero", "completed"},
+		{"exit nonzero", "terminal-exit-nonzero", "failed"},
+		{"no reported end", "terminal-vanish", "ended"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, err := jsonstore.New(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			manager := newV2TestManager(t, store, nil)
+			defer manager.Close()
+			spawned := spawnV2Session(t, manager, "v2-terminal-outcome")
+			defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+			sendV2(t, manager, spawned.Slug, "terminal-background watch")
+			waitTurnV2(t, manager, spawned.SessionID)
+
+			sendV2(t, manager, spawned.Slug, test.prompt)
+			waitTurnV2(t, manager, spawned.SessionID)
+			waitForV2Job(t, 10*time.Second, func() bool {
+				tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+				return len(tasks) == 1 && tasks[0].State == test.want
+			})
+			tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+			if len(tasks) != 1 || tasks[0].State != test.want {
+				t.Fatalf("background tasks = %#v, want state %s", tasks, test.want)
+			}
+		})
+	}
+}
+
 // A terminal linked to a turn's tool call must survive the turn's result
 // being discarded: the agent reports the stop after the turn has ended.
 func TestV2BackgroundTerminalStopAfterTurn(t *testing.T) {
@@ -418,7 +456,7 @@ func TestV2ToolCallCancel(t *testing.T) {
 	if job.State != acp.StateIdle || !strings.Contains(job.Assistant, "tool cancelled") {
 		t.Fatalf("turn ended %s with %q", job.State, job.Assistant)
 	}
-	if job.ToolCalls[0].Status != "failed" {
+	if job.ToolCalls[0].Status != "cancelled" {
 		t.Fatalf("cancelled tool call = %#v", job.ToolCalls[0])
 	}
 }

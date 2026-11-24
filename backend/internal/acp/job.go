@@ -129,7 +129,6 @@ type jobState struct {
 	subagentToolIDs        map[string]struct{}
 	seenMessagesV2         map[string]bool
 	cancellableToolsV2     map[string]bool
-	stoppedTasksV2         map[string]bool
 	terminalsV2            map[string]*terminalStateV2
 	terminalTool           map[string]string
 	deferredToolIDs        map[string]struct{}
@@ -423,7 +422,6 @@ func (j *jobState) beginTurnLocked(completion CompletionMode, stored storage.Tur
 	j.toolByID = make(map[string]sessionevents.ACPToolCall)
 	j.pendingToolUpdateByID = make(map[string]sessionevents.ACPToolCall)
 	j.seenMessagesV2 = nil
-	j.cancellableToolsV2 = nil
 	j.terminalsV2 = nil
 	j.terminalTool = nil
 	j.UpdatedAt = now

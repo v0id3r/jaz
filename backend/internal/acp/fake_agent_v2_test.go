@@ -159,7 +159,9 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			answer(*msg.ID, map[string]any{})
 			notify(map[string]any{
 				"sessionUpdate": "terminal_update", "terminalId": req.TerminalID,
-				"exitStatus": map[string]any{"exitCode": nil, "signal": nil},
+				"exitStatus": map[string]any{
+					"_meta": map[string]any{"claudeCode": map[string]any{"reason": "stopped"}},
+				},
 			})
 			if heldTerminal {
 				heldTerminal = false
@@ -175,7 +177,7 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			answer(*msg.ID, map[string]any{})
 			notify(map[string]any{
 				"sessionUpdate": "tool_call_update", "toolCallId": req.ToolCallID,
-				"status": "failed",
+				"status": "cancelled",
 			})
 			text("a1", "tool cancelled")
 			state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
@@ -302,6 +304,23 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 					"data": base64.StdEncoding.EncodeToString([]byte{0xA9}),
 				})
 				text("a1", "printed")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "terminal-exit-zero"):
+				notify(map[string]any{
+					"sessionUpdate": "terminal_update", "terminalId": "term-1",
+					"exitStatus": map[string]any{"exitCode": 0},
+				})
+				text("a1", "the command finished")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "terminal-exit-nonzero"):
+				notify(map[string]any{
+					"sessionUpdate": "terminal_update", "terminalId": "term-1",
+					"exitStatus": map[string]any{"exitCode": 1},
+				})
+				text("a1", "the command failed")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "terminal-vanish"):
+				text("a1", "the command is gone")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
 			case strings.Contains(message, "terminal-background"):
 				notify(map[string]any{
