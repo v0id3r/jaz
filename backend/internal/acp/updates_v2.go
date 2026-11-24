@@ -52,6 +52,7 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 		m.confirmPromptV2Locked(job)
 		messageChunk = acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
 		messageID = string(event.MessageID)
+		job.noteStreamedMessageV2Locked(messageID)
 		m.appendMessageV2Locked(job, messageID, messageChunk, event.Meta)
 	case acpv2.AgentMessageUpdate:
 		m.confirmPromptV2Locked(job)
@@ -63,6 +64,7 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 	case acpv2.AgentThoughtChunkUpdate:
 		thoughtChunk = acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
 		thoughtMessageID = string(event.MessageID)
+		job.noteStreamedMessageV2Locked(thoughtMessageID)
 		job.appendThoughtLocked(thoughtChunk)
 	case acpv2.AgentThoughtUpdate:
 		if text := acpv2.TextFromContent(event.Content); text != "" && job.claimMessageV2Locked(string(event.MessageID)) {
@@ -200,14 +202,24 @@ func (j *jobState) claimMessageV2Locked(messageID string) bool {
 	if messageID == "" {
 		return true
 	}
-	if j.seenMessagesV2 == nil {
-		j.seenMessagesV2 = map[string]bool{}
-	}
 	if j.seenMessagesV2[messageID] || messageID == j.replyID {
 		return false
 	}
-	j.seenMessagesV2[messageID] = true
+	j.noteStreamedMessageV2Locked(messageID)
 	return true
+}
+
+// noteStreamedMessageV2Locked remembers a message ID the job already holds,
+// streamed or upserted, so a later whole-message upsert of it is a
+// correction, not new content.
+func (j *jobState) noteStreamedMessageV2Locked(messageID string) {
+	if messageID == "" {
+		return
+	}
+	if j.seenMessagesV2 == nil {
+		j.seenMessagesV2 = map[string]bool{}
+	}
+	j.seenMessagesV2[messageID] = true
 }
 
 func (m *Manager) recordToolV2Locked(job *jobState, update acpv2.ToolCallUpdate, now time.Time) *sessionevents.ACPToolCall {

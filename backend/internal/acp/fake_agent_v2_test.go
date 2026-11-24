@@ -235,6 +235,37 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				})
 				text("a1", "subagent done")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "dedup"):
+				state(map[string]any{"state": "running", "background": []any{}})
+				notify(map[string]any{
+					"sessionUpdate": "agent_message_chunk", "messageId": "m1",
+					"content": map[string]any{"type": "text", "text": "interim "},
+					"_meta":   map[string]any{"jaz": map[string]any{"phase": "commentary"}},
+				})
+				notify(map[string]any{
+					"sessionUpdate": "agent_message", "messageId": "m1",
+					"content": []any{map[string]any{"type": "text", "text": "interim "}},
+					"_meta":   map[string]any{"jaz": map[string]any{"phase": "commentary"}},
+				})
+				notify(map[string]any{
+					"sessionUpdate": "agent_thought_chunk", "messageId": "t1",
+					"content": map[string]any{"type": "text", "text": "thinking"},
+				})
+				notify(map[string]any{
+					"sessionUpdate": "agent_thought", "messageId": "t1",
+					"content": []any{map[string]any{"type": "text", "text": "thinking"}},
+				})
+				text("m2", "final")
+				notify(map[string]any{
+					"sessionUpdate": "agent_message", "messageId": "m2",
+					"content": []any{map[string]any{"type": "text", "text": "final"}},
+				})
+				notify(map[string]any{
+					"sessionUpdate": "agent_message", "messageId": "m1",
+					"content": []any{map[string]any{"type": "text", "text": "interim "}},
+					"_meta":   map[string]any{"jaz": map[string]any{"phase": "commentary"}},
+				})
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
 			case strings.Contains(message, "fail"):
 				state(map[string]any{"state": "running", "background": []any{}})
 				state(map[string]any{"state": "idle", "stopReason": "error", "error": map[string]any{"code": -32603, "message": "provider exploded"}})

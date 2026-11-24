@@ -375,6 +375,33 @@ func TestV2MessagePhaseKeepsCommentaryOutOfResult(t *testing.T) {
 	}
 }
 
+// A whole-message upsert after the message's chunks (or after a later
+// message started) is a correction, not new content: no duplicates.
+func TestV2UpsertAfterChunksDoesNotDuplicate(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-dedup")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "dedup please")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle {
+		t.Fatalf("turn ended %s", job.State)
+	}
+	if job.Assistant != "interim final" {
+		t.Fatalf("assistant = %q", job.Assistant)
+	}
+	if job.Thought != "thinking" {
+		t.Fatalf("thought = %q", job.Thought)
+	}
+	if job.Result != "final" {
+		t.Fatalf("result = %q", job.Result)
+	}
+}
+
 func TestV2ResumeAfterRestart(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {
