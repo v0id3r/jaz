@@ -377,6 +377,47 @@ func TestV2SubagentTranscriptReachesParentVisibleSurface(t *testing.T) {
 	}
 }
 
+// v2 terminal output is base64 on the wire, each chunk independently; the
+// job keeps decoded text, a split UTF-8 character reassembles, and an
+// invalid chunk is dropped without failing the turn.
+func TestV2TerminalOutputDecodesBase64(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-terminal-output")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "terminal-output please")
+	waitTurnV2(t, manager, spawned.SessionID)
+	// Chunk publishes are coalesced on a short timer; the stored tool call
+	// carries the full output once it lands.
+	var output string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := store.LoadSessionEvents(spawned.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if event.ACP == nil {
+				continue
+			}
+			for _, call := range event.ACP.ToolCalls {
+				if call.ID == "call-term-out" {
+					output = call.Runtime.TerminalOutput
+				}
+			}
+		}
+		if output == "out: café" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("terminal output = %q", output)
+}
+
 // A child session whose state the agent reports as unknown gives the panel
 // no failure: unknown is not a made-up terminal result.
 func TestV2SubagentUnknownStateIsNotFailure(t *testing.T) {

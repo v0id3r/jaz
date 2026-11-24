@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -373,7 +374,9 @@ func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.Termin
 			call.Runtime.TerminalCwd = string(*update.Cwd)
 		}
 		if update.Output != nil && update.Output.Data != "" {
-			call.Runtime.TerminalOutput = tailToolText(update.Output.Data)
+			if decoded := decodeTerminalOutputV2(update.Output.Data); decoded != nil {
+				call.Runtime.TerminalOutput = tailToolText(string(decoded))
+			}
 		}
 		if update.ExitStatus != nil {
 			code := int(update.ExitStatus.ExitCode)
@@ -403,10 +406,26 @@ func (m *Manager) appendTerminalOutputV2Locked(job *jobState, terminalID, data s
 	if callID == "" || data == "" {
 		return
 	}
+	decoded := decodeTerminalOutputV2(data)
+	if len(decoded) == 0 {
+		return
+	}
 	call := job.toolByID[callID]
 	call.Runtime.TerminalID = terminalID
-	call.Runtime.TerminalOutput = tailToolText(call.Runtime.TerminalOutput + data)
+	// Bytes, not strings: a UTF-8 character may split across chunks.
+	call.Runtime.TerminalOutput = tailToolText(string(append([]byte(call.Runtime.TerminalOutput), decoded...)))
 	job.toolByID[callID] = call
+}
+
+// decodeTerminalOutputV2 decodes a terminal output payload: v2 carries
+// terminal bytes base64-encoded, each chunk independently. Invalid data is
+// dropped, never fatal to the turn.
+func decodeTerminalOutputV2(data string) []byte {
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return nil
+	}
+	return decoded
 }
 
 func applyPlanV2Locked(job *jobState, event acpv2.PlanSessionUpdate) (publish, attention bool) {
