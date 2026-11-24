@@ -2,6 +2,17 @@ import { expect, test } from 'bun:test'
 import { agentSettingsDraft, agentSettingsDraftDirty } from './agentSettingsDraft'
 import { inputFromSettings } from './agentSettings'
 
+test('inputFromSettings keeps the negotiated ACP protocol version', () => {
+  const view = {
+    agents: ['claude'],
+    acp: { claude: { enabled: true, model: 'opus[1m]', protocol: 'v2' } },
+    acp_keys: {},
+  }
+  expect(inputFromSettings(view).acp.claude.protocol).toBe('v2')
+  const v1 = { ...view, acp: { claude: { enabled: true, model: '' } } }
+  expect('protocol' in inputFromSettings(v1).acp.claude).toBe(false)
+})
+
 test('live metadata refreshes preserve edits and reverting clears dirty state', () => {
   const server = {
     agents: ['muse'],

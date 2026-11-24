@@ -54,6 +54,7 @@ export function inputFromSettings(
             model_provider: current.model_provider?.trim() || '',
             model: current.model?.trim() || '',
             reasoning_effort: current.reasoning_effort ?? '',
+            ...(current.protocol ? { protocol: current.protocol } : {}),
             auth: {
               mode: current.auth?.mode || 'auto',
               path: current.auth?.path?.trim() || '',
