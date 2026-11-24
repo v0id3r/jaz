@@ -76,7 +76,7 @@ func NewRoutes(deps routeDeps) server.Routes {
 		{Pattern: "GET /v1/acp/agents/{agent}/models", Handler: modelcapabilitiesapi.NewAgentModelsHandler(deps.ACP)},
 		{Pattern: "GET " + m365copilot.OAuthCallbackPath, Handler: http.HandlerFunc(deps.MicrosoftCopilot.Callback)},
 		{Pattern: "POST /v1/filesystem/dirs", Handler: http.HandlerFunc(filesystemapi.CreateDirectory)},
-		{Pattern: "GET /v1/sessions", Handler: sessionsapi.NewListHandler(deps.Store)},
+		{Pattern: "GET /v1/sessions", Handler: sessionsapi.NewListHandler(deps.Store, deps.ACP.AwaitsAnswer)},
 		{Pattern: "PUT /v1/sessions/{session}/agent/config", Handler: http.HandlerFunc(deps.AgentSession.SetConfig)},
 		{Pattern: "PUT /v1/sessions/{session}/mcp/discovery", Handler: http.HandlerFunc(deps.AgentSession.SetMCPDiscovery)},
 		{Pattern: "POST /v1/sessions/{session}/agent/tasks/{task}/stop", Handler: http.HandlerFunc(deps.AgentSession.StopTask)},

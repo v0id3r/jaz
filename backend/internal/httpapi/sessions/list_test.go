@@ -53,7 +53,7 @@ func TestListSearchAndPagination(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			handler := NewListHandler(store)
+			handler := NewListHandler(store, nil)
 			fetch := func(query string, want ...string) listResponse {
 				t.Helper()
 				response := httptest.NewRecorder()
@@ -106,7 +106,7 @@ func TestListRejectsInvalidPagination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewListHandler(store)
+	handler := NewListHandler(store, nil)
 	for _, query := range []string{"limit=-1", "limit=0", "limit=201", "limit=oops", "limit=2&cursor=bad", "limit=2&cursor=1:", "limit=2&cursor=bad:id", "cursor=1:id"} {
 		t.Run(query, func(t *testing.T) {
 			response := httptest.NewRecorder()
@@ -135,7 +135,7 @@ func TestListSessionsUpdatedSince(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewListHandler(store)
+	handler := NewListHandler(store, nil)
 
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/sessions?updated_since="+cutoff.Format(time.RFC3339Nano), nil))
@@ -156,5 +156,42 @@ func TestListSessionsUpdatedSince(t *testing.T) {
 	handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/sessions?updated_since=not-a-time", nil))
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected bad request for malformed updated_since, got %d", res.Code)
+	}
+}
+
+func TestListMarksThreadsWaitingForAnAnswer(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slug := range []string{"asking", "working"} {
+		if _, err := store.CreateSession(storage.CreateSession{Slug: slug, Runtime: storage.RuntimeACP}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := NewListHandler(store, func(id string) bool {
+		session, err := store.LoadSession(id)
+		return err == nil && session.Slug == "asking"
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/sessions", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	var listed struct {
+		Sessions []struct {
+			Slug    string `json:"slug"`
+			Waiting bool   `json:"waiting"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	waiting := map[string]bool{}
+	for _, session := range listed.Sessions {
+		waiting[session.Slug] = session.Waiting
+	}
+	if !waiting["asking"] || waiting["working"] {
+		t.Fatalf("waiting flags = %v", waiting)
 	}
 }

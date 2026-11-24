@@ -35,3 +35,9 @@ test('background work does not mask running, failed or unread states', () => {
   expect(stateDot({ status: 'idle', unread: true })?.title).toBe('Unread reply')
   expect(stateDot({ status: 'idle' })).toBeNull()
 })
+
+test('a thread holding a question says it waits for the answer', () => {
+  expect(stateDot({ status: 'running', waiting: true })?.title).toBe('Waiting for your answer')
+  expect(stateDot({ status: 'idle', waiting: true })?.title).toBe('Waiting for your answer')
+  expect(stateDot({ status: 'error', waiting: true })?.title).toBe('Failed')
+})

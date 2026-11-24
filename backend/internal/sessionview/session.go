@@ -10,6 +10,9 @@ type Response struct {
 	storage.Session
 	Goal    *goal.PublicState `json:"goal,omitempty"`
 	Actions *Actions          `json:"actions,omitempty"`
+	// Waiting is set while the thread holds a question or plan decision for
+	// the person.
+	Waiting bool `json:"waiting,omitempty"`
 }
 
 type Actions struct {

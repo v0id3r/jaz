@@ -19,6 +19,9 @@ type sessionListStore interface {
 
 type ListHandler struct {
 	store sessionListStore
+	// waiting reports whether a thread holds a question or plan decision for
+	// the person; nil leaves every thread unmarked.
+	waiting func(string) bool
 }
 
 type listResponse struct {
@@ -26,8 +29,8 @@ type listResponse struct {
 	NextCursor string                 `json:"next_cursor,omitempty"`
 }
 
-func NewListHandler(store sessionListStore) *ListHandler {
-	return &ListHandler{store: store}
+func NewListHandler(store sessionListStore, waiting func(string) bool) *ListHandler {
+	return &ListHandler{store: store, waiting: waiting}
 }
 
 func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -95,5 +98,11 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		last := sessions[len(sessions)-1]
 		nextCursor = fmt.Sprintf("%d:%s", storage.SessionAttentionAt(last).UnixMilli(), last.ID)
 	}
-	httpapi.WriteJSON(w, http.StatusOK, listResponse{Sessions: sessionview.Responses(sessions), NextCursor: nextCursor})
+	views := sessionview.Responses(sessions)
+	if h.waiting != nil {
+		for i := range views {
+			views[i].Waiting = h.waiting(views[i].ID)
+		}
+	}
+	httpapi.WriteJSON(w, http.StatusOK, listResponse{Sessions: views, NextCursor: nextCursor})
 }

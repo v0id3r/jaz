@@ -81,6 +81,8 @@ export interface Session {
   unread?: boolean
   /** Set while the thread's agent holds a live background task. */
   background_work?: boolean
+  /** Set while the thread holds a question or plan decision for the user. */
+  waiting?: boolean
   runtime: 'acp'
   runtime_ref?: RuntimeRef
   model_provider?: string
