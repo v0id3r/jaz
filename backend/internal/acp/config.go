@@ -334,7 +334,13 @@ func BuiltinAgents() AgentCatalog {
 			ManagedAdapter:  "claude",
 			Model:           "opus[1m]",
 			ReasoningEffort: DefaultAgentReasoningEffort(AgentClaude),
-			Env:             map[string]string{"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"},
+			// With telemetry off, Claude Code loads its cached feature flags
+			// (idle tool-result clearing) only when this is in its process
+			// environment; settings.json env does not reach that check.
+			Env: map[string]string{
+				"CLAUDE_CODE_AUTO_COMPACT_WINDOW":              "400000",
+				"CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF": "1",
+			},
 		},
 		AgentKimi: {
 			ManagedAdapter:     "kimi",
