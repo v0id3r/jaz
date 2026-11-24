@@ -392,7 +392,7 @@ func (m *Manager) connectProtocol(ctx context.Context, name string, cfg AgentCon
 	state.initialized(initRaw)
 	methodID, missingAuth := autoAuthMethod(name, initRaw, env)
 	if methodID != "" {
-		if _, err := peer.Call(ctx, acpschema.AgentMethodAuthenticate, acpschema.AuthenticateRequest{MethodID: methodID}); err != nil {
+		if err := authenticateConn(ctx, peer, protocol, methodID); err != nil {
 			return nil, fmt.Errorf("authenticate acp agent: %w", withProcessStderr(err, stderr))
 		}
 	} else if len(missingAuth) > 0 {

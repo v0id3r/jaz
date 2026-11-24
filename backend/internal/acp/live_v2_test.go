@@ -4,15 +4,61 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/log"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/wins/jaz/backend/internal/mcpconfig"
 	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
 )
+
+// liveMCPStore is a mutable MCP server list for the live probe.
+type liveMCPStore struct {
+	mu      sync.Mutex
+	servers []mcpconfig.Server
+}
+
+func (s *liveMCPStore) ListMCPServers() ([]mcpconfig.Server, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]mcpconfig.Server(nil), s.servers...), nil
+}
+
+func (s *liveMCPStore) add(server mcpconfig.Server) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.servers = append(s.servers, server)
+}
+
+// liveMCPToolServer serves one echo tool over streamable HTTP, the shape of
+// the MCP servers Jaz hands to agents.
+func liveMCPToolServer(t *testing.T, tool string) string {
+	t.Helper()
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: tool, Version: "test"}, nil)
+	server.AddTool(&mcpsdk.Tool{
+		Name:        tool,
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
+	}, func(_ context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		var args struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(req.Params.Arguments, &args)
+		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "mcp-echo:" + args.Text}}}, nil
+	})
+	httpServer := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server {
+		return server
+	}, &mcpsdk.StreamableHTTPOptions{JSONResponse: true}))
+	t.Cleanup(httpServer.Close)
+	return httpServer.URL
+}
 
 // TestLiveV2Scenarios drives a real adapter (claude or codex) through the
 // pilot scenarios, at v2 when ACP_LIVE_V2=1 and at v1 otherwise. It needs
@@ -36,10 +82,13 @@ func TestLiveV2Scenarios(t *testing.T) {
 		t.Fatal(err)
 	}
 	cwd := t.TempDir()
+	mcpStore := &liveMCPStore{}
+	mcpStore.add(mcpconfig.Server{ID: "live_echo", Name: "live_echo", Transport: mcpconfig.TransportStreamableHTTP, URL: liveMCPToolServer(t, "live_echo"), Enabled: true})
 	manager := NewManager(store, Config{
 		Root:         root,
 		Workspace:    cwd,
 		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
+		MCPStore:     mcpStore,
 		Agents: map[string]AgentConfig{
 			agent: {
 				ProtocolV2:      v2,
@@ -89,6 +138,26 @@ func TestLiveV2Scenarios(t *testing.T) {
 	} else {
 		t.Logf("[%s] tool calls: %s", label, toolCallSummary(tool))
 	}
+	// A sandboxed attempt may fail with a readable error of its own; the
+	// check is that some terminal shows the command's output as text.
+	terminalSeen := false
+	for _, call := range tool.ToolCalls {
+		if call.Runtime.TerminalOutput == "" {
+			continue
+		}
+		t.Logf("[%s] terminal output of %s: %q", label, call.ID, truncateRunes(call.Runtime.TerminalOutput, 120))
+		if strings.Contains(call.Runtime.TerminalOutput, "jaz-live-check") {
+			terminalSeen = true
+		}
+	}
+	if !terminalSeen {
+		t.Errorf("[%s] no terminal output with the command's text", label)
+	}
+
+	mcpTurn := turn("mcp", "Call the live_echo MCP tool with text hello. Reply with exactly what the tool returned.")
+	if !strings.Contains(mcpTurn.Assistant, "mcp-echo:hello") {
+		t.Errorf("[%s] mcp turn did not return the tool's echo: %q", label, truncateRunes(mcpTurn.Assistant, 200))
+	}
 
 	if os.Getenv("ACP_LIVE_SKIP_STEER") == "" {
 		runSteerScenario(t, ctx, manager, spawned.SessionID, label)
@@ -119,10 +188,14 @@ func TestLiveV2Scenarios(t *testing.T) {
 		t.Errorf("[%s] subagent transcript entries after restart: %d, want %d", label, after, subagentEntries)
 	}
 
+	// A server added while Jaz was down must reach the resumed session: v2
+	// has no mid-session MCP refresh, so resume is where the new list lands.
+	mcpStore.add(mcpconfig.Server{ID: "live_echo_two", Name: "live_echo_two", Transport: mcpconfig.TransportStreamableHTTP, URL: liveMCPToolServer(t, "live_echo_two"), Enabled: true})
 	restarted := NewManager(store, Config{
 		Root:         root,
 		Workspace:    cwd,
 		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
+		MCPStore:     mcpStore,
 		Agents: map[string]AgentConfig{
 			agent: {
 				ProtocolV2:      v2,
@@ -142,6 +215,17 @@ func TestLiveV2Scenarios(t *testing.T) {
 		t.Fatalf("[%s] resume wait: %v", label, err)
 	}
 	t.Logf("[%s] resume: state=%s assistant=%s", label, resumed.State, truncateRunes(resumed.Assistant, 300))
+	if _, err := restarted.Send(ctx, SendRequest{Session: spawned.SessionID, Message: "Call the live_echo_two MCP tool with text again. Reply with exactly what the tool returned.", Completion: CompletionInline}); err != nil {
+		t.Fatalf("[%s] resumed mcp send: %v", label, err)
+	}
+	resumedMCP, err := restarted.Wait(ctx, WaitRequest{Session: spawned.SessionID, Timeout: 3 * time.Minute})
+	if err != nil {
+		t.Fatalf("[%s] resumed mcp wait: %v", label, err)
+	}
+	t.Logf("[%s] resumed mcp: state=%s assistant=%s", label, resumedMCP.State, truncateRunes(resumedMCP.Assistant, 200))
+	if !strings.Contains(resumedMCP.Assistant, "mcp-echo:again") {
+		t.Errorf("[%s] resumed session did not see the MCP server added while Jaz was down: %q", label, truncateRunes(resumedMCP.Assistant, 200))
+	}
 	if resumed.State != StateIdle {
 		t.Errorf("[%s] resumed turn state: %s (%s)", label, resumed.State, resumed.Error)
 	}

@@ -10,6 +10,9 @@ import (
 
 	"github.com/charmbracelet/log"
 	"github.com/wins/jaz/backend/internal/acp"
+	"github.com/wins/jaz/backend/internal/jaztools"
+	mcpruntime "github.com/wins/jaz/backend/internal/mcp"
+	mcpconfig "github.com/wins/jaz/backend/internal/mcpconfig"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
 )
@@ -104,6 +107,37 @@ func TestV2SimpleTurn(t *testing.T) {
 	if status.Model != "fake-small" {
 		t.Fatalf("model = %q", status.Model)
 	}
+}
+
+// A v2 agent that advertises HTTP MCP support gets the session's HTTP MCP
+// servers: the v2 initialize capabilities read as the v1 shape.
+func TestV2SessionGetsHTTPMCPServers(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := acp.NewManager(store, acp.Config{
+		Root:      t.TempDir(),
+		Workspace: t.TempDir(),
+		MCPStore: staticMCPStore{servers: []mcpconfig.Server{
+			mcpruntime.ProxyServerConfig("http://127.0.0.1:5299/mcp/proxy"),
+			jaztools.ServerConfig("http://127.0.0.1:5299/mcp/jaztools"),
+		}},
+		Agents: map[string]acp.AgentConfig{
+			"fake": {
+				ProtocolV2: true,
+				Command:    os.Args[0],
+				Args:       []string{"-test.run=TestFakeACPAgentV2Process"},
+				Env: map[string]string{
+					"JAZ_FAKE_ACP_V2_AGENT": "1",
+					"JAZ_FAKE_ACP_EXPECT_MCP": "1",
+				},
+			},
+		},
+	}, log.New(io.Discard))
+	defer manager.Close()
+	spawned := spawnV2Session(t, manager, "v2-mcp")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
 }
 
 // A configured model is set through session/set_config_option, whose v2
@@ -430,6 +464,47 @@ func TestV2SubagentTranscriptReachesParentVisibleSurface(t *testing.T) {
 			t.Fatalf("session %s transcript = %q", session, transcript)
 		}
 	}
+}
+
+// v2 terminal output is base64 on the wire, each chunk independently; the
+// job keeps decoded text, a split UTF-8 character reassembles, and an
+// invalid chunk is dropped without failing the turn.
+func TestV2TerminalOutputDecodesBase64(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-terminal-output")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "terminal-output please")
+	waitTurnV2(t, manager, spawned.SessionID)
+	// Chunk publishes are coalesced on a short timer; the stored tool call
+	// carries the full output once it lands.
+	var output string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := store.LoadSessionEvents(spawned.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if event.ACP == nil {
+				continue
+			}
+			for _, call := range event.ACP.ToolCalls {
+				if call.ID == "call-term-out" {
+					output = call.Runtime.TerminalOutput
+				}
+			}
+		}
+		if output == "out: café" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("terminal output = %q", output)
 }
 
 // A child session whose state the agent reports as unknown gives the panel

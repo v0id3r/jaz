@@ -242,6 +242,9 @@ func shouldCompleteClosedGrokPrompt(job *jobState, turn *activeTurn, err error) 
 }
 
 func (m *Manager) finishTurn(done chan struct{}, job *jobState) {
+	// Coalesced tool updates must reach the store before the turn's result
+	// can be discarded; the flush timer alone loses them to a fast turn end.
+	m.publishDeferredTools(job)
 	job.mu.Lock()
 	turn := job.turn
 	if turn == nil || turn.done != done {

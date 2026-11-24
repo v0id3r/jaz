@@ -2,6 +2,7 @@ package acp_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"strings"
@@ -105,9 +106,20 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			answer(*msg.ID, map[string]any{
 				"protocolVersion": 2,
 				"info":            map[string]any{"name": "fake-v2-agent", "version": "test"},
-				"capabilities":    map[string]any{"session": map[string]any{}},
+				"capabilities": map[string]any{"session": map[string]any{
+					"mcp": map[string]any{"http": map[string]any{}},
+				}},
 			})
 		case "session/new", "session/resume":
+			var req struct {
+				MCPServers []json.RawMessage `json:"mcpServers"`
+			}
+			_ = json.Unmarshal(msg.Params, &req)
+			if err := validateFakeMCPServers(req.MCPServers); err != nil {
+				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams(err.Error(), nil))
+				_ = conn.Send(ctx, resp)
+				continue
+			}
 			result := map[string]any{"configOptions": configOptions}
 			if msg.Method == "session/new" {
 				result["sessionId"] = sessionID
@@ -234,6 +246,37 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 					"capabilities": map[string]any{"cancel": map[string]any{}},
 				})
 				text("a1", "waiting on the command")
+			case strings.Contains(message, "terminal-output"):
+				state(map[string]any{"state": "running", "background": []any{}})
+				notify(map[string]any{
+					"sessionUpdate": "tool_call_update", "toolCallId": "call-term-out",
+					"title": "printf", "kind": "execute", "status": "in_progress",
+					"content": []any{map[string]any{"type": "terminal", "terminalId": "term-out"}},
+				})
+				notify(map[string]any{
+					"sessionUpdate": "terminal_update", "terminalId": "term-out",
+					"command": "printf", "output": map[string]any{"data": base64.StdEncoding.EncodeToString([]byte("out: "))},
+				})
+				notify(map[string]any{
+					"sessionUpdate": "terminal_output_chunk", "terminalId": "term-out",
+					"data": base64.StdEncoding.EncodeToString([]byte("caf")),
+				})
+				// A UTF-8 character split across chunks, and an invalid chunk
+				// that must not fail the turn.
+				notify(map[string]any{
+					"sessionUpdate": "terminal_output_chunk", "terminalId": "term-out",
+					"data": base64.StdEncoding.EncodeToString([]byte{0xC3}),
+				})
+				notify(map[string]any{
+					"sessionUpdate": "terminal_output_chunk", "terminalId": "term-out",
+					"data": "!!!not-base64!!!",
+				})
+				notify(map[string]any{
+					"sessionUpdate": "terminal_output_chunk", "terminalId": "term-out",
+					"data": base64.StdEncoding.EncodeToString([]byte{0xA9}),
+				})
+				text("a1", "printed")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
 			case strings.Contains(message, "terminal-background"):
 				notify(map[string]any{
 					"sessionUpdate": "terminal_update", "terminalId": "term-1",
