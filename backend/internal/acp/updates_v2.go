@@ -224,6 +224,7 @@ func (j *jobState) noteStreamedMessageV2Locked(messageID string) {
 
 func (m *Manager) recordToolV2Locked(job *jobState, update acpv2.ToolCallUpdate, now time.Time) *sessionevents.ACPToolCall {
 	src := toolUpdateSnapshotV2(update)
+	src.SubagentID = toolCallSubagentID(job.ACPAgent, update.Meta)
 	if update.Capabilities != nil && update.Capabilities.Cancel != nil {
 		if job.cancellableToolsV2 == nil {
 			job.cancellableToolsV2 = map[string]bool{}

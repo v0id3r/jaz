@@ -27,6 +27,7 @@ import {
 } from './toolPresentation'
 import { EditDiffBlock, hasInlineDiff } from './EditDiffBlock'
 import { ToolCancelButton } from './ToolCancel'
+import { SubagentTranscriptButton } from './SubagentLink'
 import { hasToolRawDetails, ToolRawDetails } from './ToolRawDetails'
 import { normalized } from './TranscriptUtils'
 
@@ -155,6 +156,7 @@ export const ToolCallDetail = memo(function ToolCallDetail({
           {running ? <LoaderCircle className="size-3 shrink-0 animate-spin text-running" aria-hidden /> : null}
         </ToolActivityReveal>
         </button>
+        <SubagentTranscriptButton call={call} />
         <ToolCancelButton call={call} active={active} />
       </div>
       <Collapse open={open && expandable} className="w-full">

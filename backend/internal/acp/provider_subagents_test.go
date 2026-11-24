@@ -316,3 +316,82 @@ func TestProviderSubagentMetadataDoesNotConsumeMessageChunk(t *testing.T) {
 		t.Fatalf("assistant = %q", got)
 	}
 }
+
+// A tool call whose metadata links it to a subagent carries that link on its
+// own record, so the call's card can open the subagent's transcript.
+func TestToolCallLinkedToItsSubagent(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.CreateSession(storage.CreateSession{Slug: "codex-subagent-link", Runtime: storage.RuntimeACP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := sessionevents.New()
+	manager := NewManager(store, Config{}, nil)
+	manager.Events = events
+	manager.jobsByID[session.ID] = &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPAgent: AgentCodex, ACPSession: "acp-session"}}
+	manager.jobsByACP["acp-session"] = manager.jobsByID[session.ID]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sub := events.Subscribe(ctx, session.ID)
+
+	_, rpcErr := manager.handleJSONRPC(ctx, jsonrpc.Request{
+		Method: acpschema.ClientMethodSessionUpdate,
+		Params: mustJSON(t, map[string]any{
+			"sessionId": "acp-session",
+			"update": map[string]any{
+				"sessionUpdate": "tool_call", "toolCallId": "spawn-1",
+				"title": "spawnAgent", "status": "in_progress",
+				"_meta": map[string]any{
+					codexMetaKey: map[string]any{
+						"providerSubagents": []any{map[string]any{
+							"provider": "codex", "id": "thread-1", "status": "running",
+						}},
+					},
+				},
+			},
+		}),
+	})
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+
+	linked := false
+	for !linked {
+		select {
+		case event := <-sub:
+			if event.ACP == nil {
+				continue
+			}
+			for _, call := range event.ACP.ToolCalls {
+				if call.ID == "spawn-1" {
+					linked = call.SubagentID == "thread-1"
+					if !linked {
+						t.Fatalf("tool call missed its subagent link: %#v", call)
+					}
+				}
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+}
+
+func TestToolCallWithoutSubagentMetaStaysUnlinked(t *testing.T) {
+	update, err := acpschema.DecodeSessionUpdate(json.RawMessage(`{
+		"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read file","status":"in_progress"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, ok := update.(acpschema.ToolCallSessionUpdate)
+	if !ok {
+		t.Fatalf("update = %#v", update)
+	}
+	if id := toolCallSubagentID(AgentCodex, event.Meta); id != "" {
+		t.Fatalf("unlinked call got subagent %q", id)
+	}
+}

@@ -196,9 +196,13 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 		job.appendThoughtLocked(thoughtChunk)
 	case acpschema.ToolCallSessionUpdate:
 		job.endReplyLocked()
-		recordTool(toolUpdateSnapshot(acpschema.ToolCallUpdate(event.ToolCall)), true)
+		src := toolUpdateSnapshot(acpschema.ToolCallUpdate(event.ToolCall))
+		src.SubagentID = toolCallSubagentID(job.ACPAgent, event.Meta)
+		recordTool(src, true)
 	case acpschema.ToolCallUpdateSessionUpdate:
-		recordTool(toolUpdateSnapshot(event.ToolCallUpdate), false)
+		src := toolUpdateSnapshot(event.ToolCallUpdate)
+		src.SubagentID = toolCallSubagentID(job.ACPAgent, event.Meta)
+		recordTool(src, false)
 	case acpschema.PlanSessionUpdate:
 		plan := make([]sessionevents.PlanEntry, 0, len(event.Entries))
 		for _, entry := range event.Entries {

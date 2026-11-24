@@ -30,6 +30,7 @@ import { SidePanelDrawer } from '@/components/session/SidePanelDrawer'
 import { useSidePanelState } from '@/components/session/SidePanelState'
 import { ThinkingBlock } from '@/components/session/ThinkingBlock'
 import { ToolCancelContext } from '@/components/session/ToolCancel'
+import { SubagentTranscriptContext, type SubagentTranscriptAccess } from '@/components/session/SubagentLink'
 import { ThreadFindBar } from '@/components/session/ThreadFindBar'
 import { ThreadOutline } from '@/components/session/ThreadOutline'
 import { ToolCalls } from '@/components/session/ToolCalls'
@@ -476,6 +477,10 @@ export function ThreadView({
     sideChatEvents,
     subagentEvents,
   } = derived
+  const subagentTranscriptAccess = useMemo<SubagentTranscriptAccess>(() => ({
+    open: sidePanel.openSubagent,
+    transcripts: new Set(subagentEvents.flatMap((event) => event.subagent_message?.id ? [event.subagent_message.id] : [])),
+  }), [sidePanel.openSubagent, subagentEvents])
   const showPlanDecision = Boolean(
     latestPlanDecisionSurface?.awaitingApproval &&
       planDecisionApproval &&
@@ -553,6 +558,7 @@ export function ThreadView({
     <MCPAppThreadContext value={appThread}>
     <MarkdownArtifactContext value={markdownArtifacts}>
     <ToolCancelContext value={cancelTool}>
+    <SubagentTranscriptContext value={subagentTranscriptAccess}>
     <FileReaderLinkProvider sessionId={session.id} documentPath={session.runtime_ref?.cwd ? `${session.runtime_ref.cwd}/` : undefined} onOpen={sidePanel.openFile}>
       <PreviewLinkProvider onOpen={sidePanel.openPreview}>
         {/* Phone: the closed side panel slides off to the right (translateX 100%);
@@ -778,6 +784,7 @@ export function ThreadView({
         </FileDropScope>
       </PreviewLinkProvider>
     </FileReaderLinkProvider>
+    </SubagentTranscriptContext>
     </ToolCancelContext>
     </MarkdownArtifactContext>
     </MCPAppThreadContext>

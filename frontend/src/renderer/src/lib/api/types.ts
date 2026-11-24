@@ -576,6 +576,8 @@ export interface ACPToolCall {
   tool_name?: string
   /** The agent offered to cancel this call on its own (ACP v2), without cancelling the turn. */
   cancellable?: boolean
+  /** The provider subagent the agent linked this call to. */
+  subagent_id?: string
   content?: ACPToolContent[]
   locations?: ACPToolLocation[]
   raw_input?: unknown

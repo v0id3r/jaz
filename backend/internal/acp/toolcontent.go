@@ -47,6 +47,9 @@ func mergeToolCall(dst *sessionevents.ACPToolCall, src sessionevents.ACPToolCall
 		dst.ToolName = src.ToolName
 	}
 	dst.Cancellable = dst.Cancellable || src.Cancellable
+	if src.SubagentID != "" {
+		dst.SubagentID = src.SubagentID
+	}
 	if len(src.Content) > 0 {
 		dst.Content = src.Content
 	}

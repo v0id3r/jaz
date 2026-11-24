@@ -93,6 +93,16 @@ func (m *Manager) openProviderSubagents(id string) ([]sessionevents.ProviderSuba
 	return open, nil
 }
 
+// toolCallSubagentID names the subagent a tool call's own metadata links it
+// to, so the call's card can open that subagent's transcript. Agents that
+// mark no link leave the call unlinked.
+func toolCallSubagentID(agent string, meta map[string]any) string {
+	if subagents := providerSubagentsFromMeta(agent, meta, providerSubagentHint{}); len(subagents) > 0 {
+		return subagents[0].ID
+	}
+	return ""
+}
+
 func providerSubagentsFromMeta(agent string, meta map[string]any, hint providerSubagentHint) []sessionevents.ProviderSubagentEvent {
 	if meta == nil {
 		return nil
