@@ -46,6 +46,91 @@ func v2InitializeRequest() acpv2.InitializeRequest {
 	}
 }
 
+// normalizeInitializeV2 rewrites a v2 initialize response into the v1 shape
+// the shared capability readers use, the way normalizeConfigOptionsV2 does
+// for config options: MCP transports become booleans, the session baseline
+// becomes resume support, and auth method ids keep their v1 key.
+func normalizeInitializeV2(raw json.RawMessage) json.RawMessage {
+	var resp struct {
+		ProtocolVersion int             `json:"protocolVersion"`
+		Info            json.RawMessage `json:"info"`
+		Capabilities    *struct {
+			Session *struct {
+				MCP *struct {
+					HTTP json.RawMessage `json:"http"`
+					SSE  json.RawMessage `json:"sse"`
+				} `json:"mcp"`
+				Delete json.RawMessage `json:"delete"`
+			} `json:"session"`
+			Meta map[string]any `json:"_meta"`
+		} `json:"capabilities"`
+		AuthMethods []struct {
+			MethodID string `json:"methodId"`
+			Name     string `json:"name"`
+		} `json:"authMethods"`
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if json.Unmarshal(raw, &resp) != nil || resp.Capabilities == nil {
+		return raw
+	}
+	caps := map[string]any{}
+	if sessions := resp.Capabilities.Session; sessions != nil {
+		if sessions.MCP != nil {
+			mcp := map[string]any{}
+			if len(sessions.MCP.HTTP) > 0 && string(sessions.MCP.HTTP) != "null" {
+				mcp["http"] = true
+			}
+			if len(sessions.MCP.SSE) > 0 && string(sessions.MCP.SSE) != "null" {
+				mcp["sse"] = true
+			}
+			if len(mcp) > 0 {
+				caps["mcpCapabilities"] = mcp
+			}
+		}
+		// The v2 session baseline includes session/resume.
+		caps["sessionCapabilities"] = map[string]any{"resume": map[string]any{}}
+		if len(sessions.Delete) > 0 && string(sessions.Delete) != "null" {
+			caps["sessionCapabilities"].(map[string]any)["delete"] = map[string]any{}
+		}
+	}
+	if resp.Capabilities.Meta != nil {
+		caps["_meta"] = resp.Capabilities.Meta
+	}
+	out := map[string]any{
+		"protocolVersion":   resp.ProtocolVersion,
+		"agentCapabilities": caps,
+	}
+	if len(resp.Info) > 0 {
+		out["agentInfo"] = resp.Info
+	}
+	if len(resp.Meta) > 0 {
+		out["_meta"] = resp.Meta
+	}
+	if len(resp.AuthMethods) > 0 {
+		methods := make([]map[string]any, 0, len(resp.AuthMethods))
+		for _, method := range resp.AuthMethods {
+			methods = append(methods, map[string]any{"id": method.MethodID, "name": method.Name})
+		}
+		out["authMethods"] = methods
+	}
+	normalized, err := json.Marshal(out)
+	if err != nil {
+		return raw
+	}
+	return normalized
+}
+
+// authenticateConn signs the connection in with the negotiated version's
+// method: v1 authenticate, v2 auth/login.
+func authenticateConn(ctx context.Context, peer *jsonrpc.Peer, protocol int, methodID acpschema.AuthMethodID) error {
+	if protocol == protocolV2 {
+		_, err := peer.Call(ctx, acpv2.AgentMethodAuthLogin, acpv2.LoginAuthRequest{MethodID: acpv2.AuthMethodID(methodID)})
+		return err
+	}
+	_, err := peer.Call(ctx, acpschema.AgentMethodAuthenticate, acpschema.AuthenticateRequest{MethodID: methodID})
+	return err
+}
+
 // initializeConn negotiates the connection's protocol version. With v2
 // enabled it asks for version 2; an agent that answers another version or
 // rejects the request sends the caller back to start over at v1, since the
@@ -56,7 +141,7 @@ func (m *Manager) initializeConn(ctx context.Context, peer *jsonrpc.Peer, name s
 		if err == nil {
 			var resp acpv2.InitializeResponse
 			if json.Unmarshal(raw, &resp) == nil && resp.ProtocolVersion == acpv2.ProtocolVersion(protocolV2) {
-				return raw, protocolV2, nil
+				return normalizeInitializeV2(raw), protocolV2, nil
 			}
 			return nil, 0, errProtocolV2Rejected
 		}

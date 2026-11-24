@@ -105,9 +105,20 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			answer(*msg.ID, map[string]any{
 				"protocolVersion": 2,
 				"info":            map[string]any{"name": "fake-v2-agent", "version": "test"},
-				"capabilities":    map[string]any{"session": map[string]any{}},
+				"capabilities": map[string]any{"session": map[string]any{
+					"mcp": map[string]any{"http": map[string]any{}},
+				}},
 			})
 		case "session/new", "session/resume":
+			var req struct {
+				MCPServers []json.RawMessage `json:"mcpServers"`
+			}
+			_ = json.Unmarshal(msg.Params, &req)
+			if err := validateFakeMCPServers(req.MCPServers); err != nil {
+				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams(err.Error(), nil))
+				_ = conn.Send(ctx, resp)
+				continue
+			}
 			result := map[string]any{"configOptions": configOptions}
 			if msg.Method == "session/new" {
 				result["sessionId"] = sessionID

@@ -10,6 +10,9 @@ import (
 
 	"github.com/charmbracelet/log"
 	"github.com/wins/jaz/backend/internal/acp"
+	"github.com/wins/jaz/backend/internal/jaztools"
+	mcpruntime "github.com/wins/jaz/backend/internal/mcp"
+	mcpconfig "github.com/wins/jaz/backend/internal/mcpconfig"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	jsonstore "github.com/wins/jaz/backend/internal/storage/json"
 )
@@ -104,6 +107,37 @@ func TestV2SimpleTurn(t *testing.T) {
 	if status.Model != "fake-small" {
 		t.Fatalf("model = %q", status.Model)
 	}
+}
+
+// A v2 agent that advertises HTTP MCP support gets the session's HTTP MCP
+// servers: the v2 initialize capabilities read as the v1 shape.
+func TestV2SessionGetsHTTPMCPServers(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := acp.NewManager(store, acp.Config{
+		Root:      t.TempDir(),
+		Workspace: t.TempDir(),
+		MCPStore: staticMCPStore{servers: []mcpconfig.Server{
+			mcpruntime.ProxyServerConfig("http://127.0.0.1:5299/mcp/proxy"),
+			jaztools.ServerConfig("http://127.0.0.1:5299/mcp/jaztools"),
+		}},
+		Agents: map[string]acp.AgentConfig{
+			"fake": {
+				ProtocolV2: true,
+				Command:    os.Args[0],
+				Args:       []string{"-test.run=TestFakeACPAgentV2Process"},
+				Env: map[string]string{
+					"JAZ_FAKE_ACP_V2_AGENT": "1",
+					"JAZ_FAKE_ACP_EXPECT_MCP": "1",
+				},
+			},
+		},
+	}, log.New(io.Discard))
+	defer manager.Close()
+	spawned := spawnV2Session(t, manager, "v2-mcp")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
 }
 
 // A configured model is set through session/set_config_option, whose v2
