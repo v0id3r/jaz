@@ -122,6 +122,17 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				}
 			}
 			answer(*msg.ID, map[string]any{"configOptions": configOptions})
+		case "terminal/cancel":
+			var req struct {
+				TerminalID string `json:"terminalId"`
+			}
+			_ = json.Unmarshal(msg.Params, &req)
+			answer(*msg.ID, map[string]any{})
+			notify(map[string]any{
+				"sessionUpdate": "terminal_update", "terminalId": req.TerminalID,
+				"exitStatus": map[string]any{"exitCode": nil, "signal": nil},
+			})
+			state(map[string]any{"state": "idle", "background": []any{}})
 		case "session/prompt":
 			prompts++
 			var req struct {
@@ -167,6 +178,24 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				state(map[string]any{"state": "running", "background": []any{}})
 				text("a2", "build finished")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "terminal-background"):
+				notify(map[string]any{
+					"sessionUpdate": "terminal_update", "terminalId": "term-1",
+					"command": "sleep 60", "capabilities": map[string]any{"cancel": map[string]any{}},
+				})
+				state(map[string]any{"state": "running", "background": []any{
+					map[string]any{"type": "terminal", "terminalId": "term-1"},
+				}})
+				notify(map[string]any{
+					"sessionUpdate": "tool_call_update", "toolCallId": "call-term",
+					"title": "sleep 60", "kind": "execute", "status": "in_progress",
+					"content":      []any{map[string]any{"type": "terminal", "terminalId": "term-1"}},
+					"capabilities": map[string]any{"cancel": map[string]any{}},
+				})
+				text("a1", "detached")
+				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{
+					map[string]any{"type": "terminal", "terminalId": "term-1"},
+				}})
 			case strings.Contains(message, "background"):
 				state(map[string]any{"state": "running", "background": []any{
 					map[string]any{"type": "tool_call", "toolCallId": "bg-1"},

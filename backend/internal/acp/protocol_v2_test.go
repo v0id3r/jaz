@@ -184,6 +184,36 @@ func TestV2BackgroundWork(t *testing.T) {
 	})
 }
 
+// A terminal linked to a turn's tool call must survive the turn's result
+// being discarded: the agent reports the stop after the turn has ended.
+func TestV2BackgroundTerminalStopAfterTurn(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-terminal-stop")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "terminal-background watch")
+	job := waitTurnV2(t, manager, spawned.SessionID)
+	if job.State != acp.StateIdle {
+		t.Fatalf("turn ended %s", job.State)
+	}
+	tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+	if len(tasks) != 1 || tasks[0].ID != "term-1" || tasks[0].Type != "terminal" || !tasks[0].CanStop {
+		t.Fatalf("background tasks = %#v", tasks)
+	}
+
+	if err := manager.StopBackgroundTask(context.Background(), spawned.SessionID, "term-1"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	waitForV2Job(t, 10*time.Second, func() bool {
+		tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+		return len(tasks) == 1 && tasks[0].State == "completed"
+	})
+}
+
 func TestV2SubagentTranscriptSeparate(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {

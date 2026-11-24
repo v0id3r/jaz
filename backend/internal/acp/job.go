@@ -463,6 +463,7 @@ func (j *jobState) discardTurnResult() {
 	j.endReplyLocked()
 	j.toolByID = nil
 	j.pendingToolUpdateByID = nil
+	j.terminalTool = nil
 	j.turnResultDiscarded = true
 }
 
