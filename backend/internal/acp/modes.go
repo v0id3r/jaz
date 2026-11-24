@@ -91,7 +91,7 @@ func (m *Manager) applyTurnConfig(ctx context.Context, job *jobState, configID, 
 	if peer == nil {
 		return fmt.Errorf("acp peer is not active")
 	}
-	raw, err := setSessionConfigOption(ctx, peer, acpschema.SessionID(acpSessionID), configID, value)
+	raw, err := setSessionConfigOption(ctx, peer, job.protocol, acpschema.SessionID(acpSessionID), configID, value)
 	if err != nil {
 		return fmt.Errorf("set acp session %q config to %q: %w", configID, value, err)
 	}

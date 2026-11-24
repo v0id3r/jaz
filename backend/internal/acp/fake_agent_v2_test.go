@@ -29,8 +29,11 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 	configOptions := []any{
 		map[string]any{
 			"type": "select", "configId": "model", "name": "Model", "category": "model",
-			"currentValue": "fake-large",
-			"options":      []any{map[string]any{"value": "fake-large", "name": "Fake Large"}},
+			"currentValue": "fake-small",
+			"options": []any{
+				map[string]any{"value": "fake-small", "name": "Fake Small"},
+				map[string]any{"value": "fake-large", "name": "Fake Large"},
+			},
 		},
 		map[string]any{
 			"type": "select", "configId": "mode", "name": "Mode", "category": "mode",
@@ -112,9 +115,22 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 		case "session/set_config_option":
 			var req struct {
 				ConfigID string `json:"configId"`
+				Type     string `json:"type"`
 				Value    string `json:"value"`
 			}
 			_ = json.Unmarshal(msg.Params, &req)
+			// Like the real v2 adapters: a value without its type tag is
+			// invalid params.
+			if req.Type != "id" {
+				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("config option value needs its type tag", nil))
+				_ = conn.Send(ctx, resp)
+				continue
+			}
+			if req.Value == "fake-rejected" {
+				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("Invalid value for config option model", json.RawMessage(`{"detail":"model is not available on this account"}`)))
+				_ = conn.Send(ctx, resp)
+				continue
+			}
 			for _, raw := range configOptions {
 				option := raw.(map[string]any)
 				if option["configId"] == req.ConfigID {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
+	acpv2 "github.com/gluonfield/acp-transport/acp/v2"
 	"github.com/gluonfield/acp-transport/jsonrpc"
 )
 
@@ -341,7 +342,7 @@ type sessionConfigOptionsState struct {
 // session/new; a model the agent does not offer gives way to the agent's
 // default. It returns the agent's raw response: it carries refreshed config
 // options (e.g. the effort levels valid for the newly selected model).
-func (m *Manager) setConfiguredSessionModel(ctx context.Context, peer *jsonrpc.Peer, agentName string, session acpSessionInfo, rawModel string, requested bool, state sessionModelState) (json.RawMessage, error) {
+func (m *Manager) setConfiguredSessionModel(ctx context.Context, peer *jsonrpc.Peer, protocol int, agentName string, session acpSessionInfo, rawModel string, requested bool, state sessionModelState) (json.RawMessage, error) {
 	policy := agentPolicyForAgent(agentName)
 	configured := configuredSessionModel(rawModel)
 	model, err := policy.sessionModelToSend(agentName, configured, state, requested)
@@ -376,7 +377,7 @@ func (m *Manager) setConfiguredSessionModel(ctx context.Context, peer *jsonrpc.P
 	}
 	sessionID := session.response.SessionID
 	if policy.usesModelConfigOption() {
-		raw, err := setSessionConfigOption(ctx, peer, sessionID, policy.modelConfigID, model)
+		raw, err := setSessionConfigOption(ctx, peer, protocol, sessionID, policy.modelConfigID, model)
 		if err == nil {
 			return raw, nil
 		}
@@ -400,7 +401,17 @@ func (m *Manager) setConfiguredSessionModel(ctx context.Context, peer *jsonrpc.P
 	return nil, fmt.Errorf("set acp agent %q model %q: %w", agentName, model, err)
 }
 
-func setSessionConfigOption(ctx context.Context, peer *jsonrpc.Peer, sessionID acpschema.SessionID, configID, value string) (json.RawMessage, error) {
+func setSessionConfigOption(ctx context.Context, peer *jsonrpc.Peer, protocol int, sessionID acpschema.SessionID, configID, value string) (json.RawMessage, error) {
+	if protocol == protocolV2 {
+		// v2 tags the value with its type; an untagged v1 value is invalid params.
+		raw, err := peer.Call(ctx, acpv2.AgentMethodSessionSetConfigOption, acpv2.SetSessionConfigOptionRequest{
+			SessionID: acpv2.SessionID(sessionID),
+			ConfigID:  acpv2.SessionConfigID(configID),
+			Type:      "id",
+			Value:     acpv2.EncodeSessionConfigValue(acpv2.SessionConfigValueID(value)),
+		})
+		return normalizeConfigOptionsV2(raw), err
+	}
 	raw, err := peer.Call(ctx, acpschema.AgentMethodSessionSetConfigOption, acpschema.SetSessionConfigOptionRequest{
 		SessionID: sessionID,
 		ConfigID:  acpschema.SessionConfigID(configID),
@@ -409,7 +420,7 @@ func setSessionConfigOption(ctx context.Context, peer *jsonrpc.Peer, sessionID a
 	return normalizeConfigOptionsV2(raw), err
 }
 
-func (m *Manager) setConfiguredReasoningEffort(ctx context.Context, peer *jsonrpc.Peer, agentName string, sessionID acpschema.SessionID, effort, configID string) (json.RawMessage, error) {
+func (m *Manager) setConfiguredReasoningEffort(ctx context.Context, peer *jsonrpc.Peer, protocol int, agentName string, sessionID acpschema.SessionID, effort, configID string) (json.RawMessage, error) {
 	if effort == "" {
 		return nil, nil
 	}
@@ -423,7 +434,7 @@ func (m *Manager) setConfiguredReasoningEffort(ctx context.Context, peer *jsonrp
 	if strings.TrimSpace(configID) == "" {
 		return nil, nil
 	}
-	raw, err := setSessionConfigOption(ctx, peer, sessionID, configID, effort)
+	raw, err := setSessionConfigOption(ctx, peer, protocol, sessionID, configID, effort)
 	if err == nil {
 		return raw, nil
 	}
@@ -452,7 +463,7 @@ func (m *Manager) configuredModeState(
 	if policy.providerInLaunch && !agentOwnsModelMetadata(agentName, cfg.ModelProvider) {
 		advertised = sessionModelState{}
 	}
-	modelRaw, err := m.setConfiguredSessionModel(ctx, peer, agentName, session, model, cfg.ModelRequested, advertised)
+	modelRaw, err := m.setConfiguredSessionModel(ctx, peer, ac.protocol, agentName, session, model, cfg.ModelRequested, advertised)
 	if err != nil {
 		return ModeState{}, err
 	}
@@ -468,6 +479,7 @@ func (m *Manager) configuredModeState(
 		effortRaw, err := m.applyConfiguredReasoningEffort(
 			ctx,
 			peer,
+			ac.protocol,
 			agentName,
 			session.response.SessionID,
 			model,
@@ -495,6 +507,7 @@ func (m *Manager) configuredModeState(
 func (m *Manager) applyConfiguredReasoningEffort(
 	ctx context.Context,
 	peer *jsonrpc.Peer,
+	protocol int,
 	agentName string,
 	sessionID acpschema.SessionID,
 	model string,
@@ -520,7 +533,7 @@ func (m *Manager) applyConfiguredReasoningEffort(
 			configOptionValuesForError(options.effortOptions),
 		)
 	}
-	return m.setConfiguredReasoningEffort(ctx, peer, agentName, sessionID, effort, options.effortConfigID)
+	return m.setConfiguredReasoningEffort(ctx, peer, protocol, agentName, sessionID, effort, options.effortConfigID)
 }
 
 // parseEffortOptions extracts the advertised reasoning effort values from a

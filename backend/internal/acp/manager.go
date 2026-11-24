@@ -566,11 +566,23 @@ func (m *Manager) createSession(ctx context.Context, req SpawnRequest, queue []s
 // abandonSession records why a session never started and archives it, so a
 // request that failed leaves no thread behind in the sidebar.
 func (m *Manager) abandonSession(session storage.Session, err error) error {
+	err = withRPCErrorData(err)
 	session.Status = storage.StatusError
 	session.Error = err.Error()
 	session.Archived = true
 	_ = m.store.SaveSession(session)
 	return err
+}
+
+// withRPCErrorData adds a json-rpc error's data to the error text: agents
+// put the failing detail there, and the bare message ("Invalid params")
+// says nothing about what was rejected.
+func withRPCErrorData(err error) error {
+	var rpcErr *jsonrpc.Error
+	if !errors.As(err, &rpcErr) || len(rpcErr.Data) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w (data: %s)", err, rpcErr.Data)
 }
 
 func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResult, error) {

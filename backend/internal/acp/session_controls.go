@@ -184,7 +184,7 @@ func (m *Manager) setSessionConfig(ctx context.Context, job *jobState, id, value
 	if peer == nil {
 		return fmt.Errorf("agent connection is unavailable")
 	}
-	raw, err := setSessionConfigOption(ctx, peer, acpschema.SessionID(job.ACPSession), id, value)
+	raw, err := setSessionConfigOption(ctx, peer, job.protocol, acpschema.SessionID(job.ACPSession), id, value)
 	if err != nil {
 		return err
 	}

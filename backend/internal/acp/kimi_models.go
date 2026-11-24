@@ -87,7 +87,7 @@ func (m *Manager) kimiModels(ctx context.Context, cfg AgentConfig) (catalog Agen
 		}
 		for _, choice := range option.Models {
 			if state.currentModel != choice.Value {
-				raw, err = setSessionConfigOption(ctx, ac.peer, session.SessionID, option.ID, choice.Value)
+				raw, err = setSessionConfigOption(ctx, ac.peer, ac.protocol, session.SessionID, option.ID, choice.Value)
 				if err != nil {
 					return catalog, err
 				}
@@ -100,7 +100,7 @@ func (m *Manager) kimiModels(ctx context.Context, cfg AgentConfig) (catalog Agen
 				Reasoning: ReasoningCapabilities{Status: modelcatalog.ReasoningUnavailable, Scope: ReasoningScopeAgent}}
 			if len(state.effortOptions) > 0 {
 				// Kimi can append the previous model's current effort until a new one is selected.
-				raw, err = setSessionConfigOption(ctx, ac.peer, session.SessionID, state.effortConfigID, state.effortOptions[0])
+				raw, err = setSessionConfigOption(ctx, ac.peer, ac.protocol, session.SessionID, state.effortConfigID, state.effortOptions[0])
 				if err != nil {
 					return catalog, err
 				}

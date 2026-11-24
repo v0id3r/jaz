@@ -101,8 +101,84 @@ func TestV2SimpleTurn(t *testing.T) {
 	if status.Modes.PlanModeID != "plan" {
 		t.Fatalf("plan mode from mode config option not detected: %#v", status.Modes)
 	}
+	if status.Model != "fake-small" {
+		t.Fatalf("model = %q", status.Model)
+	}
+}
+
+// A configured model is set through session/set_config_option, whose v2
+// value carries its type tag; an untagged value is invalid params.
+func TestV2ConfiguredModelSetsConfigOption(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := acp.NewManager(store, acp.Config{
+		Root:         t.TempDir(),
+		Workspace:    t.TempDir(),
+		SystemPrompt: staticPrompt("skill prompt"),
+		Agents: map[string]acp.AgentConfig{
+			// The claude policy sends the model through session/set_config_option.
+			"claude": {
+				ProtocolV2: true,
+				Model:      "fake-large",
+				Command:    os.Args[0],
+				Args:       []string{"-test.run=TestFakeACPAgentV2Process"},
+				Env:        fakeV2ManagerConfig(t, nil),
+			},
+		},
+	}, log.New(io.Discard))
+	defer manager.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	spawned, err := manager.Spawn(ctx, acp.SpawnRequest{ACPAgent: "claude", Slug: "v2-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The strict fake already refused an untagged value at spawn; the
+	// mid-session path goes through the same request.
+	if err := manager.SetSessionConfig(ctx, spawned.SessionID, "model", "fake-large"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Status(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if status.Model != "fake-large" {
 		t.Fatalf("model = %q", status.Model)
+	}
+}
+
+// A session-start json-rpc failure keeps the agent's error data, so the
+// recorded reason says what was rejected, not only "Invalid params".
+func TestV2SessionStartErrorKeepsRPCData(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := acp.NewManager(store, acp.Config{
+		Root:         t.TempDir(),
+		Workspace:    t.TempDir(),
+		SystemPrompt: staticPrompt("skill prompt"),
+		Agents: map[string]acp.AgentConfig{
+			"claude": {
+				ProtocolV2: true,
+				Model:      "fake-rejected",
+				Command:    os.Args[0],
+				Args:       []string{"-test.run=TestFakeACPAgentV2Process"},
+				Env:        fakeV2ManagerConfig(t, nil),
+			},
+		},
+	}, log.New(io.Discard))
+	defer manager.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = manager.Spawn(ctx, acp.SpawnRequest{ACPAgent: "claude", Slug: "v2-rejected"})
+	if err == nil {
+		t.Fatal("spawn with a rejected model succeeded")
+	}
+	if !strings.Contains(err.Error(), "model is not available on this account") {
+		t.Fatalf("spawn error without the rpc data: %v", err)
 	}
 }
 
