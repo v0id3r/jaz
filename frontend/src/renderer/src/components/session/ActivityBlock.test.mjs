@@ -33,7 +33,11 @@ globalThis.document = {
   },
 }
 
+// Keep every other export real: the mock is process-global, and a later test
+// file importing this module must not lose them.
+const actualAppearance = await import('@/lib/appearance')
 mock.module('@/lib/appearance', () => ({
+  ...actualAppearance,
   useInlineDiffs: () => inlineDiffs,
   useInlineShellCommands: () => inlineShellCommands,
 }))
