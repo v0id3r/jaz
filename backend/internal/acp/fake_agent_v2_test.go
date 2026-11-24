@@ -224,6 +224,18 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				text("a1", "tool done")
 				notify(map[string]any{"sessionUpdate": "usage_update", "used": 120, "size": 1000})
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
+			case strings.Contains(message, "open-background"):
+				// A background tool call while its turn still runs, so the
+				// call's card can cancel it mid-turn.
+				state(map[string]any{"state": "running", "background": []any{
+					map[string]any{"type": "tool_call", "toolCallId": "bg-1"},
+				}})
+				notify(map[string]any{
+					"sessionUpdate": "tool_call_update", "toolCallId": "bg-1",
+					"title": "Watch build", "status": "in_progress",
+					"capabilities": map[string]any{"cancel": map[string]any{}},
+				})
+				text("a1", "watching")
 			case strings.Contains(message, "background-finish"):
 				notify(map[string]any{
 					"sessionUpdate": "tool_call_update", "toolCallId": "bg-1",

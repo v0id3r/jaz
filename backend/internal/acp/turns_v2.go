@@ -155,7 +155,14 @@ func (m *Manager) applyBackgroundV2(job *jobState, event acpv2.StateUpdateEvent)
 		if seen[id] || !taskLive(task) {
 			continue
 		}
-		task.State = "completed"
+		// The list names no end state: a task the client asked to stop ended
+		// stopped, any other drop completed.
+		if job.stoppedTasksV2[id] {
+			task.State = "stopped"
+			delete(job.stoppedTasksV2, id)
+		} else {
+			task.State = "completed"
+		}
 		task.CanStop = false
 		job.backgroundTasks[id] = task
 		finished = append(finished, id)
@@ -212,21 +219,43 @@ func (m *Manager) stopBackgroundTaskV2(ctx context.Context, job *jobState, task 
 	if peer == nil {
 		return fmt.Errorf("agent connection is unavailable")
 	}
+	m.noteStopRequestedV2(job, task.ID)
+	var err error
 	switch task.Type {
 	case "terminal":
-		_, err := peer.Call(ctx, acpv2.AgentMethodTerminalCancel, acpv2.CancelTerminalRequest{
+		_, err = peer.Call(ctx, acpv2.AgentMethodTerminalCancel, acpv2.CancelTerminalRequest{
 			SessionID:  acpv2.SessionID(job.ACPSession),
 			TerminalID: acpv2.TerminalID(task.ID),
 		})
-		return err
 	case "tool_call":
-		_, err := peer.Call(ctx, acpv2.AgentMethodToolCallCancel, acpv2.CancelToolCallRequest{
+		_, err = peer.Call(ctx, acpv2.AgentMethodToolCallCancel, acpv2.CancelToolCallRequest{
 			SessionID:  acpv2.SessionID(job.ACPSession),
 			ToolCallID: acpv2.ToolCallID(task.ID),
 		})
-		return err
+	default:
+		err = fmt.Errorf("background task %q of type %q is not stoppable", task.ID, task.Type)
 	}
-	return fmt.Errorf("background task %q of type %q is not stoppable", task.ID, task.Type)
+	if err != nil {
+		job.mu.Lock()
+		delete(job.stoppedTasksV2, task.ID)
+		job.mu.Unlock()
+	}
+	return err
+}
+
+// noteStopRequestedV2 records the client's stop of a live background task:
+// the v2 background list carries no end state, so applyBackgroundV2 reports
+// the task stopped, not completed, when the list drops it.
+func (m *Manager) noteStopRequestedV2(job *jobState, id string) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	if task, ok := job.backgroundTasks[id]; !ok || !taskLive(task) {
+		return
+	}
+	if job.stoppedTasksV2 == nil {
+		job.stoppedTasksV2 = map[string]bool{}
+	}
+	job.stoppedTasksV2[id] = true
 }
 
 // CancelToolCall cancels one running tool call through the v2 cancel request
@@ -255,16 +284,24 @@ func (m *Manager) CancelToolCall(ctx context.Context, session, toolCallID string
 	if peer == nil {
 		return fmt.Errorf("agent connection is unavailable")
 	}
-	if terminalStoppable {
-		_, err := peer.Call(ctx, acpv2.AgentMethodTerminalCancel, acpv2.CancelTerminalRequest{
-			SessionID:  acpv2.SessionID(job.ACPSession),
-			TerminalID: acpv2.TerminalID(terminalID),
-		})
-		return err
-	}
-	_, err = peer.Call(ctx, acpv2.AgentMethodToolCallCancel, acpv2.CancelToolCallRequest{
+	target, method := toolCallID, acpv2.AgentMethodToolCallCancel
+	var request any = acpv2.CancelToolCallRequest{
 		SessionID:  acpv2.SessionID(job.ACPSession),
 		ToolCallID: acpv2.ToolCallID(toolCallID),
-	})
+	}
+	if terminalStoppable {
+		target, method = terminalID, acpv2.AgentMethodTerminalCancel
+		request = acpv2.CancelTerminalRequest{
+			SessionID:  acpv2.SessionID(job.ACPSession),
+			TerminalID: acpv2.TerminalID(terminalID),
+		}
+	}
+	m.noteStopRequestedV2(job, target)
+	_, err = peer.Call(ctx, method, request)
+	if err != nil {
+		job.mu.Lock()
+		delete(job.stoppedTasksV2, target)
+		job.mu.Unlock()
+	}
 	return err
 }

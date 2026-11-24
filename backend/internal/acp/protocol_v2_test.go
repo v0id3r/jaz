@@ -307,6 +307,60 @@ func TestV2BackgroundWork(t *testing.T) {
 	})
 }
 
+// A background tool call stopped from the Overview ends stopped, not
+// completed: the cancel went through the client.
+func TestV2BackgroundToolCallStop(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-background-stop")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "background watch")
+	waitTurnV2(t, manager, spawned.SessionID)
+	tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+	if len(tasks) != 1 || tasks[0].ID != "bg-1" || !tasks[0].CanStop {
+		t.Fatalf("background tasks = %#v", tasks)
+	}
+	if err := manager.StopBackgroundTask(context.Background(), spawned.SessionID, "bg-1"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	waitForV2Job(t, 10*time.Second, func() bool {
+		tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+		return len(tasks) == 1 && tasks[0].State == "stopped"
+	})
+}
+
+// A background tool call cancelled from its card mid-turn ends stopped too.
+func TestV2BackgroundToolCallCancel(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	spawned := spawnV2Session(t, manager, "v2-background-cancel")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	sendV2(t, manager, spawned.Slug, "open-background watch")
+	waitForV2Job(t, 10*time.Second, func() bool {
+		job, err := manager.Status(spawned.SessionID)
+		return err == nil && job.State == acp.StateRunning &&
+			slices.ContainsFunc(job.ToolCalls, func(call sessionevents.ACPToolCall) bool {
+				return call.ID == "bg-1" && call.Cancellable
+			})
+	})
+	if err := manager.CancelToolCall(context.Background(), spawned.SessionID, "bg-1"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	waitTurnV2(t, manager, spawned.SessionID)
+	waitForV2Job(t, 10*time.Second, func() bool {
+		tasks := manager.BackgroundTasksForTest(spawned.SessionID)
+		return len(tasks) == 1 && tasks[0].State == "stopped"
+	})
+}
+
 // A terminal linked to a turn's tool call must survive the turn's result
 // being discarded: the agent reports the stop after the turn has ended.
 func TestV2BackgroundTerminalStopAfterTurn(t *testing.T) {
@@ -331,9 +385,10 @@ func TestV2BackgroundTerminalStopAfterTurn(t *testing.T) {
 	if err := manager.StopBackgroundTask(context.Background(), spawned.SessionID, "term-1"); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
+	// The client asked for the stop, so the task ends stopped, not completed.
 	waitForV2Job(t, 10*time.Second, func() bool {
 		tasks := manager.BackgroundTasksForTest(spawned.SessionID)
-		return len(tasks) == 1 && tasks[0].State == "completed"
+		return len(tasks) == 1 && tasks[0].State == "stopped"
 	})
 }
 

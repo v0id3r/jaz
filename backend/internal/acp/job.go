@@ -129,6 +129,7 @@ type jobState struct {
 	subagentToolIDs        map[string]struct{}
 	seenMessagesV2         map[string]bool
 	cancellableToolsV2     map[string]bool
+	stoppedTasksV2         map[string]bool
 	terminalsV2            map[string]*terminalStateV2
 	terminalTool           map[string]string
 	deferredToolIDs        map[string]struct{}
