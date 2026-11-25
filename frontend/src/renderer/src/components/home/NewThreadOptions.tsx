@@ -64,7 +64,7 @@ export function NewThreadOptions({
             <>
               <motion.div
                 key="backdrop"
-                className="fixed inset-0 z-drawer"
+                className="fixed inset-0 z-modal"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -75,7 +75,7 @@ export function NewThreadOptions({
                 key="panel"
                 role="dialog"
                 aria-label="Thread settings"
-                className="fixed inset-x-2 top-[60px] z-drawer rounded-[14px] bg-surface p-3 shadow-xl ring-1 ring-border"
+                className="fixed inset-x-2 top-[60px] z-modal rounded-[14px] bg-surface p-3 shadow-xl ring-1 ring-border"
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
