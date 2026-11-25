@@ -180,10 +180,7 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 		}
 		phase := messagePhase(event.Meta)
 		interim := phase != "" && phase != "final_answer"
-		if !interim {
-			job.resultText.WriteString(messageChunk)
-			job.Result = job.resultText.String()
-		}
+		job.appendResultMessageLocked(messageID, phase, messageChunk)
 		if warning == nil {
 			if interim {
 				job.endReplyLocked()
@@ -197,14 +194,17 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 		job.appendThoughtLocked(thoughtChunk)
 	case acpschema.ToolCallSessionUpdate:
 		job.endReplyLocked()
+		job.breakResultMessageLocked()
 		src := toolUpdateSnapshot(acpschema.ToolCallUpdate(event.ToolCall))
 		src.SubagentID = toolCallSubagentID(job.ACPAgent, event.Meta)
 		recordTool(src, true)
 	case acpschema.ToolCallUpdateSessionUpdate:
+		job.breakResultMessageLocked()
 		src := toolUpdateSnapshot(event.ToolCallUpdate)
 		src.SubagentID = toolCallSubagentID(job.ACPAgent, event.Meta)
 		recordTool(src, false)
 	case acpschema.PlanSessionUpdate:
+		job.breakResultMessageLocked()
 		plan := make([]sessionevents.PlanEntry, 0, len(event.Entries))
 		for _, entry := range event.Entries {
 			plan = append(plan, sessionevents.PlanEntry{

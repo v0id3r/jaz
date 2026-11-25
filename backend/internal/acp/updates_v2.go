@@ -187,8 +187,7 @@ func (m *Manager) appendMessageV2Locked(job *jobState, messageID, chunk string) 
 	if chunk != "" {
 		job.savedAssistantLen = len(job.Assistant)
 	}
-	job.resultText.WriteString(chunk)
-	job.Result = job.resultText.String()
+	job.appendResultMessageLocked(messageID, "", chunk)
 	job.replyLocked(messageID, chunk)
 }
 

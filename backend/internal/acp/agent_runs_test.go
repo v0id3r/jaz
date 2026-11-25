@@ -160,8 +160,10 @@ func TestAMessageDuringTheAgentsOwnRunReportsWithItToTheParentOnce(t *testing.T)
 			if _, err := jaz.manager.Steer(jaz.ctx, acp.SteerRequest{Session: thread, Message: test.message}); err != nil {
 				t.Fatal(err)
 			}
-			if result := jaz.twoResults(parent, thread)[1]; !strings.Contains(result, "suite finished: all green.") || !strings.Contains(result, test.answer) {
-				t.Fatalf("result = %q; want the run and %q", result, test.answer)
+			// The result is the run's last message; the finished run's
+			// earlier line lives in the transcript, not the result.
+			if result := jaz.twoResults(parent, thread)[1]; !strings.Contains(result, test.answer) {
+				t.Fatalf("result = %q; want the run's answer %q", result, test.answer)
 			}
 		})
 	}
@@ -176,7 +178,7 @@ func TestAMessageAfterTheWorkFinishedOwesTheParentTheAgentsReport(t *testing.T) 
 	// The user writes before the agent's run about it begins; the adapter takes
 	// the message into that run.
 	jaz.write(thread, "is the suite done?")
-	if result := jaz.twoResults(parent, thread)[1]; !strings.Contains(result, "suite finished: all green.") {
+	if result := jaz.twoResults(parent, thread)[1]; !strings.Contains(result, "Took the message into the run.") {
 		t.Fatalf("result = %q; want the agent's report on the work", result)
 	}
 }
@@ -291,10 +293,10 @@ func TestWorkTwoBotsAskedForThatFinishesTogetherReportsToEach(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("the run answered %q, want each bot once: %q", got, askers)
 	}
-	for _, result := range results[2:] {
-		if !strings.Contains(result[1], "alpha finished: all green.") || !strings.Contains(result[1], "beta finished: all green.") {
-			t.Fatalf("result = %q; want the run that reports both", result[1])
-		}
+	// The deliveries share the run's result, its last message; a task's
+	// report that is not the last lives in the transcript.
+	if results[2][1] != results[3][1] || !strings.Contains(results[2][1], " finished: all green.") {
+		t.Fatalf("results = %q, %q; want the run's report", results[2][1], results[3][1])
 	}
 	jaz.step("lead")
 	jaz.idle(lead)
@@ -539,7 +541,7 @@ func TestABackgroundAgentsReportInTheTurnHeldForItReachesTheParentOnce(t *testin
 	jaz.idle(spawned.SessionID)
 	jaz.idle(lead.ID)
 	results := jaz.resultsFor("runner")
-	if len(results) != 1 || !strings.Contains(results[0], "Launched scout") || !strings.Contains(results[0], "scout reported: all green.") {
+	if len(results) != 1 || !strings.Contains(results[0], "scout reported: all green.") {
 		t.Fatalf("results = %q; want one result with the agent's report", results)
 	}
 }

@@ -140,7 +140,8 @@ type jobState struct {
 	thoughtText            strings.Builder
 	replyText              strings.Builder
 	replyID                string
-	resultText             strings.Builder
+	resultMessages         []resultMessage
+	resultBoundary         int
 	// leases counts callers holding the process outside a turn; retired marks
 	// a job whose process is being stopped as idle, which takes no more.
 	leases  int
@@ -391,7 +392,8 @@ func (j *jobState) beginTurnLocked(completion CompletionMode, stored storage.Tur
 	j.Thought = ""
 	j.assistantText.Reset()
 	j.thoughtText.Reset()
-	j.resultText.Reset()
+	j.resultMessages = nil
+	j.resultBoundary = 0
 	j.Result = ""
 	j.endReplyLocked()
 	if len(j.Plan) > 0 {
@@ -466,7 +468,8 @@ func (j *jobState) discardTurnResult() {
 	j.ActiveOperation = ""
 	j.assistantText.Reset()
 	j.thoughtText.Reset()
-	j.resultText.Reset()
+	j.resultMessages = nil
+	j.resultBoundary = 0
 	j.Result = ""
 	j.endReplyLocked()
 	j.toolByID = nil
@@ -491,6 +494,66 @@ func (j *jobState) appendAssistantLocked(chunk string) {
 
 // replyLocked adds a chunk of message id to the turn's final reply, which
 // another message replaces.
+// resultMessage is one agent message of the running turn, as it counts
+// toward the turn's result: the message id an adapter streams by (empty for
+// adapters that mark none), the AIR phase mark, and the message's text.
+type resultMessage struct {
+	id       string
+	boundary int
+	phase    string
+	text     strings.Builder
+}
+
+// appendResultMessageLocked adds a chunk of an agent message to the turn's
+// result set. The result rule: every message marked partial_answer, plus the
+// turn's last message; without phase marks that leaves just the last one. A
+// chunk with a message id continues that id's message; a chunk without one
+// continues the previous anonymous message until a reply-breaking update
+// (a tool call, a plan) draws a new boundary.
+func (j *jobState) appendResultMessageLocked(id, phase, chunk string) {
+	if id != "" && len(j.resultMessages) > 0 {
+		if last := &j.resultMessages[len(j.resultMessages)-1]; last.id == id {
+			last.text.WriteString(chunk)
+			j.Result = j.resultLocked()
+			return
+		}
+	}
+	if id == "" && len(j.resultMessages) > 0 {
+		if last := &j.resultMessages[len(j.resultMessages)-1]; last.id == "" && last.boundary == j.resultBoundary {
+			last.text.WriteString(chunk)
+			j.Result = j.resultLocked()
+			return
+		}
+	}
+	j.resultMessages = append(j.resultMessages, resultMessage{id: id, boundary: j.resultBoundary, phase: phase})
+	j.resultMessages[len(j.resultMessages)-1].text.WriteString(chunk)
+	j.Result = j.resultLocked()
+}
+
+// breakResultMessageLocked draws the boundary anonymous (id-less) agent
+// messages are split by: after a tool call or a plan, the next chunks are a
+// new message even without an id.
+func (j *jobState) breakResultMessageLocked() {
+	j.resultBoundary++
+}
+
+// resultLocked assembles the turn's result from its messages: every
+// partial_answer, then the last message (once, when it is itself one).
+func (j *jobState) resultLocked() string {
+	if len(j.resultMessages) == 0 {
+		return ""
+	}
+	var out strings.Builder
+	lastIndex := len(j.resultMessages) - 1
+	for i, message := range j.resultMessages {
+		if message.phase != "partial_answer" && i != lastIndex {
+			continue
+		}
+		out.WriteString(message.text.String())
+	}
+	return out.String()
+}
+
 func (j *jobState) replyLocked(id, chunk string) {
 	if id != j.replyID {
 		j.endReplyLocked()

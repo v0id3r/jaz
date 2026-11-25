@@ -1016,7 +1016,7 @@ func TestV2UpsertAfterChunksDoesNotDuplicate(t *testing.T) {
 	if job.Thought != "thinking" {
 		t.Fatalf("thought = %q", job.Thought)
 	}
-	if job.Result != "interim final" {
+	if job.Result != "final" {
 		t.Fatalf("result = %q", job.Result)
 	}
 }
