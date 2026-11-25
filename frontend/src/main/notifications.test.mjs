@@ -62,7 +62,7 @@ if (process.env.JAZ_NOTIFICATION_TEST_CHILD === '1') {
     onAlert(alert('question', 'needs_you'))
     await settle()
     expect(notifications.map((item) => item.options)).toEqual([
-      { title: 'Fix the build', subtitle: 'Jaz', body: 'Fixed.', groupId: 'thread', silent: false, sound: 'Blow' },
+      { title: 'Fix the build', subtitle: 'Jaz', body: 'Fixed.', groupId: 'thread', silent: false, sound: 'Blow', ...(process.platform === 'linux' ? { icon: 'icon' } : {}) },
     ])
     router.configure({ mode: 'center', ...target })
     onAlert(alert('reply', 'reply'))

@@ -2,7 +2,9 @@ import { expect, mock, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
+const popover = await import('@/components/ui/Popover')
 mock.module('@/components/ui/Popover', () => ({
+  ...popover,
   Popover: ({ children }) => createElement('div', null, children),
 }))
 mock.module('@/lib/models', () => ({
