@@ -508,18 +508,11 @@ func applyPlanV2Locked(job *jobState, event acpv2.PlanSessionUpdate) (publish, a
 	return publish, publish && wasEmpty && len(normalized) > 0
 }
 
-// applySessionControlsV2 routes the v2 config and command updates through the
-// shared session-controls parsing after configId normalization.
+// applySessionControlsV2 routes the v2 config and command payloads through
+// the shared session-controls parsing after configId normalization. A
+// set_config_option response carries configOptions without a sessionUpdate
+// kind, so the content, not the kind, decides.
 func (m *Manager) applySessionControlsV2(job *jobState, raw json.RawMessage) bool {
-	var envelope struct {
-		Kind string `json:"sessionUpdate"`
-	}
-	if json.Unmarshal(raw, &envelope) != nil {
-		return false
-	}
-	if envelope.Kind != "config_option_update" && envelope.Kind != "available_commands_update" {
-		return false
-	}
 	return m.applySessionControls(job, normalizeConfigOptionsV2(raw))
 }
 

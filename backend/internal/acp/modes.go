@@ -51,7 +51,11 @@ func (m *Manager) prepareModeForTurn(ctx context.Context, job *jobState, planReq
 	job.mu.RUnlock()
 
 	if modes.planConfigID != "" {
-		if err := m.ensureTurnMode(ctx, job, baselineModeID(job.ACPAgent, modes)); err != nil {
+		if modes.modeConfigID != "" && modes.modeConfigID != modes.planConfigID {
+			if err := m.ensureTurnModeConfig(ctx, job, modes); err != nil {
+				return err
+			}
+		} else if err := m.ensureTurnMode(ctx, job, baselineModeID(job.ACPAgent, modes)); err != nil {
 			return err
 		}
 		job.mu.RLock()
@@ -79,6 +83,28 @@ func (m *Manager) prepareModeForTurn(ctx context.Context, job *jobState, planReq
 		return m.applyTurnMode(ctx, job, target)
 	}
 	return m.ensureTurnMode(ctx, job, target)
+}
+
+// ensureTurnModeConfig is ensureTurnMode for a v2 permission mode: the mode
+// config option takes the user's pick, else the agent's baseline, unless it
+// already holds that value.
+func (m *Manager) ensureTurnModeConfig(ctx context.Context, job *jobState, modes ModeState) error {
+	job.mu.RLock()
+	current := ""
+	value := modes.userModeID
+	for _, option := range job.agentSession.ConfigOptions {
+		if option.ID == modes.modeConfigID {
+			current = option.CurrentValue
+			if value == "" {
+				value = baselineModeValue(job.ACPAgent, configOptionValues(option))
+			}
+		}
+	}
+	job.mu.RUnlock()
+	if value == "" || value == current {
+		return nil
+	}
+	return m.applyTurnConfig(ctx, job, modes.modeConfigID, value)
 }
 
 func (m *Manager) applyTurnConfig(ctx context.Context, job *jobState, configID, value string) error {
@@ -158,20 +184,33 @@ func baselineModeConfigValue(agent string, options []sessionevents.AgentConfigOp
 		if option.ID != configID {
 			continue
 		}
-		values := make([]string, 0, len(option.Options))
-		for _, value := range option.Options {
-			values = append(values, value.Value)
-		}
-		for _, want := range baselineModePriority[CanonicalAgentName(agent)] {
-			if slices.Contains(values, want) {
-				return want
-			}
-		}
-		for _, want := range defaultBaselineModePriority {
-			if slices.Contains(values, want) {
-				return want
-			}
+		if value := baselineModeValue(agent, configOptionValues(option)); value != "" {
+			return value
 		}
 	}
 	return "default"
+}
+
+// baselineModeValue picks the agent's full-auto value among the advertised
+// mode values, or "" when the agent offers none of them.
+func baselineModeValue(agent string, values []string) string {
+	for _, want := range baselineModePriority[CanonicalAgentName(agent)] {
+		if slices.Contains(values, want) {
+			return want
+		}
+	}
+	for _, want := range defaultBaselineModePriority {
+		if slices.Contains(values, want) {
+			return want
+		}
+	}
+	return ""
+}
+
+func configOptionValues(option sessionevents.AgentConfigOption) []string {
+	values := make([]string, 0, len(option.Options))
+	for _, value := range option.Options {
+		values = append(values, value.Value)
+	}
+	return values
 }

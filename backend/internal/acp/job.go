@@ -195,7 +195,10 @@ type ModeState struct {
 	PlanModeID     string         `json:"plan_mode_id,omitempty"`
 	AvailableModes []ModeSnapshot `json:"available_modes,omitempty"`
 	planConfigID   string
-	userModeID     string
+	// modeConfigID is the v2 config option carrying the permission mode; v1
+	// sessions keep it empty and use session modes.
+	modeConfigID string
+	userModeID   string
 }
 
 type ModeSnapshot struct {

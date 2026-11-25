@@ -328,6 +328,8 @@ type sessionConfigOptionsState struct {
 	// modeConfigID is the select option of category "mode", v2's replacement
 	// for session modes.
 	modeConfigID        string
+	modeOptions         []string
+	currentMode         string
 	modelOptions        []string
 	currentModel        string
 	defaultModel        string
@@ -496,10 +498,24 @@ func (m *Manager) configuredModeState(
 	if err != nil {
 		return modes, err
 	}
-	// v2 has no session modes; plan rides the mode config option instead.
-	if ac.protocol == protocolV2 && modes.planConfigID == "" && session.configOptions.modeConfigID != "" {
-		modes.PlanModeID = "plan"
-		modes.planConfigID = session.configOptions.modeConfigID
+	// v2 has no session modes; plan rides the mode config option instead, and
+	// a permission mode separate from it takes the baseline session modes
+	// would (initializeModeState's session/set_mode has no v2 analog).
+	if ac.protocol == protocolV2 && session.configOptions.modeConfigID != "" {
+		modes.modeConfigID = session.configOptions.modeConfigID
+		if modes.planConfigID == "" {
+			modes.PlanModeID = "plan"
+			modes.planConfigID = modes.modeConfigID
+		}
+		if modes.modeConfigID != modes.planConfigID {
+			if target := baselineModeValue(agentName, session.configOptions.modeOptions); target != "" && target != session.configOptions.currentMode {
+				raw, err := setSessionConfigOption(ctx, peer, ac.protocol, session.response.SessionID, modes.modeConfigID, target)
+				if err != nil {
+					return modes, err
+				}
+				ac.state.configResponse(session.response.SessionID, raw)
+			}
+		}
 	}
 	return modes, nil
 }
@@ -563,20 +579,28 @@ func parseSessionConfigOptions(raw json.RawMessage) sessionConfigOptionsState {
 		return sessionConfigOptionsState{}
 	}
 	state := sessionConfigOptionsState{configOptionsPresent: true}
-	var options []struct {
-		ID           string           `json:"id"`
-		Category     string           `json:"category"`
-		CurrentValue string           `json:"currentValue"`
-		Options      json.RawMessage  `json:"options"`
-		Meta         configOptionMeta `json:"_meta"`
-	}
-	if json.Unmarshal(rawOptions, &options) != nil {
+	var rawList []json.RawMessage
+	if json.Unmarshal(rawOptions, &rawList) != nil {
 		return state
 	}
-	for _, option := range options {
+	for _, rawOption := range rawList {
+		// One option decodes alone: a boolean option's JSON currentValue must
+		// not fail the whole list the way one bad element fails a slice.
+		var option struct {
+			ID           string           `json:"id"`
+			Category     string           `json:"category"`
+			CurrentValue string           `json:"currentValue"`
+			Options      json.RawMessage  `json:"options"`
+			Meta         configOptionMeta `json:"_meta"`
+		}
+		if json.Unmarshal(rawOption, &option) != nil {
+			continue
+		}
 		category := strings.TrimSpace(option.Category)
 		if category == string(acpschema.SessionConfigOptionCategoryMode) && state.modeConfigID == "" {
 			state.modeConfigID = option.ID
+			state.modeOptions = parseConfigOptionValues(option.Options)
+			state.currentMode = option.CurrentValue
 		}
 		switch {
 		case option.ID == sessionConfigCollaborationMode:

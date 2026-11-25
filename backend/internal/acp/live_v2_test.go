@@ -109,6 +109,15 @@ func TestLiveV2Scenarios(t *testing.T) {
 	}
 	t.Logf("[%s] spawned session %s", label, spawned.SessionID)
 
+	// Without config options the baseline mode never lands and the UI loses
+	// its model, effort and mode selectors.
+	if got := liveConfigOptionValue(manager, spawned.SessionID, "model"); got == "" {
+		t.Errorf("[%s] no model config option after spawn", label)
+	}
+	if got := liveConfigOptionValue(manager, spawned.SessionID, "mode"); got == "" {
+		t.Errorf("[%s] no mode config option after spawn", label)
+	}
+
 	turn := func(name, message string) Job {
 		t.Helper()
 		start := time.Now()
@@ -128,6 +137,16 @@ func TestLiveV2Scenarios(t *testing.T) {
 	plain := turn("plain", "Reply with exactly: ok")
 	if plain.State != StateIdle || !strings.Contains(strings.ToLower(plain.Assistant), "ok") {
 		t.Errorf("[%s] plain turn unexpected: %s %q", label, plain.State, plain.Assistant)
+	}
+	// The turn's prepareModeForTurn sets the agent's baseline mode through the
+	// mode config option; Codex left in its default mode sandboxes every
+	// command into bwrap failures.
+	if v2 {
+		if want := map[string]string{"codex": "agent-full-access", "claude": "bypassPermissions"}[agent]; want != "" {
+			if got := liveConfigOptionValue(manager, spawned.SessionID, "mode"); got != want {
+				t.Errorf("[%s] mode after the first turn = %q, want %s", label, got, want)
+			}
+		}
 	}
 
 	tool := turn("tool", "Run this exact shell command with your shell tool: echo jaz-live-check. Then reply with exactly: done")
@@ -381,6 +400,23 @@ func TestLiveBackgroundOutcomes(t *testing.T) {
 		}
 	}
 	t.Logf("[%s] final tasks: %s", agent, backgroundTaskSummary(manager, spawned.SessionID))
+}
+
+// liveConfigOptionValue reads the current value of the session's config
+// option of a category, as the agent_session event publishes it.
+func liveConfigOptionValue(manager *Manager, session, category string) string {
+	job, err := manager.job(session)
+	if err != nil {
+		return ""
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	for _, option := range job.agentSession.ConfigOptions {
+		if option.Category == category {
+			return option.CurrentValue
+		}
+	}
+	return ""
 }
 
 func stoppableBackgroundTask(manager *Manager, session string) string {

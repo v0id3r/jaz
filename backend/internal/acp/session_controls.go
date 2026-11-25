@@ -88,27 +88,30 @@ func (m *Manager) applySessionControls(job *jobState, raw json.RawMessage) bool 
 }
 
 func translateConfigOptions(raw json.RawMessage) []sessionevents.AgentConfigOption {
-	var options []struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-		Category     string `json:"category"`
-		Type         string `json:"type"`
-		CurrentValue string `json:"currentValue"`
-		Options      []struct {
-			Value       string                           `json:"value"`
-			Name        string                           `json:"name"`
-			Description string                           `json:"description"`
-			Options     []sessionevents.AgentConfigValue `json:"options"`
-		} `json:"options"`
-		Meta configOptionMeta `json:"_meta"`
-	}
-	if json.Unmarshal(raw, &options) != nil {
+	var rawList []json.RawMessage
+	if json.Unmarshal(raw, &rawList) != nil {
 		return nil
 	}
-	result := make([]sessionevents.AgentConfigOption, 0, len(options))
-	for _, option := range options {
-		if option.Type != "select" {
+	result := make([]sessionevents.AgentConfigOption, 0, len(rawList))
+	for _, rawOption := range rawList {
+		// One option decodes alone: a boolean option's JSON currentValue must
+		// not fail the whole list the way one bad element fails a slice.
+		var option struct {
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			Description  string `json:"description"`
+			Category     string `json:"category"`
+			Type         string `json:"type"`
+			CurrentValue string `json:"currentValue"`
+			Options      []struct {
+				Value       string                           `json:"value"`
+				Name        string                           `json:"name"`
+				Description string                           `json:"description"`
+				Options     []sessionevents.AgentConfigValue `json:"options"`
+			} `json:"options"`
+			Meta configOptionMeta `json:"_meta"`
+		}
+		if json.Unmarshal(rawOption, &option) != nil || option.Type != "select" {
 			continue
 		}
 		item := sessionevents.AgentConfigOption{
