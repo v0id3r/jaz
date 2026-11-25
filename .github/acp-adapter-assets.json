@@ -2,26 +2,10 @@
   "adapters": {
     "codex": {
       "repo": "v0id3r/codex-acp-app-server",
-      "tag": "v2.11.0-jaz.1",
+      "tag": "v2.11.0-jaz.2",
       "assets": {
-        "darwin-arm64": {
-          "name": "codex-acp-app-server-2.11.0-jaz.1-darwin-arm64.tar.gz",
-          "binary": "codex-acp",
-          "env": {
-            "CODEX_PATH": "codex-runtime/aarch64-apple-darwin/bin/codex",
-            "CODEX_CODE_MODE_HOST_PATH": "codex-runtime/aarch64-apple-darwin/bin/codex-code-mode-host"
-          }
-        },
-        "darwin-x64": {
-          "name": "codex-acp-app-server-2.11.0-jaz.1-darwin-x64.tar.gz",
-          "binary": "codex-acp",
-          "env": {
-            "CODEX_PATH": "codex-runtime/x86_64-apple-darwin/bin/codex",
-            "CODEX_CODE_MODE_HOST_PATH": "codex-runtime/x86_64-apple-darwin/bin/codex-code-mode-host"
-          }
-        },
         "linux-arm64": {
-          "name": "codex-acp-app-server-2.11.0-jaz.1-linux-arm64.tar.gz",
+          "name": "codex-acp-app-server-2.11.0-jaz.2-linux-arm64.tar.gz",
           "binary": "codex-acp",
           "env": {
             "CODEX_PATH": "codex-runtime/aarch64-unknown-linux-musl/bin/codex",
@@ -29,7 +13,7 @@
           }
         },
         "linux-x64": {
-          "name": "codex-acp-app-server-2.11.0-jaz.1-linux-x64.tar.gz",
+          "name": "codex-acp-app-server-2.11.0-jaz.2-linux-x64.tar.gz",
           "binary": "codex-acp",
           "env": {
             "CODEX_PATH": "codex-runtime/x86_64-unknown-linux-musl/bin/codex",
@@ -37,7 +21,7 @@
           }
         },
         "win32-arm64": {
-          "name": "codex-acp-app-server-2.11.0-jaz.1-win32-arm64.tar.gz",
+          "name": "codex-acp-app-server-2.11.0-jaz.2-win32-arm64.tar.gz",
           "binary": "codex-acp.exe",
           "env": {
             "CODEX_PATH": "codex-runtime/aarch64-pc-windows-msvc/bin/codex.exe",
@@ -45,7 +29,7 @@
           }
         },
         "win32-x64": {
-          "name": "codex-acp-app-server-2.11.0-jaz.1-win32-x64.tar.gz",
+          "name": "codex-acp-app-server-2.11.0-jaz.2-win32-x64.tar.gz",
           "binary": "codex-acp.exe",
           "env": {
             "CODEX_PATH": "codex-runtime/x86_64-pc-windows-msvc/bin/codex.exe",
@@ -86,10 +70,10 @@
     },
     "claude": {
       "repo": "v0id3r/claude-agent-acp",
-      "tag": "v0.111.0-jaz.1",
+      "tag": "v0.111.0-jaz.2",
       "assets": {
         "linux-x64": {
-          "name": "claude-agent-acp-0.111.0-jaz.1-linux-x64.tar.gz",
+          "name": "claude-agent-acp-0.111.0-jaz.2-linux-x64.tar.gz",
           "binary": "claude-agent-acp",
           "env": {
             "CLAUDE_CODE_EXECUTABLE": "claude"

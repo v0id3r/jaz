@@ -1,29 +1,11 @@
 {
   "adapters": {
     "codex": {
-      "version": "2.11.0-jaz.1",
+      "version": "2.11.0-jaz.2",
       "assets": {
-        "darwin-arm64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.1/codex-acp-app-server-2.11.0-jaz.1-darwin-arm64.tar.gz",
-          "sha256": "47bf36e3bc4f397699fee91380a3bc5b5cb49f6bc2dc33c0e06e8df069989a3e",
-          "binary": "codex-acp",
-          "env": {
-            "CODEX_PATH": "codex-runtime/aarch64-apple-darwin/bin/codex",
-            "CODEX_CODE_MODE_HOST_PATH": "codex-runtime/aarch64-apple-darwin/bin/codex-code-mode-host"
-          }
-        },
-        "darwin-x64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.1/codex-acp-app-server-2.11.0-jaz.1-darwin-x64.tar.gz",
-          "sha256": "349ead8b37a182be0262d98342264d2a14a5bf1b9af6f5604a9b77f971b6ad7d",
-          "binary": "codex-acp",
-          "env": {
-            "CODEX_PATH": "codex-runtime/x86_64-apple-darwin/bin/codex",
-            "CODEX_CODE_MODE_HOST_PATH": "codex-runtime/x86_64-apple-darwin/bin/codex-code-mode-host"
-          }
-        },
         "linux-arm64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.1/codex-acp-app-server-2.11.0-jaz.1-linux-arm64.tar.gz",
-          "sha256": "8da3357665d48fc7dc718ce591961c74ff8f14e0cd964ee4a9e9fe3dea36b4eb",
+          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.2/codex-acp-app-server-2.11.0-jaz.2-linux-arm64.tar.gz",
+          "sha256": "2949a7414bc86bb6fd3cfbcc683fdf790b7a33ba279a960e9c55ef829ff82a10",
           "binary": "codex-acp",
           "env": {
             "CODEX_PATH": "codex-runtime/aarch64-unknown-linux-musl/bin/codex",
@@ -31,8 +13,8 @@
           }
         },
         "linux-x64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.1/codex-acp-app-server-2.11.0-jaz.1-linux-x64.tar.gz",
-          "sha256": "d0f19dc32052a0a34c5d3f3a0f3684ae1a144da2daabee81743c7996fb54b0ec",
+          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.2/codex-acp-app-server-2.11.0-jaz.2-linux-x64.tar.gz",
+          "sha256": "82027b598cac39a224d3109378fa00f66d1b28208c87eef10efbe29405b84d5c",
           "binary": "codex-acp",
           "env": {
             "CODEX_PATH": "codex-runtime/x86_64-unknown-linux-musl/bin/codex",
@@ -40,8 +22,8 @@
           }
         },
         "win32-arm64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.1/codex-acp-app-server-2.11.0-jaz.1-win32-arm64.tar.gz",
-          "sha256": "8e64741aa64d88b23a8911984e52dd5e928cebfb90cee030ac296cbce7a69e6c",
+          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.2/codex-acp-app-server-2.11.0-jaz.2-win32-arm64.tar.gz",
+          "sha256": "914dc4608d6b304b68fac2c69ed45e582bb4eb27313be0c948b8cd03e9d48907",
           "binary": "codex-acp.exe",
           "env": {
             "CODEX_PATH": "codex-runtime/aarch64-pc-windows-msvc/bin/codex.exe",
@@ -49,8 +31,8 @@
           }
         },
         "win32-x64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.1/codex-acp-app-server-2.11.0-jaz.1-win32-x64.tar.gz",
-          "sha256": "41bf758af0c9a287f9b127f1c4e3d3d356f0b51969c9dee21fdf39722c8451c7",
+          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.2/codex-acp-app-server-2.11.0-jaz.2-win32-x64.tar.gz",
+          "sha256": "5a4a9f4f02e104959e85ca3d295a25a4a13d4790a295d42701a8ccbbbf0d832e",
           "binary": "codex-acp.exe",
           "env": {
             "CODEX_PATH": "codex-runtime/x86_64-pc-windows-msvc/bin/codex.exe",
@@ -95,11 +77,11 @@
       }
     },
     "claude": {
-      "version": "0.111.0-jaz.1",
+      "version": "0.111.0-jaz.2",
       "assets": {
         "linux-x64": {
-          "url": "https://github.com/v0id3r/claude-agent-acp/releases/download/v0.111.0-jaz.1/claude-agent-acp-0.111.0-jaz.1-linux-x64.tar.gz",
-          "sha256": "c7415020ee38d9c7673dd53140911f936caca05f8edb86f4b1b0c15f6944683e",
+          "url": "https://github.com/v0id3r/claude-agent-acp/releases/download/v0.111.0-jaz.2/claude-agent-acp-0.111.0-jaz.2-linux-x64.tar.gz",
+          "sha256": "acab6252d24b3b46f82eceae2e6dbcd869c48131d9cf35e005760d2f2957fc10",
           "binary": "claude-agent-acp",
           "env": {
             "CLAUDE_CODE_EXECUTABLE": "claude"
