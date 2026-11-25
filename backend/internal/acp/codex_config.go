@@ -13,6 +13,7 @@ import (
 const (
 	CodexProviderOpenAIAPIKey = "openai-api-key"
 	CodexOpenAIDefaultModel   = modelprovider.OpenAIModelGPT6Astra
+	codexMetaKey              = "codex"
 )
 
 func codexProvider(modelProvider string, providers map[string]modelprovider.ModelProviderConfig) (modelprovider.ModelProvider, bool) {
@@ -52,6 +53,7 @@ func configureCodexEnv(
 	env map[string]string,
 	cfg AgentConfig,
 	providers map[string]modelprovider.ModelProviderConfig,
+	contextWindow int,
 	developerInstructions string,
 ) error {
 	config, err := decodeCodexConfig(env["CODEX_CONFIG"])
@@ -85,6 +87,11 @@ func configureCodexEnv(
 		for key, value := range providerConfig {
 			provider[key] = value
 		}
+	}
+	// A custom provider's model has no Codex catalog entry; the runtime's
+	// own key carries its context window so usage reports the size.
+	if contextWindow > 0 {
+		config["model_context_window"] = contextWindow
 	}
 
 	file, err := os.CreateTemp(dir, "codex-config-*.json")

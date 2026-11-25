@@ -13,8 +13,7 @@ import (
 
 func TestConfigureCodexEnv(t *testing.T) {
 	env := map[string]string{
-		"CODEX_CONFIG":        `{"features":{"existing":true},"model_providers":{"keep":{"name":"Keep"}}}`,
-		codexModelMetadataEnv: `{"id":"moonshotai/kimi-k3","display_name":"Kimi K3","context_window":1048576}`,
+		"CODEX_CONFIG": `{"features":{"existing":true},"model_providers":{"keep":{"name":"Keep"}}}`,
 	}
 	cfg := AgentConfig{
 		ModelProvider:   modelprovider.ProviderOpenRouter,
@@ -30,7 +29,7 @@ func TestConfigureCodexEnv(t *testing.T) {
 		},
 	}
 
-	err := configureCodexEnv(t.TempDir(), env, cfg, providers, "Jaz instructions")
+	err := configureCodexEnv(t.TempDir(), env, cfg, providers, 0, "Jaz instructions")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +67,7 @@ func TestConfigureCodexEnvKeepsOpenAIAccountAuthNative(t *testing.T) {
 	err := configureCodexEnv(t.TempDir(), env, AgentConfig{
 		ModelProvider: modelprovider.ProviderOpenAI,
 		Model:         modelprovider.OpenAIModelGPT6Sol,
-	}, nil, "instructions")
+	}, nil, 0, "instructions")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +259,7 @@ func TestConfigureCodexEnvReadsFileOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := map[string]string{"CODEX_CONFIG": "@" + path}
-	err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, "instructions")
+	err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, 0, "instructions")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +271,7 @@ func TestConfigureCodexEnvReadsFileOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	env["CODEX_CONFIG"] = "@" + path
-	if err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, "instructions"); err == nil {
+	if err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, 0, "instructions"); err == nil {
 		t.Fatal("missing config file was accepted")
 	}
 }

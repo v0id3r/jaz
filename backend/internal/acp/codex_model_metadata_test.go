@@ -1,9 +1,7 @@
 package acp
 
 import (
-	"encoding/json"
 	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/wins/jaz/backend/internal/modelcatalog"
@@ -23,7 +21,28 @@ func (c *codexMetadataCatalog) ProviderModels(id string) ([]modelcatalog.Model, 
 	return c.models, c.err
 }
 
-func TestResolveCodexCustomProviderModelMetadataUsesCatalog(t *testing.T) {
+func (*codexMetadataCatalog) AgentModels(string) []modelcatalog.Model {
+	return nil
+}
+
+func customProviderCodexConfig(providerID, model string) AgentConfig {
+	return AgentConfig{
+		ProviderMode:  AgentProviderModeAgentDefaults,
+		ModelProvider: providerID,
+		Model:         model,
+	}
+}
+
+func readCodexConfigFile(t *testing.T, ref string) map[string]any {
+	t.Helper()
+	config, err := decodeCodexConfig(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return config
+}
+
+func TestResolveCodexCustomProviderContextWindowUsesCatalog(t *testing.T) {
 	catalog := &codexMetadataCatalog{models: []modelcatalog.Model{{
 		Value:           "qwen3.8-max-preview",
 		Label:           "Qwen3.8 Max Preview",
@@ -32,163 +51,71 @@ func TestResolveCodexCustomProviderModelMetadataUsesCatalog(t *testing.T) {
 		Reasoning:       modelcatalog.Reasoning{Status: modelcatalog.ReasoningReady},
 	}}}
 	manager := NewManager(nil, Config{ModelCatalog: catalog}, nil)
-	encoded, err := manager.resolveCodexCustomProviderModelMetadata(AgentCodex, AgentConfig{
-		ProviderMode:  AgentProviderModeAgentDefaults,
-		ModelProvider: "qwen-cloud",
-		Model:         "qwen3.8-max-preview",
-	})
+	window, err := manager.resolveCodexCustomProviderContextWindow(AgentCodex, customProviderCodexConfig("qwen-cloud", "qwen3.8-max-preview"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var metadata codexModelMetadata
-	if err := json.Unmarshal([]byte(encoded), &metadata); err != nil {
-		t.Fatal(err)
-	}
-	if catalog.lastID != "qwen-cloud" || metadata.ContextWindow != 1_000_000 || !reflect.DeepEqual(metadata.InputModalities, []string{"text", "image"}) {
-		t.Fatalf("provider = %q, metadata = %#v", catalog.lastID, metadata)
+	if catalog.lastID != "qwen-cloud" || window != 1_000_000 {
+		t.Fatalf("provider = %q, window = %d", catalog.lastID, window)
 	}
 }
 
-func TestResolveCodexCustomProviderModelMetadataPreservesNativeCatalog(t *testing.T) {
+func TestResolveCodexCustomProviderContextWindowPreservesNativeCatalog(t *testing.T) {
 	for _, providerID := range []string{"", AgentCodex, provider.ProviderOpenAI, CodexProviderOpenAIAPIKey} {
 		catalog := &codexMetadataCatalog{err: errors.New("must not be called")}
 		manager := NewManager(nil, Config{ModelCatalog: catalog}, nil)
-		metadata, err := manager.resolveCodexCustomProviderModelMetadata(AgentCodex, AgentConfig{
-			ProviderMode:  AgentProviderModeAgentDefaults,
-			ModelProvider: providerID,
-			Model:         provider.OpenAIModelGPT6Sol,
-		})
-		if err != nil || metadata != "" || catalog.calls != 0 {
-			t.Fatalf("provider %q: metadata = %q, error = %v, catalog calls = %d", providerID, metadata, err, catalog.calls)
+		window, err := manager.resolveCodexCustomProviderContextWindow(AgentCodex, customProviderCodexConfig(providerID, provider.OpenAIModelGPT6Sol))
+		if err != nil || window != 0 || catalog.calls != 0 {
+			t.Fatalf("provider %q: window = %d, error = %v, catalog calls = %d", providerID, window, err, catalog.calls)
 		}
 	}
 }
 
-func TestResolveCodexCustomProviderModelMetadataRejectsIncompleteCatalog(t *testing.T) {
+func TestResolveCodexCustomProviderContextWindowRejectsIncompleteCatalog(t *testing.T) {
 	manager := NewManager(nil, Config{ModelCatalog: &codexMetadataCatalog{models: []modelcatalog.Model{{Value: "unknown"}}}}, nil)
-	metadata, err := manager.resolveCodexCustomProviderModelMetadata(AgentCodex, AgentConfig{
-		ProviderMode:  AgentProviderModeAgentDefaults,
-		ModelProvider: "custom",
-		Model:         "unknown",
-	})
-	if err == nil || metadata != "" {
-		t.Fatalf("metadata = %q, error = %v", metadata, err)
+	window, err := manager.resolveCodexCustomProviderContextWindow(AgentCodex, customProviderCodexConfig("custom", "unknown"))
+	if err == nil || window != 0 {
+		t.Fatalf("window = %d, error = %v", window, err)
 	}
 }
 
-func TestResolveCodexCustomProviderModelMetadataPreservesKnownEmptyReasoningEfforts(t *testing.T) {
-	manager := NewManager(nil, Config{ModelCatalog: &codexMetadataCatalog{models: []modelcatalog.Model{{
-		Value:           "automatic",
-		ContextLength:   128_000,
-		InputModalities: []string{"text"},
-		Reasoning:       modelcatalog.Reasoning{Status: modelcatalog.ReasoningReady},
-	}}}}, nil)
-	encoded, err := manager.resolveCodexCustomProviderModelMetadata(AgentCodex, AgentConfig{
-		ProviderMode:  AgentProviderModeAgentDefaults,
-		ModelProvider: "custom",
-		Model:         "automatic",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var metadata codexModelMetadata
-	if err := json.Unmarshal([]byte(encoded), &metadata); err != nil {
-		t.Fatal(err)
-	}
-	if metadata.ReasoningEfforts == nil || len(metadata.ReasoningEfforts) != 0 {
-		t.Fatalf("reasoning efforts = %#v", metadata.ReasoningEfforts)
-	}
-}
-
-func TestResolveCodexCustomProviderModelMetadataAllowsUnknownReasoningDefault(t *testing.T) {
-	manager := NewManager(nil, Config{ModelCatalog: &codexMetadataCatalog{models: []modelcatalog.Model{{
-		Value:           "custom",
-		ContextLength:   128_000,
-		InputModalities: []string{"text"},
-		Reasoning: modelcatalog.Reasoning{
-			Status:  modelcatalog.ReasoningReady,
-			Efforts: []string{"low", "high"},
-		},
-	}}}}, nil)
-	encoded, err := manager.resolveCodexCustomProviderModelMetadata(AgentCodex, AgentConfig{
-		ProviderMode:  AgentProviderModeAgentDefaults,
-		ModelProvider: "custom",
-		Model:         "custom",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var metadata map[string]any
-	if err := json.Unmarshal([]byte(encoded), &metadata); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := metadata["default_reasoning_effort"]; ok {
-		t.Fatalf("metadata = %#v", metadata)
-	}
-	if !reflect.DeepEqual(metadata["reasoning_efforts"], []any{"low", "high"}) {
-		t.Fatalf("metadata = %#v", metadata)
-	}
-}
-
-func (*codexMetadataCatalog) AgentModels(string) []modelcatalog.Model {
-	return nil
-}
-
-func TestResolveCodexCustomProviderModelMetadataUsesCanonicalCapabilities(t *testing.T) {
-	catalog := &codexMetadataCatalog{models: []modelcatalog.Model{{
-		Value:           "moonshotai/kimi-k3",
-		Label:           "Kimi K3",
-		Description:     "Agentic reasoning model",
-		ContextLength:   1_048_576,
-		InputModalities: []string{"text", "image"},
-		Reasoning: modelcatalog.Reasoning{
-			Status:        modelcatalog.ReasoningReady,
-			Efforts:       []string{"low", "high", "max"},
-			DefaultEffort: "max",
-		},
-	}}}
+func TestResolveCodexCustomProviderContextWindowPropagatesCatalogError(t *testing.T) {
+	catalog := &codexMetadataCatalog{err: modelcatalog.ErrCatalogUnavailable}
 	manager := NewManager(nil, Config{ModelCatalog: catalog}, nil)
-	cfg := AgentConfig{
-		ProviderMode:  AgentProviderModeAgentDefaults,
-		ModelProvider: provider.ProviderOpenRouter,
-		Model:         "moonshotai/kimi-k3",
+	window, err := manager.resolveCodexCustomProviderContextWindow(AgentCodex, customProviderCodexConfig(provider.ProviderOpenRouter, "moonshotai/kimi-k3"))
+	if err == nil || window != 0 {
+		t.Fatalf("window = %d, error = %v", window, err)
 	}
-	encoded, err := manager.resolveCodexCustomProviderModelMetadata(AgentCodex, cfg)
+}
+
+func TestConfigureCodexEnvWritesModelContextWindow(t *testing.T) {
+	env := map[string]string{}
+	err := configureCodexEnv(t.TempDir(), env, customProviderCodexConfig("custom", "qwen3.8-max-preview"), nil, 1_000_000, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	config := readCodexConfigFile(t, env["CODEX_CONFIG"])
+	if window, ok := config["model_context_window"].(float64); !ok || window != 1_000_000 {
+		t.Fatalf("model_context_window = %v in %v", config["model_context_window"], config)
+	}
+}
 
-	var metadata codexModelMetadata
-	if err := json.Unmarshal([]byte(encoded), &metadata); err != nil {
+func TestConfigureCodexEnvOmitsModelContextWindow(t *testing.T) {
+	env := map[string]string{}
+	err := configureCodexEnv(t.TempDir(), env, customProviderCodexConfig("custom", "qwen3.8-max-preview"), nil, 0, "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if metadata.ID != "moonshotai/kimi-k3" || metadata.ContextWindow != 1_048_576 ||
-		metadata.DefaultReasoningEffort != "max" ||
-		!reflect.DeepEqual(metadata.InputModalities, []string{"text", "image"}) ||
-		!reflect.DeepEqual(metadata.ReasoningEfforts, []string{"low", "high", "max"}) {
-		t.Fatalf("metadata = %#v", metadata)
-	}
-	if catalog.calls != 1 {
-		t.Fatalf("provider catalog calls = %d, want 1", catalog.calls)
-	}
-	catalog.err = modelcatalog.ErrCatalogUnavailable
-	if metadata, err := manager.resolveCodexCustomProviderModelMetadata(AgentCodex, cfg); err == nil || metadata != "" {
-		t.Fatalf("metadata = %q, catalog error = %v", metadata, err)
+	config := readCodexConfigFile(t, env["CODEX_CONFIG"])
+	if _, ok := config["model_context_window"]; ok {
+		t.Fatalf("model_context_window present in %v", config)
 	}
 }
 
 func TestProcessEnvOnlySerializesProcessConfiguration(t *testing.T) {
-	t.Setenv(codexModelMetadataEnv, `{"id":"stale"}`)
 	catalog := &codexMetadataCatalog{err: errors.New("must not be called")}
 	manager := NewManager(nil, Config{ModelCatalog: catalog}, nil)
-	env := manager.processEnv(AgentCodex, AgentConfig{
-		ProviderMode:  AgentProviderModeAgentDefaults,
-		ModelProvider: provider.ProviderOpenRouter,
-		Model:         "moonshotai/kimi-k3",
-	})
-	if got := env[codexModelMetadataEnv]; got != "" {
-		t.Fatalf("Codex inherited model metadata %q", got)
-	}
+	manager.processEnv(AgentCodex, customProviderCodexConfig(provider.ProviderOpenRouter, "moonshotai/kimi-k3"))
 	if catalog.calls != 0 {
 		t.Fatalf("process environment performed %d catalog calls", catalog.calls)
 	}

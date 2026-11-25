@@ -152,7 +152,10 @@ func (m *Manager) openConn(ctx context.Context, name string, cfg AgentConfig, en
 	switch CanonicalAgentName(name) {
 	case AgentCodex:
 		if cfg.Model, err = m.startingModel(name, cfg); err == nil {
-			err = configureCodexEnv(launchDir, env, cfg, m.providers(), systemPrompt)
+			var contextWindow int
+			if contextWindow, err = m.resolveCodexCustomProviderContextWindow(name, cfg); err == nil {
+				err = configureCodexEnv(launchDir, env, cfg, m.providers(), contextWindow, systemPrompt)
+			}
 		}
 	case AgentMuse:
 		err = configureMusePrompt(launchDir, env, systemPrompt)
@@ -372,7 +375,6 @@ func (m *Manager) buildProcessEnv(name string, agent AgentConfig, cwd string, pr
 		prepareMuseEnv(root, env)
 	}
 	if name == AgentCodex {
-		delete(env, codexModelMetadataEnv)
 		providers := m.providers()
 		auth := resolveAgentAuthWithProviders(name, agent, root, env, providers)
 		codexHome := auth.Config.Path
