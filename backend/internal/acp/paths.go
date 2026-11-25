@@ -138,3 +138,10 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+func stringValue(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
+}

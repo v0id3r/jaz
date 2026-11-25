@@ -7,12 +7,11 @@ import (
 	"github.com/wins/jaz/backend/internal/sessionevents"
 )
 
-// The agent can begin work that no prompt asked for: Claude Code wakes its
-// model when a background task finishes after the turn that started it ended.
-// The adapter reports when the agent's work runs and ends, as
-// `_meta.jaz.stateUpdate` (ACP v2's state_update carried on v1). Work that no
-// turn holds runs as a turn of its own, owing its result to whoever waits for
-// the background work it reports on.
+// The agent can begin work that no prompt asked for: an adapter reports its
+// work through ACP v2's state_update, or, on v1, through the ext.stateUpdate
+// extension an adapter declares at initialize (Kimi). Work that no turn holds
+// runs as a turn of its own, owing its result to whoever waits for the
+// background work it reports on.
 
 // agentWork is what Jaz tracks of an agent that reports its work.
 type agentWork struct {
@@ -24,11 +23,14 @@ type agentWork struct {
 	replaying bool
 }
 
+// workState is the _meta.jaz.stateUpdate record of an agent's work on ACP
+// v1: the state_update of ACP v2 carried by a session_info_update. The Kimi
+// adapter sends it; it is the fork's one remaining Jaz-specific contract,
+// temporary until the Kimi server speaks ACP v2.
 type workState struct {
-	State      string             `json:"state"`
-	StopReason string             `json:"stopReason"`
-	Error      *jsonrpc.Error     `json:"error"`
-	Meta       sessionFailureMeta `json:"_meta"`
+	State      string         `json:"state"`
+	StopReason string         `json:"stopReason"`
+	Error      *jsonrpc.Error `json:"error"`
 	// Tasks are the background tasks whose end the work took in since the
 	// agent's last report.
 	Tasks []string `json:"tasks"`
@@ -61,6 +63,34 @@ func (m *Manager) applyWorkState(job *jobState, raw json.RawMessage) bool {
 		m.takeIn(job, state.Tasks)
 	}
 	return true
+}
+
+// endWork ends the running turn on the agent's idle report.
+func (m *Manager) endWork(job *jobState, report json.RawMessage, state workState) {
+	job.mu.Lock()
+	job.work.tasks.workEnded()
+	turn := job.turn
+	if turn == nil {
+		job.mu.Unlock()
+		return
+	}
+	run := turn.agentRun
+	steered := turn.promptCalls > 1
+	turn.agentRun = false
+	job.mu.Unlock()
+	if !run {
+		return
+	}
+	m.recordRawUsage(job, report)
+	if state.StopReason == "error" && !steered {
+		var err error = &jsonrpc.Error{Message: "agent run failed"}
+		if state.Error != nil {
+			err = state.Error
+		}
+		go m.failPromptCall(turn.done, job, err)
+		return
+	}
+	go m.completePromptCall(turn.done, job, state.StopReason, nil)
 }
 
 // startAgentRun runs the agent's work as a turn when no turn holds it. Work
@@ -111,35 +141,6 @@ func (m *Manager) startAgentRun(job *jobState, report json.RawMessage) {
 		m.log.Error("persist agent turn", "session", job.ID, "error", err)
 	}
 	go m.watchAgentRun(job, turn.done, closed)
-}
-
-// endWork records the agent's report that its work in the running turn
-// ended, which ends the agent's own run.
-func (m *Manager) endWork(job *jobState, report json.RawMessage, state workState) {
-	job.mu.Lock()
-	job.work.tasks.workEnded()
-	turn := job.turn
-	if turn == nil {
-		job.mu.Unlock()
-		return
-	}
-	run := turn.agentRun
-	steered := turn.promptCalls > 1
-	turn.agentRun = false
-	job.mu.Unlock()
-	if !run {
-		return
-	}
-	m.recordRawUsage(job, report)
-	if state.StopReason == "error" && !steered {
-		var err error = &jsonrpc.Error{Message: "agent run failed"}
-		if state.Error != nil {
-			err = state.Error
-		}
-		go m.failPromptCall(turn.done, job, err)
-		return
-	}
-	go m.completePromptCall(turn.done, job, state.StopReason, state.Meta.terminal())
 }
 
 // watchAgentRun fails the agent's run when its connection closes first, as a

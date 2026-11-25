@@ -103,6 +103,10 @@ func toolCallSubagentID(agent string, meta map[string]any) string {
 	return ""
 }
 
+// providerSubagentsFromMeta reads the subagent panel records of the v1 fork
+// adapters: Codex's collab agents under _meta.codex.providerSubagents and
+// Claude's reporter under _meta.jaz.providerSubagent. No agnostic adapter
+// emits either key; the readers stay until the v1 panel's removal.
 func providerSubagentsFromMeta(agent string, meta map[string]any, hint providerSubagentHint) []sessionevents.ProviderSubagentEvent {
 	if meta == nil {
 		return nil
@@ -135,6 +139,21 @@ func providerSubagentsFromMeta(agent string, meta map[string]any, hint providerS
 	return nil
 }
 
+func decodeProviderSubagent(raw any, agent string, hint providerSubagentHint) *sessionevents.ProviderSubagentEvent {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var subagent sessionevents.ProviderSubagentEvent
+	if err := json.Unmarshal(data, &subagent); err != nil {
+		return nil
+	}
+	if !normalizeProviderSubagent(&subagent, agent, hint) {
+		return nil
+	}
+	return &subagent
+}
+
 func decodeProviderSubagents(raw any, agent string, hint providerSubagentHint) []sessionevents.ProviderSubagentEvent {
 	data, err := json.Marshal(raw)
 	if err != nil {
@@ -150,21 +169,6 @@ func decodeProviderSubagents(raw any, agent string, hint providerSubagentHint) [
 		}
 	}
 	return subagents
-}
-
-func decodeProviderSubagent(raw any, agent string, hint providerSubagentHint) *sessionevents.ProviderSubagentEvent {
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var subagent sessionevents.ProviderSubagentEvent
-	if err := json.Unmarshal(data, &subagent); err != nil {
-		return nil
-	}
-	if !normalizeProviderSubagent(&subagent, agent, hint) {
-		return nil
-	}
-	return &subagent
 }
 
 func normalizeProviderSubagent(subagent *sessionevents.ProviderSubagentEvent, agent string, hint providerSubagentHint) bool {

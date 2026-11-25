@@ -19,6 +19,9 @@ type promptTrackingConn struct {
 	onSending  func(id string) error
 	onSent     func()
 	onAnswered func(id string)
+	// isSideSession reports whether a session id belongs to a side chat
+	// fork; a fork's prompt is not one of the turn's prompts.
+	isSideSession func(string) bool
 	// lastTraffic is when a message last crossed the connection either way,
 	// in Unix nanoseconds.
 	lastTraffic atomic.Int64
@@ -41,7 +44,7 @@ func (c *promptTrackingConn) trackPrompts(onSending func(id string) error, onSen
 
 func (c *promptTrackingConn) Send(ctx context.Context, msg *jsonrpc.Message) error {
 	c.lastTraffic.Store(time.Now().UnixNano())
-	id := promptID(msg)
+	id := c.promptID(msg)
 	c.cbMu.RLock()
 	onSending, onSent := c.onSending, c.onSent
 	c.cbMu.RUnlock()
@@ -91,8 +94,8 @@ func (c *promptTrackingConn) Receive(ctx context.Context) (*jsonrpc.Message, err
 }
 
 // promptID is the id of a turn's prompt or native steering request; a side
-// chat's prompt is not one.
-func promptID(msg *jsonrpc.Message) string {
+// chat fork's prompt is not one.
+func (c *promptTrackingConn) promptID(msg *jsonrpc.Message) string {
 	if !msg.IsRequest() || msg.Method != acpschema.AgentMethodSessionPrompt && msg.Method != string(steerNative) {
 		return ""
 	}
@@ -100,7 +103,7 @@ func promptID(msg *jsonrpc.Message) string {
 	if json.Unmarshal(msg.Params, &prompt) != nil {
 		return ""
 	}
-	if _, side := sideChatScopeFromMeta(prompt.Meta, ""); side {
+	if c.isSideSession != nil && c.isSideSession(string(prompt.SessionID)) {
 		return ""
 	}
 	id, _ := jsonrpc.IDKey(*msg.ID)

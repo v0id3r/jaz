@@ -72,6 +72,10 @@ func (m *Manager) requestPermission(ctx context.Context, raw json.RawMessage) (j
 func (m *Manager) applyUpdate(acpSessionID string, raw json.RawMessage) {
 	job := m.jobByACP(acpSessionID)
 	if job == nil {
+		if fork, ok := m.sideChatForkByACPSession(acpSessionID); ok {
+			m.applySideChatUpdate(fork, raw)
+			return
+		}
 		m.applySubagentChildUpdateV2(acpSessionID, raw)
 		return
 	}
@@ -107,7 +111,7 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 	}
 	var warning *sessionFailure
 	if info, ok := update.(acpschema.SessionInfoSessionUpdate); ok {
-		warning = sessionWarning(job.ID, info.Meta)
+		warning = sessionWarning(info.Meta)
 	}
 	if warning != nil && warning.notice() {
 		update = noticeMessage(*warning)
@@ -151,9 +155,6 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 		}
 		delete(job.deferredToolIDs, src.ID)
 		toolEvent = &call
-	}
-	if m.applySideChatUpdate(job, update) {
-		return
 	}
 	subagentUpdate := providerSubagentFromUpdate(job, update)
 	m.publishProviderSubagents(job.eventView(), subagentUpdate.subagents)
@@ -288,14 +289,9 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 	}
 }
 
-// messagePhase reads the message's phase mark: the jaz key of ACP v2
-// adapters, else the AIR extension of v1.
+// messagePhase reads the message's phase mark from the AIR phase extension;
+// an empty string means the message counts toward the result.
 func messagePhase(meta map[string]any) string {
-	if jaz, _ := meta["jaz"].(map[string]any); jaz != nil {
-		if phase, _ := jaz["phase"].(string); phase != "" {
-			return phase
-		}
-	}
 	jetbrains, _ := meta["jetbrains"].(map[string]any)
 	air, _ := jetbrains["air"].(map[string]any)
 	phase, _ := air["phase"].(string)

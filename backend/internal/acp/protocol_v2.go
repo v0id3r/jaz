@@ -150,6 +150,16 @@ func (m *Manager) initializeConn(ctx context.Context, peer *jsonrpc.Peer, name s
 		}
 		return nil, 0, fmt.Errorf("initialize acp agent: %w", withProcessStderr(err, stderr))
 	}
+	// v1 adapters gate terminal auth and streamed terminal output on these
+	// client capability flags; the AIR record negotiates typed failures, the
+	// recommended config values and async task reports of the v1 adapters
+	// that implement it.
+	meta := map[string]any{
+		"terminal-auth":         true,
+		"terminal_output_delta": true,
+		"jetbrains":             map[string]any{"air": map[string]any{"version": 1, "capabilities": []string{"asyncTasks", "recommendedValue", "sessionFailure"}}},
+		"jaz.dev/widget":        map[string]any{"version": 1},
+	}
 	raw, err := peer.Call(ctx, acpschema.AgentMethodInitialize, acpschema.InitializeRequest{
 		ProtocolVersion: acpschema.ProtocolVersion(acpschema.ProtocolVersionNumber),
 		ClientInfo: &acpschema.Implementation{
@@ -158,12 +168,7 @@ func (m *Manager) initializeConn(ctx context.Context, peer *jsonrpc.Peer, name s
 			Version: "0.1.0",
 		},
 		ClientCapabilities: &acpschema.ClientCapabilities{
-			Meta: map[string]any{
-				"terminal-auth":         true,
-				"terminal_output_delta": true,
-				"jetbrains":             map[string]any{"air": map[string]any{"version": 1, "capabilities": []string{"asyncTasks", "recommendedValue", "sessionFailure"}}},
-				"jaz.dev/widget":        map[string]any{"version": 1},
-			},
+			Meta: meta,
 			FS: &acpschema.FileSystemCapabilities{
 				ReadTextFile:  true,
 				WriteTextFile: true,

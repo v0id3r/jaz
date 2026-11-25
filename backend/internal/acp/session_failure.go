@@ -1,7 +1,6 @@
 package acp
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -12,8 +11,9 @@ import (
 
 // sessionFailure is a provider failure an agent reports through the AIR
 // sessionFailure extension Jaz negotiates at initialize. A turn's terminal
-// failure rides on its prompt response; records the agent sends while a turn
-// runs are the provider retrying on its own, or notices.
+// failure rides on its prompt response (v1) or its idle state_update (v2,
+// see failureFromStateV2); records the agent sends while a turn runs are the
+// provider retrying on its own, or notices.
 type sessionFailure struct {
 	ID       string   `json:"id"`
 	Category string   `json:"category"`
@@ -29,9 +29,6 @@ type sessionFailureMeta struct {
 			SessionFailure *sessionFailure `json:"sessionFailure"`
 		} `json:"air"`
 	} `json:"jetbrains"`
-	Jaz struct {
-		SessionFailure *sessionFailure `json:"sessionFailure"`
-	} `json:"jaz"`
 }
 
 // providerRetryDelays are the waits before each continuation Jaz sends after
@@ -39,9 +36,9 @@ type sessionFailureMeta struct {
 var providerRetryDelays = []time.Duration{15 * time.Second, time.Minute, 4 * time.Minute}
 
 // terminal is the failure that ended a turn; AIR reads an absent severity as
-// an error. The jaz namespace is the ACP v2 carrier of the same record.
+// an error.
 func (m sessionFailureMeta) terminal() *sessionFailure {
-	failure := cmp.Or(m.Jaz.SessionFailure, m.Jetbrains.Air.SessionFailure)
+	failure := m.Jetbrains.Air.SessionFailure
 	if failure == nil || failure.Severity == "warning" {
 		return nil
 	}
@@ -57,12 +54,9 @@ func (f sessionFailure) message() string {
 
 // sessionWarning is the warning record a session_info_update of the turn
 // carries: the provider retrying a failure of its category itself, or a
-// notice. A side chat's records are its own, not the turn's. v1 and v2 share
-// the record; the jaz namespace is the v2 carrier.
-func sessionWarning(jobID string, meta map[string]any) *sessionFailure {
-	if _, side := sideChatScopeFromMeta(meta, jobID); side {
-		return nil
-	}
+// notice. A side chat fork's records are its own and never reach the turn's
+// job, so no scope check is needed here.
+func sessionWarning(meta map[string]any) *sessionFailure {
 	raw, err := json.Marshal(meta)
 	if err != nil {
 		return nil
@@ -71,7 +65,7 @@ func sessionWarning(jobID string, meta map[string]any) *sessionFailure {
 	if json.Unmarshal(raw, &record) != nil {
 		return nil
 	}
-	if failure := cmp.Or(record.Jaz.SessionFailure, record.Jetbrains.Air.SessionFailure); failure != nil && failure.Severity == "warning" {
+	if failure := record.Jetbrains.Air.SessionFailure; failure != nil && failure.Severity == "warning" {
 		return failure
 	}
 	return nil

@@ -54,13 +54,13 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 		messageChunk = acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
 		messageID = string(event.MessageID)
 		job.noteStreamedMessageV2Locked(messageID)
-		m.appendMessageV2Locked(job, messageID, messageChunk, event.Meta)
+		m.appendMessageV2Locked(job, messageID, messageChunk)
 	case acpv2.AgentMessageUpdate:
 		m.confirmPromptV2Locked(job)
 		messageID = string(event.MessageID)
 		if text := acpv2.TextFromContent(event.Content); text != "" && job.claimMessageV2Locked(messageID) {
 			messageChunk = text
-			m.appendMessageV2Locked(job, messageID, messageChunk, event.Meta)
+			m.appendMessageV2Locked(job, messageID, messageChunk)
 		}
 	case acpv2.AgentThoughtChunkUpdate:
 		thoughtChunk = acpv2.TextFromContent([]acpv2.ContentBlock{event.Content})
@@ -98,7 +98,7 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 			publishACP = true
 		}
 	case acpv2.SessionInfoSessionUpdate:
-		warning = sessionWarning(job.ID, event.Meta)
+		warning = sessionWarning(event.Meta)
 		if warning != nil && warning.notice() {
 			messageChunk = "Warning: " + warning.message() + "\n\n"
 			job.appendAssistantLocked(messageChunk)
@@ -180,17 +180,12 @@ func (m *Manager) confirmPromptV2Locked(job *jobState) {
 	}
 }
 
-// appendMessageV2Locked appends an agent message chunk. v2 marks no phase, so
-// every message counts toward the result; the reply still resets on tools.
-func (m *Manager) appendMessageV2Locked(job *jobState, messageID, chunk string, meta map[string]any) {
+// appendMessageV2Locked appends an agent message chunk: every v2 message
+// counts toward the result; the reply still resets on tools.
+func (m *Manager) appendMessageV2Locked(job *jobState, messageID, chunk string) {
 	job.appendAssistantLocked(chunk)
 	if chunk != "" {
 		job.savedAssistantLen = len(job.Assistant)
-	}
-	phase := messagePhase(meta)
-	if phase != "" && phase != "final_answer" {
-		job.endReplyLocked()
-		return
 	}
 	job.resultText.WriteString(chunk)
 	job.Result = job.resultText.String()

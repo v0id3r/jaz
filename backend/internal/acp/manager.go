@@ -108,6 +108,7 @@ type Manager struct {
 	turnReaders       map[string]int
 	pendingDiscard    map[string]*jobState
 	subagentsV2       *subagentRegistryV2
+	sideChats         map[string]sideChatFork
 
 	pendingPermission map[string]*pendingPermission
 	permissionMu      sync.Mutex
@@ -268,6 +269,7 @@ func NewManager(store Store, cfg Config, logger *log.Logger) *Manager {
 		resumeLocks:       sessionlock.New(),
 		inputLocks:        sessionlock.New(),
 		subagentsV2:       newSubagentRegistryV2(),
+		sideChats:         make(map[string]sideChatFork),
 	}
 }
 
@@ -310,6 +312,10 @@ func (c *agentConn) withProcessStderr(err error) error {
 
 func (m *Manager) trackPromptSends(c *agentConn, job *jobState) {
 	if c.promptTracker != nil {
+		c.promptTracker.isSideSession = func(id string) bool {
+			_, side := m.sideChatForkByACPSession(id)
+			return side
+		}
 		c.promptTracker.trackPrompts(func(id string) error {
 			return m.promptSending(job, id)
 		}, func() {
@@ -330,16 +336,9 @@ func (m *Manager) connectWithHandler(ctx context.Context, name string, cfg Agent
 }
 
 func (m *Manager) connectProtocol(ctx context.Context, name string, cfg AgentConfig, cwd, artifactSurface, mcpServerPolicy string, systemPromptExtensions promptmodule.Modules, handler jsonrpc.Handler, allowV2 bool) (_ *agentConn, err error) {
-	modelMetadata, err := m.resolveCodexCustomProviderModelMetadata(name, cfg)
-	if err != nil {
-		return nil, err
-	}
 	env, err := m.processEnvPreparedForCwd(name, cfg, cwd)
 	if err != nil {
 		return nil, err
-	}
-	if modelMetadata != "" {
-		env[codexModelMetadataEnv] = modelMetadata
 	}
 	// Codex ACP predicts each next prompt with an extra model call; skip it
 	// where nobody writes one. The adapter reads this as each session opens.
