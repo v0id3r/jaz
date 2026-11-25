@@ -3,13 +3,19 @@ import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { BrowserWindow, app, net, protocol } from 'electron'
 import { RENDERER_DOCUMENT, RENDERER_HOST, RENDERER_SCHEME } from '@main/permissions'
+import { LOCAL_BACKEND_SCHEME } from '@shared/localBackend'
 
 const RENDERER_DIR = join(__dirname, '../renderer')
 const MIGRATION_PATH = '/storage-migration'
 
-protocol.registerSchemesAsPrivileged([
-  { scheme: RENDERER_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
-])
+// Electron keeps only the last registerSchemesAsPrivileged call, so every
+// app scheme is registered here at once.
+export function registerAppSchemes(): void {
+  protocol.registerSchemesAsPrivileged([RENDERER_SCHEME, LOCAL_BACKEND_SCHEME].map((scheme) => ({
+    scheme,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
+  })))
+}
 
 export function rendererURL(hash = ''): string {
   const dev = process.env['ELECTRON_RENDERER_URL']
@@ -17,13 +23,13 @@ export function rendererURL(hash = ''): string {
   return hash ? `${RENDERER_DOCUMENT}#${hash}` : RENDERER_DOCUMENT
 }
 
-export function serveRenderer(): void {
+export function serveRenderer(dir = RENDERER_DIR): void {
   protocol.handle(RENDERER_SCHEME, (request) => {
     const url = new URL(request.url)
     if (url.host !== RENDERER_HOST) return new Response(null, { status: 404 })
     if (url.pathname === MIGRATION_PATH) return new Response('', { headers: { 'content-type': 'text/html' } })
-    const file = join(RENDERER_DIR, decodeURIComponent(url.pathname))
-    if (relative(RENDERER_DIR, file).startsWith('..')) return new Response(null, { status: 404 })
+    const file = join(dir, decodeURIComponent(url.pathname))
+    if (relative(dir, file).startsWith('..')) return new Response(null, { status: 404 })
     return net.fetch(pathToFileURL(file).toString())
   })
 }

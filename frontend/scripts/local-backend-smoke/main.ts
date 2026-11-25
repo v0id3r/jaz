@@ -5,8 +5,9 @@ import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { installDroppedFileInspection } from '@main/fileActions'
-import { configureLocalBackendTransport, registerLocalBackendTransport } from '@main/localBackendTransport'
-import { configureAppPermissions } from '@main/permissions'
+import { configureLocalBackendTransport } from '@main/localBackendTransport'
+import { configureAppPermissions, RENDERER_DOCUMENT } from '@main/permissions'
+import { registerAppSchemes, serveRenderer } from '@main/rendererScheme'
 import { LOCAL_BACKEND_TRANSPORT_URL, LOCAL_BACKEND_URL } from '@shared/localBackend'
 import type { SessionMessages } from '@/lib/api/types'
 
@@ -14,7 +15,7 @@ const output = process.env.JAZ_LOCAL_BACKEND_TEST_DIR!
 if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
 app.disableHardwareAcceleration()
 app.setPath('userData', join(output, 'profile'))
-registerLocalBackendTransport()
+registerAppSchemes()
 let stage = 'startup'
 
 async function run() {
@@ -170,7 +171,8 @@ async function run() {
     }
   }
   stage = 'connect'
-  await window.loadFile(join(output, 'renderer', 'index.html'))
+  serveRenderer(join(output, 'renderer'))
+  await window.loadURL(RENDERER_DOCUMENT)
   await until(() => evaluate('Boolean(window.fixture)'))
   await until(() => evaluate('document.documentElement.dataset.status === "disconnected"'))
   assert.equal(await evaluate('fixture.connect()'), null)

@@ -41,9 +41,9 @@ import { createUpdateController } from './updater'
 import { createConnectionSession } from '@main/connectionSession'
 import { installDroppedFileInspection, installFileActions } from '@main/fileActions'
 import { attachContextMenu } from '@main/contextMenu'
-import { configureLocalBackendTransport, registerLocalBackendTransport } from '@main/localBackendTransport'
+import { configureLocalBackendTransport } from '@main/localBackendTransport'
 import { LOCAL_BACKEND_URL } from '@shared/localBackend'
-import { migrateFileOriginStorage, rendererURL, serveRenderer } from '@main/rendererScheme'
+import { migrateFileOriginStorage, registerAppSchemes, rendererURL, serveRenderer } from '@main/rendererScheme'
 
 // Matches --color-bg under :root.dark; used as the window paint color before
 // the renderer mounts so a dark launch doesn't flash white behind the content.
@@ -53,7 +53,7 @@ const APP_NAME = 'Jaz'
 
 app.setName(APP_NAME)
 app.setAppUserModelId('dev.wins.jaz')
-registerLocalBackendTransport()
+registerAppSchemes()
 installMainDiagnostics()
 installBrowserControl()
 installComputerControl()

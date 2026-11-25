@@ -20,10 +20,11 @@ import { accessibilityFixture, accessibilityFrame } from './accessibility'
 import { exerciseBrowserPopups } from './popups'
 import { configureAppPermissions } from '@main/permissions'
 import { clipboardFixture, exerciseClipboard } from './clipboard'
-import { configureLocalBackendTransport, registerLocalBackendTransport } from '@main/localBackendTransport'
+import { configureLocalBackendTransport } from '@main/localBackendTransport'
+import { registerAppSchemes } from '@main/rendererScheme'
 
 app.setName('Jaz')
-registerLocalBackendTransport()
+registerAppSchemes()
 let probingNavigation = false
 let navigationRequests: { url: string; webContentsId: number }[] = []
 // The suite runs on the developer's own desktop: no Dock icon, no focus and no

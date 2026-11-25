@@ -1,16 +1,10 @@
-import { protocol, type Session } from 'electron'
+import type { Session } from 'electron'
 import { LOCAL_BACKEND_SCHEME, LOCAL_BACKEND_TRANSPORT_URL } from '@shared/localBackend'
-
-export function registerLocalBackendTransport(): void {
-  protocol.registerSchemesAsPrivileged([{
-    scheme: LOCAL_BACKEND_SCHEME,
-    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
-  }])
-}
+import { RENDERER_HOST, RENDERER_SCHEME } from '@main/permissions'
 
 export function configureLocalBackendTransport(target: Session, backendURL: string): void {
   const rendererURL = process.env.ELECTRON_RENDERER_URL
-  const origin = rendererURL ? new URL(rendererURL).origin : 'file://'
+  const origin = rendererURL ? new URL(rendererURL).origin : `${RENDERER_SCHEME}://${RENDERER_HOST}`
   target.protocol.handle(LOCAL_BACKEND_SCHEME, async (request) => {
     const url = new URL(request.url)
     if (url.host !== 'backend' || url.username || url.password ||
