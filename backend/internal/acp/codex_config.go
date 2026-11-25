@@ -63,15 +63,19 @@ func configureCodexEnv(
 	// The launch names the model as `codex -m` does: Codex builds a thread's base
 	// instructions for the model it starts on and tells the model about any
 	// later model as a switch.
-	model, effort := strings.TrimSpace(cfg.Model), strings.TrimSpace(cfg.ReasoningEffort)
+	model := strings.TrimSpace(cfg.Model)
+	var launchEffort string
 	if base, suffix, ok := cutReasoningEffort(model); ok {
-		model, effort = base, suffix
+		model, launchEffort = base, suffix
 	}
 	if model != "" {
 		config["model"] = model
 	}
-	if effort != "" {
-		config["model_reasoning_effort"] = effort
+	// Only an effort encoded in the model id rides the launch config: the
+	// suffixed model skips the session config option, so nothing else carries
+	// it. A separately selected effort travels session/set_config_option alone.
+	if launchEffort != "" {
+		config["model_reasoning_effort"] = launchEffort
 	}
 
 	providerID, providerConfig := codexLaunchProvider(cfg, providers)

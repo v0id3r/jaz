@@ -46,6 +46,7 @@ func TestCodexMemoryUsesSelectedModelOrFails(t *testing.T) {
 			turnLog := filepath.Join(root, "turns.log")
 			manager := newFakeNamedAgentManagerWithOptions(t, store, root, acp.AgentCodex, map[string]string{
 				"JAZ_FAKE_ACP_MODELS": available, "JAZ_FAKE_ACP_SET_CONFIG": "1", "JAZ_FAKE_ACP_TURN_LOG": turnLog,
+				"JAZ_FAKE_ACP_MODEL_CONFIG_EFFORT_ID": "reasoning_effort", "JAZ_FAKE_ACP_MODEL_CONFIG_EFFORT_OPTIONS": "minimal,low,medium,high,xhigh,max,ultra",
 			}, "gpt-6-astra", "xhigh")
 			t.Cleanup(manager.Close)
 			_, err := memorysearch.New(store, manager).SearchMemory(testContext(t), memoryservice.SearchRequest{Query: "Jaz"})

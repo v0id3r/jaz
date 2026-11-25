@@ -38,10 +38,12 @@ func TestConfigureCodexEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	if config["model"] != "moonshotai/kimi-k3" ||
-		config["model_reasoning_effort"] != "max" ||
 		config["sandbox_mode"] != "danger-full-access" ||
 		config["approval_policy"] != "never" {
 		t.Fatalf("config = %#v", config)
+	}
+	if _, ok := config["model_reasoning_effort"]; ok {
+		t.Fatalf("selected effort must travel session/set_config_option, not the launch config: %#v", config)
 	}
 	features := config["features"].(map[string]any)
 	if !reflect.DeepEqual(features, map[string]any{"existing": true}) {
@@ -58,6 +60,31 @@ func TestConfigureCodexEnv(t *testing.T) {
 		"wire_api": "responses",
 	}) {
 		t.Fatalf("OpenRouter = %#v", modelProviders[modelprovider.ProviderOpenRouter])
+	}
+}
+
+func TestConfigureCodexEnvLaunchCarriesSuffixEncodedEffort(t *testing.T) {
+	env := map[string]string{}
+	err := configureCodexEnv(env, AgentConfig{
+		ModelProvider: modelprovider.ProviderOpenRouter,
+		Model:         "acme/corp-model/high",
+	}, map[string]modelprovider.ModelProviderConfig{
+		modelprovider.ProviderOpenRouter: {
+			Label:        "OpenRouter",
+			BaseURL:      "https://openrouter.ai/api/v1",
+			APIKeyEnv:    "OPENROUTER_API_KEY",
+			Capabilities: []string{modelprovider.CapabilityResponses},
+		},
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := decodeCodexConfig(env["CODEX_CONFIG"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config["model"] != "acme/corp-model" || config["model_reasoning_effort"] != "high" {
+		t.Fatalf("launch config = %#v", config)
 	}
 }
 
