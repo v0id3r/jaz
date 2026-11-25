@@ -75,8 +75,8 @@ func promptWithModules(base string, modules promptmodule.Modules) string {
 }
 
 // systemPromptMeta wraps prompt in the session _meta payload understood by
-// the named agent. ACP has no standard system-prompt field, so each adapter
-// defines its own extension key; every form below appends to the agent's own
+// the named agent, for agents without the standard systemPrompt capability
+// (see sessionSystemPromptSupported). Every form appends to the agent's own
 // system prompt rather than replacing it:
 //   - claude-agent-acp reads _meta.systemPrompt; {"append": ...} extends the
 //     Claude Code preset, while a bare string would replace it. Claude Code
@@ -84,11 +84,11 @@ func promptWithModules(base string, modules promptmodule.Modules) string {
 //     that record when the session is resumed; fresh sets the Agent SDK's
 //     "snapshot": false so each launch renders the prompt it is given instead.
 //   - grok reads _meta.rules and ignores _meta.systemPrompt.
-//   - codex receives developer instructions in its launch config and does not
-//     use this session metadata path.
 //   - kimi (Jaz fork) appends a _meta.systemPrompt string to its native system
 //     prompt without persisting it in conversation history.
 //
+// Agents that advertise sessionCapabilities.systemPrompt (codex, claude) get
+// the standard request field instead; this map stays for the rest.
 // Unknown agents get the codex-style bare string.
 func systemPromptMeta(agent, prompt string, fresh bool) map[string]any {
 	switch CanonicalAgentName(agent) {

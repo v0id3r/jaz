@@ -458,9 +458,10 @@ func (m *Manager) sessionPromptMeta(ctx context.Context, agent, cwd, artifactSur
 }
 
 type newSessionRequest struct {
-	Meta       map[string]any    `json:"_meta,omitempty"`
-	Cwd        string            `json:"cwd"`
-	MCPServers []json.RawMessage `json:"mcpServers"`
+	Meta         map[string]any           `json:"_meta,omitempty"`
+	Cwd          string                   `json:"cwd"`
+	MCPServers   []json.RawMessage        `json:"mcpServers"`
+	SystemPrompt *acpschema.SystemPrompt  `json:"systemPrompt,omitempty"`
 }
 
 func (m *Manager) newACPProtocolSession(ctx context.Context, ac *agentConn, label string, req newSessionRequest) (acpSessionInfo, error) {
@@ -498,10 +499,15 @@ func (m *Manager) newACPSession(ctx context.Context, ac *agentConn, agent string
 	if err != nil {
 		return acpSessionInfo{}, err
 	}
+	var systemPrompt *acpschema.SystemPrompt
+	if sessionSystemPromptSupported(ac.initRaw, ac.protocol) {
+		systemPrompt, meta = sessionSystemPromptV1(meta)
+	}
 	return m.newACPProtocolSession(ctx, ac, "agent", newSessionRequest{
-		Meta:       meta,
-		Cwd:        cwd,
-		MCPServers: m.mcpServersForAgent(m.mcpAuthContext(ctx, ac.sandboxed), ac.initRaw, session.RuntimeRef.MCPServerPolicy, agent),
+		Meta:         meta,
+		Cwd:          cwd,
+		MCPServers:   m.mcpServersForAgent(m.mcpAuthContext(ctx, ac.sandboxed), ac.initRaw, session.RuntimeRef.MCPServerPolicy, agent),
+		SystemPrompt: systemPrompt,
 	})
 }
 

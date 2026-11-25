@@ -29,7 +29,7 @@ func TestConfigureCodexEnv(t *testing.T) {
 		},
 	}
 
-	err := configureCodexEnv(t.TempDir(), env, cfg, providers, 0, "Jaz instructions")
+	err := configureCodexEnv(t.TempDir(), env, cfg, providers, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,8 +37,7 @@ func TestConfigureCodexEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config["developer_instructions"] != "Jaz instructions" ||
-		config["model"] != "moonshotai/kimi-k3" ||
+	if config["model"] != "moonshotai/kimi-k3" ||
 		config["model_reasoning_effort"] != "max" ||
 		config["sandbox_mode"] != "danger-full-access" ||
 		config["approval_policy"] != "never" {
@@ -67,7 +66,7 @@ func TestConfigureCodexEnvKeepsOpenAIAccountAuthNative(t *testing.T) {
 	err := configureCodexEnv(t.TempDir(), env, AgentConfig{
 		ModelProvider: modelprovider.ProviderOpenAI,
 		Model:         modelprovider.OpenAIModelGPT6Sol,
-	}, nil, 0, "instructions")
+	}, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,19 +258,19 @@ func TestConfigureCodexEnvReadsFileOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := map[string]string{"CODEX_CONFIG": "@" + path}
-	err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, 0, "instructions")
+	err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	config, err := decodeCodexConfig(env["CODEX_CONFIG"])
-	if err != nil || config["custom"] != "preserved" || config["developer_instructions"] != "instructions" {
+	if err != nil || config["custom"] != "preserved" {
 		t.Fatalf("config = %#v, err = %v", config, err)
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 	env["CODEX_CONFIG"] = "@" + path
-	if err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, 0, "instructions"); err == nil {
+	if err := configureCodexEnv(t.TempDir(), env, AgentConfig{}, nil, 0); err == nil {
 		t.Fatal("missing config file was accepted")
 	}
 }

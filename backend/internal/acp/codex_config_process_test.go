@@ -2,9 +2,7 @@ package acp
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -31,9 +29,9 @@ func TestCodexConfigProcessHelper(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	prompt, ok := config["developer_instructions"].(string)
-	if !ok || fmt.Sprintf("%x", sha256.Sum256([]byte(prompt))) != os.Getenv("JAZ_CODEX_PROMPT_SHA") {
-		t.Fatal("instructions changed")
+	// The system prompt travels session/new's standard field, not the launch config.
+	if _, ok := config["developer_instructions"]; ok {
+		t.Fatal("launch config carries the system prompt")
 	}
 	if config["model_provider"] != "openai" || config["custom"] != "preserved" {
 		t.Fatal("config changed")
@@ -65,11 +63,10 @@ func TestCodexConfigFileProcessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var paths []string
-	for _, label := range []string{"first", "second"} {
-		prompt := strings.Repeat(label+" Привет 🌍\n\"quoted\" \\path\n", 20000)
+	for range 2 {
 		receipt := filepath.Join(t.TempDir(), "receipt")
-		env := map[string]string{"CODEX_HOME": home, "CODEX_CONFIG": `{"custom":"preserved"}`, "JAZ_CODEX_CONFIG_PROBE": "1", "JAZ_CODEX_PROMPT_SHA": fmt.Sprintf("%x", sha256.Sum256([]byte(prompt))), "JAZ_CODEX_CONFIG_RECEIPT": receipt}
-		conn, stderr, err := manager.openConn(ctx, AgentCodex, AgentConfig{Command: executable, Args: []string{"-test.run=^TestCodexConfigProcessHelper$"}}, env, t.TempDir(), prompt)
+		env := map[string]string{"CODEX_HOME": home, "CODEX_CONFIG": `{"custom":"preserved"}`, "JAZ_CODEX_CONFIG_PROBE": "1", "JAZ_CODEX_CONFIG_RECEIPT": receipt}
+		conn, stderr, err := manager.openConn(ctx, AgentCodex, AgentConfig{Command: executable, Args: []string{"-test.run=^TestCodexConfigProcessHelper$"}}, env, t.TempDir(), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +124,7 @@ func TestCodexConfigFileProcessLifecycle(t *testing.T) {
 func TestCodexConfigFileRemovedOnStartFailure(t *testing.T) {
 	manager := NewManager(nil, Config{Root: t.TempDir()}, nil)
 	env := map[string]string{}
-	_, _, err := manager.openConn(context.Background(), AgentCodex, AgentConfig{Command: filepath.Join(t.TempDir(), "missing-executable")}, env, t.TempDir(), "instructions")
+	_, _, err := manager.openConn(context.Background(), AgentCodex, AgentConfig{Command: filepath.Join(t.TempDir(), "missing-executable")}, env, t.TempDir(), "")
 	if err == nil {
 		t.Fatal("missing executable started")
 	}

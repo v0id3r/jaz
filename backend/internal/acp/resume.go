@@ -215,16 +215,22 @@ func (m *Manager) restoreACPSession(ctx context.Context, ac *agentConn, agentNam
 		if err != nil {
 			return "", ModeState{}, false, err
 		}
+		var systemPrompt *acpschema.SystemPrompt
+		if sessionSystemPromptSupported(ac.initRaw, ac.protocol) {
+			systemPrompt, meta = sessionSystemPromptV1(meta)
+		}
 		raw, err := ac.peer.Call(ctx, restoreMethod, struct {
-			Meta       map[string]any      `json:"_meta,omitempty"`
-			Cwd        string              `json:"cwd"`
-			MCPServers []json.RawMessage   `json:"mcpServers"`
-			SessionID  acpschema.SessionID `json:"sessionId"`
+			Meta         map[string]any           `json:"_meta,omitempty"`
+			Cwd          string                   `json:"cwd"`
+			MCPServers   []json.RawMessage        `json:"mcpServers"`
+			SessionID    acpschema.SessionID      `json:"sessionId"`
+			SystemPrompt *acpschema.SystemPrompt  `json:"systemPrompt,omitempty"`
 		}{
-			Meta:       meta,
-			Cwd:        cwd,
-			MCPServers: m.mcpServersForAgent(m.mcpAuthContext(ctx, ac.sandboxed), ac.initRaw, mcpServerPolicy, agentName),
-			SessionID:  acpschema.SessionID(storedID),
+			Meta:         meta,
+			Cwd:          cwd,
+			MCPServers:   m.mcpServersForAgent(m.mcpAuthContext(ctx, ac.sandboxed), ac.initRaw, mcpServerPolicy, agentName),
+			SessionID:    acpschema.SessionID(storedID),
+			SystemPrompt: systemPrompt,
 		})
 		if err == nil {
 			var resp acpschema.LoadSessionResponse

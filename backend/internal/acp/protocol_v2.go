@@ -17,6 +17,57 @@ import (
 // of the connection, and everything after initialize speaks only that version.
 const protocolV2 = 2
 
+// splitSystemPromptMeta extracts the prompt text from the agent-specific
+// _meta.systemPrompt payload — a bare string (kimi, codex), {"append": ...}
+// (claude), or {"override": ...} — returning the meta without the key.
+func splitSystemPromptMeta(meta map[string]any) (text string, override bool, rest map[string]any) {
+	raw, ok := meta["systemPrompt"]
+	if !ok {
+		return "", false, meta
+	}
+	rest = make(map[string]any, len(meta))
+	for key, value := range meta {
+		if key != "systemPrompt" {
+			rest[key] = value
+		}
+	}
+	if len(rest) == 0 {
+		rest = nil
+	}
+	switch value := raw.(type) {
+	case string:
+		return value, false, rest
+	case map[string]any:
+		if text, _ := value["append"].(string); text != "" {
+			return text, false, rest
+		}
+		if text, _ := value["override"].(string); text != "" {
+			return text, true, rest
+		}
+	}
+	return "", false, rest
+}
+
+// sessionSystemPromptV1 lifts the agent-specific _meta system prompt into the
+// standard v1 systemPrompt field for agents that advertised the capability;
+// the fresh-render "snapshot" option has no standard counterpart and drops,
+// matching v2 where the standard field is already the only path.
+func sessionSystemPromptV1(meta map[string]any) (*acpschema.SystemPrompt, map[string]any) {
+	text, override, rest := splitSystemPromptMeta(meta)
+	if text == "" {
+		return nil, rest
+	}
+	mode := acpschema.SystemPromptModeAppend
+	if override {
+		mode = acpschema.SystemPromptModeOverride
+	}
+	block, err := json.Marshal(map[string]any{"type": "text", "text": text})
+	if err != nil {
+		return nil, rest
+	}
+	return &acpschema.SystemPrompt{Mode: mode, Content: []json.RawMessage{block}}, rest
+}
+
 // steerV2Prompt steers a v2 turn with a plain session/prompt: v2 agents take
 // mid-turn prompts into the running turn, and the turn ends on state_update.
 const steerV2Prompt steerMethod = "acp-v2/session/prompt"
@@ -192,35 +243,13 @@ func (m *Manager) initializeConn(ctx context.Context, peer *jsonrpc.Peer, name s
 // sessionSystemPromptV2 lifts the agent-specific _meta system prompt into
 // v2's standard session field, returning the remaining session _meta.
 func sessionSystemPromptV2(meta map[string]any) (*acpv2.SystemPrompt, map[string]any) {
-	raw, ok := meta["systemPrompt"]
-	if !ok {
-		return nil, meta
-	}
-	rest := make(map[string]any, len(meta))
-	for key, value := range meta {
-		if key != "systemPrompt" {
-			rest[key] = value
-		}
-	}
-	if len(rest) == 0 {
-		rest = nil
-	}
-	mode := acpv2.SystemPromptModeAppend
-	var text string
-	switch value := raw.(type) {
-	case string:
-		text = value
-	case map[string]any:
-		text, _ = value["append"].(string)
-		if text == "" {
-			text, _ = value["override"].(string)
-			if text != "" {
-				mode = acpv2.SystemPromptModeOverride
-			}
-		}
-	}
+	text, override, rest := splitSystemPromptMeta(meta)
 	if text == "" {
 		return nil, rest
+	}
+	mode := acpv2.SystemPromptModeAppend
+	if override {
+		mode = acpv2.SystemPromptModeOverride
 	}
 	block, err := json.Marshal(acpv2.TextContentBlock{Kind: acpv2.ContentBlockText, TextContent: acpv2.TextContent{Text: text}})
 	if err != nil {

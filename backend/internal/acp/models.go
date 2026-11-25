@@ -135,7 +135,6 @@ func agentPolicyForAgent(agentName string) agentPolicy {
 			effortInModelSuffix:     true,
 			providerInLaunch:        true,
 			modelConfiguredAtLaunch: true,
-			systemPromptAtLaunch:    true,
 			promptPersistsOnRestore: true,
 			materializesOnPrompt:    true,
 			unadvertisedModel:       unadvertisedModelSkipped,

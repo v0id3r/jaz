@@ -54,7 +54,6 @@ func configureCodexEnv(
 	cfg AgentConfig,
 	providers map[string]modelprovider.ModelProviderConfig,
 	contextWindow int,
-	developerInstructions string,
 ) error {
 	config, err := decodeCodexConfig(env["CODEX_CONFIG"])
 	if err != nil {
@@ -63,9 +62,6 @@ func configureCodexEnv(
 	config["sandbox_mode"] = "danger-full-access"
 	config["approval_policy"] = "never"
 	config["suppress_unstable_features_warning"] = true
-	if developerInstructions != "" {
-		config["developer_instructions"] = developerInstructions
-	}
 	// The launch names the model as `codex -m` does: Codex builds a thread's base
 	// instructions for the model it starts on and tells the model about any
 	// later model as a switch.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
+	acpv2 "github.com/gluonfield/acp-transport/acp/v2"
 )
 
 // systemPromptAppendMeta is advertised in initialize _meta by Jaz-patched
@@ -69,6 +70,25 @@ func validateProcessLifecycle(agent string, cfg AgentConfig, raw json.RawMessage
 func initializeMetaFlag(raw json.RawMessage, key string) bool {
 	var resp acpschema.InitializeResponse
 	return json.Unmarshal(raw, &resp) == nil && boolMeta(resp.Meta, key)
+}
+
+// sessionSystemPromptSupported reports whether the agent advertised the
+// standard systemPrompt session capability at initialize: v1 answers carry
+// sessionCapabilities.systemPrompt, v2 capabilities.session.systemPrompt
+// (codex-acp and claude-agent-acp do, on both protocols). Agents without it
+// (grok, kimi) keep their _meta system-prompt extension.
+func sessionSystemPromptSupported(raw json.RawMessage, protocol int) bool {
+	if protocol == protocolV2 {
+		var resp acpv2.InitializeResponse
+		return json.Unmarshal(raw, &resp) == nil && resp.Capabilities != nil &&
+			resp.Capabilities.Session != nil && resp.Capabilities.Session.SystemPrompt != nil
+	}
+	var resp acpschema.InitializeResponse
+	if json.Unmarshal(raw, &resp) != nil || resp.AgentCapabilities == nil {
+		return false
+	}
+	sessions := resp.AgentCapabilities.SessionCapabilities
+	return sessions != nil && sessions.SystemPrompt != nil
 }
 
 func sessionMaterializesOnPrompt(agent string, cfg AgentConfig) bool {
