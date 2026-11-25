@@ -80,8 +80,8 @@ func (m *Manager) applyJobUpdateV2(job *jobState, raw json.RawMessage) {
 	case acpv2.ToolCallContentChunkUpdate:
 		toolEvent = m.appendToolContentV2Locked(job, event, now)
 	case acpv2.TerminalSessionUpdate:
-		exitReported, exitCode, reason := terminalExitV2(raw)
-		m.applyTerminalUpdateV2Locked(job, event.TerminalUpdate, exitReported, exitCode, reason, now)
+		exitReported, exitCode := terminalExitV2(raw)
+		m.applyTerminalUpdateV2Locked(job, event.TerminalUpdate, exitReported, exitCode, now)
 		toolEvent = m.terminalToolEventV2Locked(job, string(event.TerminalID))
 	case acpv2.TerminalOutputChunkUpdate:
 		m.appendTerminalOutputV2Locked(job, string(event.TerminalID), event.Data)
@@ -220,7 +220,6 @@ func (j *jobState) noteStreamedMessageV2Locked(messageID string) {
 
 func (m *Manager) recordToolV2Locked(job *jobState, update acpv2.ToolCallUpdate, now time.Time) *sessionevents.ACPToolCall {
 	src := toolUpdateSnapshotV2(update)
-	src.SubagentID = toolCallSubagentID(job.ACPAgent, update.Meta)
 	if update.Capabilities != nil && update.Capabilities.Cancel != nil {
 		if job.cancellableToolsV2 == nil {
 			job.cancellableToolsV2 = map[string]bool{}
@@ -354,35 +353,25 @@ type terminalStateV2 struct {
 	exited      bool
 	exitCode    *int64
 	signal      string
-	reason      string
 }
 
 // terminalExitV2 reads the exit of a raw terminal_update: whether it carries
-// one, its exit code, and the reason its `_meta` names. The generated type
-// decodes an absent exitCode as zero, and an agent that reports no exit code
-// (a background command's end) must not read as exit 0.
-func terminalExitV2(raw json.RawMessage) (reported bool, exitCode *int64, reason string) {
+// one and its exit code. The generated type decodes an absent exitCode as
+// zero, and an agent that reports no exit code (a background command's end)
+// must not read as exit 0.
+func terminalExitV2(raw json.RawMessage) (reported bool, exitCode *int64) {
 	var probe struct {
 		ExitStatus *struct {
-			ExitCode *int64         `json:"exitCode"`
-			Meta     map[string]any `json:"_meta"`
+			ExitCode *int64 `json:"exitCode"`
 		} `json:"exitStatus"`
 	}
 	if json.Unmarshal(raw, &probe) != nil || probe.ExitStatus == nil {
-		return false, nil, ""
+		return false, nil
 	}
-	// The adapters namespace their metadata: claudeCode for Claude, codex for Codex.
-	for _, key := range []string{"claudeCode", "codex"} {
-		if meta, _ := probe.ExitStatus.Meta[key].(map[string]any); meta != nil {
-			if reason, _ := meta["reason"].(string); reason != "" {
-				return true, probe.ExitStatus.ExitCode, reason
-			}
-		}
-	}
-	return true, probe.ExitStatus.ExitCode, ""
+	return true, probe.ExitStatus.ExitCode
 }
 
-func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.TerminalUpdate, exitReported bool, exitCode *int64, reason string, now time.Time) {
+func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.TerminalUpdate, exitReported bool, exitCode *int64, now time.Time) {
 	id := string(update.TerminalID)
 	if job.terminalsV2 == nil {
 		job.terminalsV2 = map[string]*terminalStateV2{}
@@ -402,7 +391,6 @@ func (m *Manager) applyTerminalUpdateV2Locked(job *jobState, update acpv2.Termin
 		terminal.exited = true
 		terminal.exitCode = exitCode
 		terminal.signal = update.ExitStatus.Signal
-		terminal.reason = reason
 	}
 	if callID := job.terminalTool[id]; callID != "" {
 		call := job.toolByID[callID]

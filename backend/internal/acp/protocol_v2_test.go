@@ -590,14 +590,14 @@ func TestV2BackgroundTerminalSurvivesTurn(t *testing.T) {
 
 // A background terminal's end state is the one the agent reported: its exit
 // code when it exited, and a neutral ended when it left the list without a
-// reported end.
+// reported end. A stop the client asked for (terminal/cancel) ends stopped by
+// the client's own knowledge, with no reported end at all.
 func TestV2BackgroundTerminalOutcomes(t *testing.T) {
 	for _, test := range []struct {
 		name, prompt, want string
 	}{
 		{"exit zero", "terminal-exit-zero", "completed"},
 		{"exit nonzero", "terminal-exit-nonzero", "failed"},
-		{"codex stop", "terminal-codex-stop", "stopped"},
 		{"no reported end", "terminal-vanish", "ended"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

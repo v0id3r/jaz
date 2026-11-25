@@ -29,3 +29,20 @@ func (m *Manager) BackgroundTasksForTest(ref string) []sessionevents.AgentTask {
 	}
 	return out
 }
+
+// TerminalExitForTest exposes a terminal's exit as the agent last reported
+// it; live tests use it to wait out the terminal_update that confirms a
+// cancel, since the cancel itself leaves the tool call's status alone.
+func (m *Manager) TerminalExitForTest(ref, terminalID string) (exited bool, exitCode *int64, signal string) {
+	job, err := m.job(ref)
+	if err != nil {
+		return false, nil, ""
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	terminal := job.terminalsV2[terminalID]
+	if terminal == nil {
+		return false, nil, ""
+	}
+	return terminal.exited, terminal.exitCode, terminal.signal
+}

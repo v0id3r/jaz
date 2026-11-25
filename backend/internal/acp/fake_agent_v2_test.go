@@ -217,9 +217,9 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			answer(*msg.ID, map[string]any{})
 			notify(map[string]any{
 				"sessionUpdate": "terminal_update", "terminalId": req.TerminalID,
-				"exitStatus": map[string]any{
-					"_meta": map[string]any{"claudeCode": map[string]any{"reason": "stopped"}},
-				},
+				// A cancelled terminal ends with no exit details, as the real
+				// adapters report it: the client knows it asked for the stop.
+				"exitStatus": map[string]any{},
 			})
 			if heldTerminal {
 				heldTerminal = false
@@ -400,17 +400,6 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 					"exitStatus": map[string]any{"exitCode": 1},
 				})
 				text("a1", "the command failed")
-				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
-			case strings.Contains(message, "terminal-codex-stop"):
-				// The Codex adapter's shape of a client-requested stop.
-				notify(map[string]any{
-					"sessionUpdate": "terminal_update", "terminalId": "term-1",
-					"exitStatus": map[string]any{
-						"exitCode": nil, "signal": nil,
-						"_meta": map[string]any{"codex": map[string]any{"reason": "stopped"}},
-					},
-				})
-				text("a1", "the command was stopped")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
 			case strings.Contains(message, "terminal-vanish"):
 				text("a1", "the command is gone")

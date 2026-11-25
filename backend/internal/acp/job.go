@@ -126,9 +126,9 @@ type jobState struct {
 	finishing              chan struct{}
 	toolByID               map[string]sessionevents.ACPToolCall
 	pendingToolUpdateByID  map[string]sessionevents.ACPToolCall
-	subagentToolIDs        map[string]struct{}
 	seenMessagesV2         map[string]bool
 	cancellableToolsV2     map[string]bool
+	stoppedTasksV2         map[string]bool
 	terminalsV2            map[string]*terminalStateV2
 	terminalTool           map[string]string
 	deferredToolIDs        map[string]struct{}

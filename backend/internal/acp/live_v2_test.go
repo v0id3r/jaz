@@ -562,9 +562,12 @@ func liveAgentEnv() map[string]string {
 }
 
 // TestLiveBackgroundStop drives a real adapter through the Overview's
-// background-task stop: the task must end stopped, not completed, and the
-// background command's tool call must hold a final status. ACP_LIVE_V2=1
-// runs it on v2, otherwise on v1.
+// background-task stop: the task must end stopped, not completed. On v2 the
+// agent confirms the end with a terminal_update carrying an exitStatus — the
+// cancel itself leaves the referencing tool call's status alone (see
+// docs/protocol/v2/tool-calls.mdx, "Cancelling terminals"); on v1 the
+// adapter closes the call with the backgrounded result. ACP_LIVE_V2=1 runs
+// it on v2, otherwise on v1.
 func TestLiveBackgroundStop(t *testing.T) {
 	agent := os.Getenv("ACP_LIVE_AGENT")
 	command := os.Getenv("ACP_LIVE_AGENT_COMMAND")
@@ -640,8 +643,29 @@ func TestLiveBackgroundStop(t *testing.T) {
 	if final != "stopped" {
 		t.Errorf("[%s] stopped task ended %q, want stopped", label, final)
 	}
-	// The background command's tool call must not stay open after the stop:
-	// the journal's last projection of it holds a final status.
+	if v2 {
+		// ACP v2: terminal/cancel does not change the status of the tool call
+		// that references the terminal; the agent confirms the end with a
+		// terminal_update carrying an exitStatus. Wait for that report, and
+		// read no exit 0 out of an end that named no code (spec: an exit
+		// without details is unknown, not success).
+		exited, exitCode, signal := false, (*int64)(nil), ""
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) && !exited {
+			exited, exitCode, signal = manager.TerminalExitForTest(spawned.SessionID, taskID)
+			time.Sleep(200 * time.Millisecond)
+		}
+		t.Logf("[%s] terminal %s exit reported=%v code=%v signal=%v", label, taskID, exited, exitCode, signal)
+		if !exited {
+			t.Errorf("[%s] no terminal_update with exitStatus after the stop", label)
+		} else if exitCode != nil && *exitCode == 0 && signal == "" && final == "stopped" {
+			t.Errorf("[%s] killed command shows exit 0", label)
+		}
+		return
+	}
+	// v1: the adapter sends an explicit exit_code 0 with the backgrounded
+	// result itself; the journal's last projection of the call holds a final
+	// status, so the call must not stay open after the stop.
 	events, err := store.LoadSessionEvents(spawned.SessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -654,7 +678,6 @@ func TestLiveBackgroundStop(t *testing.T) {
 		for _, call := range event.ACP.ToolCalls {
 			if call.ID == taskID || call.ID == toolCallID || call.Runtime.TerminalID == taskID {
 				last = &call
-				t.Logf("[%s] projection at %s: status=%s exit=%v", label, event.At.Format("15:04:05.000"), call.Status, call.Runtime.TerminalExitCode)
 			}
 		}
 	}
@@ -664,11 +687,5 @@ func TestLiveBackgroundStop(t *testing.T) {
 	t.Logf("[%s] tool call %s: status=%s exit=%v signal=%v", label, last.ID, last.Status, last.Runtime.TerminalExitCode, last.Runtime.TerminalExitSignal)
 	if last.Status == "pending" || last.Status == "in_progress" {
 		t.Errorf("[%s] tool call %s stayed %s after the stop", label, last.ID, last.Status)
-	}
-	if v2 && last.Runtime.TerminalExitCode != nil && *last.Runtime.TerminalExitCode == 0 && last.Runtime.TerminalExitSignal == nil && final == "stopped" {
-		// v2 reports a background command's end with an empty exitStatus; Jaz
-		// must not read it as exit 0. (v1's adapter sends an explicit
-		// exit_code 0 with the backgrounded result itself.)
-		t.Errorf("[%s] killed command shows exit 0", label)
 	}
 }

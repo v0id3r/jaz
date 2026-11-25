@@ -18,6 +18,7 @@ import (
 	"github.com/wins/jaz/backend/internal/server"
 	"github.com/wins/jaz/backend/internal/sessionevents"
 	"github.com/wins/jaz/backend/internal/sessionlock"
+	sqlitestore "github.com/wins/jaz/backend/internal/storage/sqlite"
 )
 
 func TestIdleProcessStopsAndItsThreadResumesTheNativeSession(t *testing.T) {
@@ -116,16 +117,6 @@ func TestIdleStopWaitsForWorkInTheProcess(t *testing.T) {
 			},
 			finish: func(ctx context.Context, manager *acp.Manager, id string) error {
 				return turn(ctx, manager, id, "task build=completed")
-			},
-		},
-		{
-			name:  "provider subagent",
-			agent: acp.AgentClaude,
-			start: func(ctx context.Context, manager *acp.Manager, id string) <-chan error {
-				return finished(turn(ctx, manager, id, "subagent toolu_bg=running"))
-			},
-			finish: func(ctx context.Context, manager *acp.Manager, id string) error {
-				return turn(ctx, manager, id, "subagent toolu_bg=completed")
 			},
 		},
 		{
@@ -286,7 +277,11 @@ func TestStoppedThreadsResumeInParallel(t *testing.T) {
 // so a thread whose process stopped reads from storage as its turn left it.
 func idleManager(t *testing.T, agent string, env map[string]string, model, effort string) *acp.Manager {
 	t.Helper()
-	store := newProviderSubagentStore(t)
+	store, err := sqlitestore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
 	manager := newFakeNamedAgentManagerWithOptions(t, store, t.TempDir(), agent, env, model, effort)
 	manager.Events = sessionevents.New()
 	manager.TurnFinished = (&server.Server{Store: store, ACP: manager, Locks: sessionlock.New(), Events: manager.Events}).HandleACPTurnFinished

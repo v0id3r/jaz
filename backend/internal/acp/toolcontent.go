@@ -47,9 +47,6 @@ func mergeToolCall(dst *sessionevents.ACPToolCall, src sessionevents.ACPToolCall
 		dst.ToolName = src.ToolName
 	}
 	dst.Cancellable = dst.Cancellable || src.Cancellable
-	if src.SubagentID != "" {
-		dst.SubagentID = src.SubagentID
-	}
 	if len(src.Content) > 0 {
 		dst.Content = src.Content
 	}
@@ -158,23 +155,6 @@ func toolUpdateName(update acpschema.ToolCallUpdate) string {
 		if name, ok := cc["toolName"].(string); ok && name != "" {
 			return name
 		}
-	}
-	codex, ok := update.Meta[codexMetaKey].(map[string]any)
-	if !ok {
-		return ""
-	}
-	if _, ok := codex[providerSubagentsMetaKey]; !ok {
-		return ""
-	}
-	var input struct {
-		ActivityKind string `json:"activityKind"`
-	}
-	action := update.Title
-	if json.Unmarshal(update.RawInput, &input) == nil && input.ActivityKind != "" {
-		action = input.ActivityKind
-	}
-	if action != "" {
-		return "codex." + action
 	}
 	return ""
 }

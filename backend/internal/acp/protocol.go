@@ -156,11 +156,6 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 		delete(job.deferredToolIDs, src.ID)
 		toolEvent = &call
 	}
-	subagentUpdate := providerSubagentFromUpdate(job, update)
-	m.publishProviderSubagents(job.eventView(), subagentUpdate.subagents)
-	if subagentUpdate.consume {
-		return
-	}
 	job.mu.Lock()
 	switch update.(type) {
 	case acpschema.AgentMessageChunkUpdate, acpschema.AgentThoughtChunkUpdate, acpschema.ToolCallSessionUpdate, acpschema.ToolCallUpdateSessionUpdate, acpschema.PlanSessionUpdate:
@@ -196,12 +191,10 @@ func (m *Manager) applyJobUpdate(job *jobState, raw json.RawMessage) {
 		job.endReplyLocked()
 		job.breakResultMessageLocked()
 		src := toolUpdateSnapshot(acpschema.ToolCallUpdate(event.ToolCall))
-		src.SubagentID = toolCallSubagentID(job.ACPAgent, event.Meta)
 		recordTool(src, true)
 	case acpschema.ToolCallUpdateSessionUpdate:
 		job.breakResultMessageLocked()
 		src := toolUpdateSnapshot(event.ToolCallUpdate)
-		src.SubagentID = toolCallSubagentID(job.ACPAgent, event.Meta)
 		recordTool(src, false)
 	case acpschema.PlanSessionUpdate:
 		job.breakResultMessageLocked()

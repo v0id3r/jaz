@@ -543,10 +543,7 @@ type ACPToolCall struct {
 	// (ACP v2 tool-call cancel capability), so the UI can stop the one call
 	// without cancelling the turn.
 	Cancellable bool `json:"cancellable,omitempty"`
-	// SubagentID names the provider subagent the agent linked this call to,
-	// so the call's card can open the subagent's transcript.
-	SubagentID string            `json:"subagent_id,omitempty"`
-	Content    []ACPToolContent  `json:"content,omitempty"`
+	Content     []ACPToolContent  `json:"content,omitempty"`
 	Locations  []ACPToolLocation `json:"locations,omitempty"`
 	RawInput   map[string]any    `json:"raw_input,omitempty"`
 	RawOutput  json.RawMessage   `json:"raw_output,omitempty"`

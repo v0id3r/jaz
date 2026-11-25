@@ -15,7 +15,6 @@ func (a ACPToolCall) EqualTranscript(b ACPToolCall) bool {
 		a.Kind == b.Kind &&
 		a.ToolName == b.ToolName &&
 		a.Cancellable == b.Cancellable &&
-		a.SubagentID == b.SubagentID &&
 		slices.Equal(a.Content, b.Content) &&
 		slices.Equal(a.Locations, b.Locations) &&
 		equalToolInput(a.RawInput, b.RawInput) &&
