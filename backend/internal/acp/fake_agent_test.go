@@ -93,18 +93,6 @@ func TestFakeACPAgentProcess(t *testing.T) {
 			t.Fatalf("Codex goals = %v (set %v), want %s", value, set, want)
 		}
 	}
-	if want := os.Getenv("JAZ_FAKE_ACP_EXPECT_CODEX_METADATA"); want != "" {
-		var metadata struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal([]byte(os.Getenv("JAZ_CODEX_MODEL_METADATA")), &metadata); err != nil || metadata.ID != want {
-			t.Fatalf("Codex model metadata = %#v, %v; want %q", metadata, err, want)
-		}
-	}
-	expectsNoMetadata := os.Getenv("JAZ_FAKE_ACP_EXPECT_NO_CODEX_METADATA") == "1"
-	if metadata := os.Getenv("JAZ_CODEX_MODEL_METADATA"); expectsNoMetadata && metadata != "" {
-		t.Fatalf("unexpected Codex model metadata %q", metadata)
-	}
 	if msg := os.Getenv("JAZ_FAKE_ACP_EXIT_BEFORE_INIT"); msg != "" {
 		_, _ = fmt.Fprintln(os.Stderr, msg)
 		os.Exit(2)
@@ -141,6 +129,7 @@ func TestFakeACPAgentProcess(t *testing.T) {
 	cancelArrived := false
 	typedFailures := false
 	prompts := 0
+	fakeForks := map[string]string{}
 	for {
 		msg, err := conn.Receive(context.Background())
 		if err != nil {
@@ -382,6 +371,17 @@ func TestFakeACPAgentProcess(t *testing.T) {
 			}
 			addFakePlanConfig(result)
 			sendResult(conn, msg, result)
+		case "session/fork":
+			var req struct {
+				SessionID string `json:"sessionId"`
+			}
+			_ = json.Unmarshal(msg.Params, &req)
+			forkID := fmt.Sprintf("fake-side-%d", len(fakeForks)+1)
+			if req.SessionID == "" {
+				req.SessionID = fakeSessionID
+			}
+			fakeForks[forkID] = req.SessionID
+			sendResult(conn, msg, map[string]any{"sessionId": forkID})
 		case "session/close":
 			sendResult(conn, msg, map[string]any{})
 		case "session/set_mode":
@@ -504,15 +504,6 @@ func TestFakeACPAgentProcess(t *testing.T) {
 			if stream && pendingPrompt != nil {
 				sendResult(conn, pendingPrompt, map[string]any{"stopReason": "end_turn"})
 				pendingPrompt = nil
-				notify(conn, "session/update", map[string]any{
-					"sessionId": fakeSessionID,
-					"update": map[string]any{
-						"sessionUpdate": "session_info_update",
-						"_meta": map[string]any{"turnId": 2, "jaz": map[string]any{
-							"stateUpdate": map[string]any{"state": "working"},
-						}},
-					},
-				})
 			}
 			notify(conn, "session/update", map[string]any{
 				"sessionId": fakeSessionID,
@@ -520,7 +511,6 @@ func TestFakeACPAgentProcess(t *testing.T) {
 					"sessionUpdate": "agent_message_chunk",
 					"messageId":     nextMessageID("native-steer"),
 					"content":       map[string]any{"type": "text", "text": "hello from native steer"},
-					"_meta":         map[string]any{"turnId": 2},
 				},
 			})
 			if stream {
@@ -600,7 +590,8 @@ func TestFakeACPAgentProcess(t *testing.T) {
 				waitForFakeFile(path)
 			}
 			var promptReq struct {
-				Meta map[string]any `json:"_meta"`
+				Meta      map[string]any `json:"_meta"`
+				SessionID string         `json:"sessionId"`
 			}
 			_ = json.Unmarshal(msg.Params, &promptReq)
 			if authRequired {
@@ -672,12 +663,11 @@ func TestFakeACPAgentProcess(t *testing.T) {
 					"update":    map[string]any{"sessionUpdate": "session_info_update", "title": "<message_context> echoed prompt"},
 				})
 			}
-			if _, ok := fakeSideChatMeta(promptReq.Meta); ok {
+			if _, ok := fakeForks[string(promptReq.SessionID)]; ok {
 				notify(conn, "session/update", map[string]any{
-					"sessionId": fakeSessionID,
+					"sessionId": string(promptReq.SessionID),
 					"update": map[string]any{
 						"sessionUpdate": "agent_message_chunk",
-						"_meta":         promptReq.Meta,
 						"messageId":     nextMessageID("side-chat"),
 						"content":       map[string]any{"type": "text", "text": "hello from side chat"},
 					},
@@ -1097,19 +1087,6 @@ func fakeUltracodeMeta(meta map[string]any) bool {
 	}
 	value, ok := settings["ultracode"].(bool)
 	return ok && value
-}
-
-func fakeSideChatMeta(meta map[string]any) (map[string]any, bool) {
-	codex, ok := meta["codex"].(map[string]any)
-	if !ok {
-		return nil, false
-	}
-	sideChat, ok := codex["sideChat"].(map[string]any)
-	if !ok {
-		return nil, false
-	}
-	_, ok = sideChat["id"].(string)
-	return sideChat, ok
 }
 
 func validateFakeMCPServers(rawServers []json.RawMessage) error {

@@ -291,6 +291,10 @@ func TestSideChatSessionUpdatePublishesAndPersistsSideChatEvent(t *testing.T) {
 	manager.Events = events
 	manager.jobsByID[session.ID] = &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPAgent: AgentCodex, ACPSession: "acp-session"}}
 	manager.jobsByACP["acp-session"] = manager.jobsByID[session.ID]
+	manager.rememberSideChatFork("fake-side-1", sideChatFork{
+		jobID: session.ID,
+		scope: sideChatScope{ID: "side-1", Command: "side", ParentSessionID: session.ID, ThreadID: "thread-1"},
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -299,21 +303,11 @@ func TestSideChatSessionUpdatePublishesAndPersistsSideChatEvent(t *testing.T) {
 	raw, rpcErr := manager.handleJSONRPC(ctx, jsonrpc.Request{
 		Method: acpschema.ClientMethodSessionUpdate,
 		Params: mustJSON(t, map[string]any{
-			"sessionId": "acp-session",
+			"sessionId": "fake-side-1",
 			"update": map[string]any{
 				"sessionUpdate": "agent_message_chunk",
 				"messageId":     "side-chat-message",
-				"_meta": map[string]any{
-					"codex": map[string]any{
-						"sideChat": map[string]any{
-							"id":              "side-1",
-							"command":         "side",
-							"parentSessionId": session.ID,
-							"threadId":        "thread-1",
-						},
-					},
-				},
-				"content": map[string]any{"type": "text", "text": "side answer"},
+				"content":       map[string]any{"type": "text", "text": "side answer"},
 			},
 		}),
 	})

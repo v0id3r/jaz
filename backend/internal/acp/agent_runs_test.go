@@ -16,8 +16,9 @@ import (
 	"github.com/wins/jaz/backend/internal/storage"
 )
 
-// workState has every turn of the fake agent report its work, as the Claude
-// adapter does, each thread's agent under its own session id, with env added.
+// workState has every turn of the fake agent report its work, as the Kimi
+// adapter does through ext.stateUpdate, each thread's agent under its own
+// session id, with env added.
 func workState(env ...string) map[string]string {
 	out := map[string]string{"JAZ_FAKE_ACP_WORK_STATE": "1", "JAZ_FAKE_ACP_UNIQUE_SESSION": "1"}
 	for i := 0; i < len(env); i += 2 {
@@ -172,7 +173,7 @@ func TestAMessageAfterTheWorkFinishedOwesTheParentTheAgentsReport(t *testing.T) 
 	parent, thread := startBackgroundWork(t, jaz, "start background work suite")
 	jaz.step("suite")
 	jaz.finished(thread)
-	// The user writes before the agent's run about it begins; Claude Code takes
+	// The user writes before the agent's run about it begins; the adapter takes
 	// the message into that run.
 	jaz.write(thread, "is the suite done?")
 	if result := jaz.twoResults(parent, thread)[1]; !strings.Contains(result, "suite finished: all green.") {
@@ -193,7 +194,7 @@ func TestWorkThatFinishesDuringAnotherTurnIsOwedByThatTurn(t *testing.T) {
 		done = append(done, job)
 	}
 	parent, thread := startBackgroundWork(t, jaz, "start background work suite")
-	// The user's turn runs when the work finishes; Claude Code reports the
+	// The user's turn runs when the work finishes; the adapter reports the
 	// work in that turn.
 	jaz.chat(thread)
 	jaz.step("suite")
@@ -279,7 +280,7 @@ func TestWorkTwoBotsAskedForThatFinishesTogetherReportsToEach(t *testing.T) {
 	jaz.step("alpha")
 	jaz.step("beta")
 	jaz.eventually("both finishing", func() bool { return jaz.finishedTasks(runner) == 2 })
-	// One run takes in both, as Claude Code batches what finished together.
+	// One run takes in both, as the adapter batches what finished together.
 	jaz.step("alpha-run")
 	jaz.step("alpha-done")
 	results := jaz.deliveries(lead, 4)
@@ -380,7 +381,7 @@ func TestWorkATurnTookInIsNotOwedAgainByTheRunAfterIt(t *testing.T) {
 	jaz.ask(runner, askers[0], "start background work alpha")
 	jaz.ask(runner, askers[1], "start background work late")
 	// The user's turn takes alpha in. Late finishes during its last model
-	// call, so Claude Code reports it in a run after the turn.
+	// call, so the adapter reports it in a run after the turn.
 	if _, err := jaz.manager.Send(jaz.ctx, acp.SendRequest{Session: runner, Message: "work until step chat", Completion: acp.CompletionInline}); err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +409,7 @@ func TestWorkTheModelWasNeverToldOfIsOwedByNoLaterRun(t *testing.T) {
 		name   string
 		finish func(jaz *jazProcess, runner string)
 	}{
-		// Claude Code tells the model of work that finishes during a turn only
+		// the adapter tells the model of work that finishes during a turn only
 		// by naming it, so unnamed it waits for no run.
 		{"finished during a turn", func(jaz *jazProcess, runner string) {
 			if _, err := jaz.manager.Send(jaz.ctx, acp.SendRequest{Session: runner, Message: "work until step chat", Completion: acp.CompletionInline}); err != nil {

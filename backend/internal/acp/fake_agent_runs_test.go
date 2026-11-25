@@ -14,10 +14,10 @@ import (
 )
 
 // fakeBackgroundWork makes a prompt start background work that outlives its
-// turn, as a background command does in Claude Code, and reports the agent's
-// work as the Claude adapter does. The test lets it go on step by step by
-// writing <release file>-<name> (the work finishes), then -<name>-run (the
-// agent's own run about the work that finished gives its first output), then
+// turn and reports the agent's work as the Kimi adapter does, through
+// _meta.jaz.stateUpdate. The test lets it go on step by step by writing
+// <release file>-<name> (the work finishes), then -<name>-run (the agent's
+// own run about the work that finished gives its first output), then
 // -<name>-done (the run ends); with "at once" every step follows the turn at
 // once.
 //
@@ -25,23 +25,23 @@ import (
 // except work named late, which finishes during the turn's last model call.
 // Other finished work waits for the agent's own run, which takes in all the
 // work waiting when it begins. A prompt that comes after work finished and
-// before the run ended is taken into the run, as Claude Code takes it in, and
-// the run ends with that prompt's turn. A prompt that says "after the run"
-// instead waits for the run to end and runs as a turn of its own. The run
-// about work named broken fails. With "at once", the work finishes as the
-// turn ends and the run follows its response at once; the fake then writes
-// <release file>-<name>-emitted. With "untold", Claude Code never tells the
+// before the run ended is taken into the run, and the run ends with that
+// prompt's turn. A prompt that says "after the run" instead waits for the run
+// to end and runs as a turn of its own. The run about work named broken
+// fails. With "at once", the work finishes as the turn ends and the run
+// follows its response at once; the fake then writes
+// <release file>-<name>-emitted. With "untold", the adapter never tells the
 // model the work finished. With "quietly", the agent reports neither its work
-// nor a run of its own, as agents other than Claude do.
+// nor a run of its own, as adapters without the work-state record do.
 //
 // "start background agent <name>" starts a background subagent instead: the
 // adapter reports the turn's work ended at its result, but holds the turn's
 // response until the subagent's follow-up, a cycle of its own, has reported
 // (after <release file>-<name>).
 //
-// Each idle report names the work its turn took in, as the Claude adapter
-// does, unless JAZ_FAKE_ACP_UNNAMED=1. With JAZ_FAKE_ACP_WORK_STATE=1, every
-// other prompt's turn reports its work as well.
+// Each idle report names the work its turn took in, as the Kimi adapter does,
+// unless JAZ_FAKE_ACP_UNNAMED=1. With JAZ_FAKE_ACP_WORK_STATE=1, every other
+// prompt's turn reports its work as well.
 var fakeBackgroundWork = regexp.MustCompile(`start background work (\w+)( at once| quietly| untold)?`)
 
 var fakeStepHold = regexp.MustCompile(`work until step (\w+)`)
@@ -58,6 +58,17 @@ var fakeRun struct {
 	taken   []string
 	running bool
 	inTurn  bool
+}
+
+func fakeText(conn jsonrpc.MessageConn, text string) {
+	notify(conn, "session/update", map[string]any{
+		"sessionId": fakeSessionID,
+		"update": map[string]any{
+			"sessionUpdate": "agent_message_chunk",
+			"messageId":     "run-message-" + strconv.FormatInt(fakeRunMessages.Add(1), 10),
+			"content":       map[string]any{"type": "text", "text": text},
+		},
+	})
 }
 
 func startFakeBackgroundWork(conn jsonrpc.MessageConn, msg *jsonrpc.Message) bool {
@@ -201,20 +212,8 @@ func fakeTurnEnds(conn jsonrpc.MessageConn) {
 	fakeWorkState(conn, map[string]any{"state": "idle", "stopReason": "end_turn"}, taken)
 }
 
-// fakeTurnFails ends a prompt's turn with the provider failure in meta, as
-// the Claude adapter reports it before the prompt's response.
-func fakeTurnFails(conn jsonrpc.MessageConn, meta map[string]any) {
-	if os.Getenv("JAZ_FAKE_ACP_WORK_STATE") != "1" {
-		return
-	}
-	fakeRun.mu.Lock()
-	defer fakeRun.mu.Unlock()
-	fakeRun.inTurn = false
-	fakeWorkState(conn, map[string]any{"state": "idle", "stopReason": "end_turn", "_meta": meta}, nil)
-}
-
 // fakeRunBegins begins the agent's own run, which takes in the work waiting;
-// Claude Code names that work only at the run's end (see fakeRunEnds).
+// the adapter names that work only at the run's end (see fakeRunEnds).
 func fakeRunBegins(conn jsonrpc.MessageConn) {
 	fakeRun.running = true
 	fakeRun.taken, fakeRun.waiting = fakeRun.waiting, nil
@@ -240,7 +239,8 @@ func fakeRunEnds(conn jsonrpc.MessageConn) {
 	}, taken)
 }
 
-// fakeWorkState reports the agent's work, naming the finished work taken in.
+// fakeWorkState reports the agent's work, naming the finished work taken in,
+// under the _meta.jaz.stateUpdate key of the session_info_update's meta.
 func fakeWorkState(conn jsonrpc.MessageConn, state map[string]any, taken []string) {
 	if os.Getenv("JAZ_FAKE_ACP_UNNAMED") != "1" {
 		state["tasks"] = append([]string{}, taken...)
@@ -251,18 +251,6 @@ func fakeWorkState(conn jsonrpc.MessageConn, state map[string]any, taken []strin
 	})
 }
 
-func fakeText(conn jsonrpc.MessageConn, text string) {
-	notify(conn, "session/update", map[string]any{
-		"sessionId": fakeSessionID,
-		"update": map[string]any{
-			"sessionUpdate": "agent_message_chunk",
-			"messageId":     "run-message-" + strconv.FormatInt(fakeRunMessages.Add(1), 10),
-			"content":       map[string]any{"type": "text", "text": text},
-		},
-	})
-}
-
-// waitForFakeFile waits for path, and exits once Jaz is gone.
 func waitForFakeFile(path string) {
 	for _, err := os.Stat(path); err != nil; _, err = os.Stat(path) {
 		if os.Getppid() == 1 {

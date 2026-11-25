@@ -139,9 +139,9 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			answer(*msg.ID, map[string]any{
 				"protocolVersion": 2,
 				"info":            map[string]any{"name": "fake-v2-agent", "version": "test"},
-				"capabilities": map[string]any{"session": map[string]any{
-					"mcp": map[string]any{"http": map[string]any{}},
-				}},
+				"capabilities": map[string]any{
+					"session": map[string]any{"mcp": map[string]any{"http": map[string]any{}}},
+				},
 			})
 		case "session/new", "session/resume":
 			var req struct {
@@ -487,12 +487,10 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				notify(map[string]any{
 					"sessionUpdate": "agent_message_chunk", "messageId": "m1",
 					"content": map[string]any{"type": "text", "text": "interim "},
-					"_meta":   map[string]any{"jaz": map[string]any{"phase": "commentary"}},
 				})
 				notify(map[string]any{
 					"sessionUpdate": "agent_message", "messageId": "m1",
 					"content": []any{map[string]any{"type": "text", "text": "interim "}},
-					"_meta":   map[string]any{"jaz": map[string]any{"phase": "commentary"}},
 				})
 				notify(map[string]any{
 					"sessionUpdate": "agent_thought_chunk", "messageId": "t1",
@@ -510,7 +508,6 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				notify(map[string]any{
 					"sessionUpdate": "agent_message", "messageId": "m1",
 					"content": []any{map[string]any{"type": "text", "text": "interim "}},
-					"_meta":   map[string]any{"jaz": map[string]any{"phase": "commentary"}},
 				})
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})
 			case strings.Contains(message, "fail"):
@@ -520,35 +517,26 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				state(map[string]any{"state": "running", "background": []any{}})
 				notify(map[string]any{
 					"sessionUpdate": "session_info_update",
-					"_meta": map[string]any{"jaz": map[string]any{"sessionFailure": map[string]any{
+					"_meta": map[string]any{"jetbrains": map[string]any{"air": map[string]any{"sessionFailure": map[string]any{
 						"id": "turn-1:retry", "category": "service",
 						"severity": "warning", "title": "API Error: 529 Overloaded",
-					}}},
+					}}}},
 				})
 				state(map[string]any{
 					"state": "idle", "stopReason": "error",
-					"error": map[string]any{"code": -32603, "message": "Internal error: API Error: 529 Overloaded"},
-					"_meta": map[string]any{"jaz": map[string]any{"sessionFailure": map[string]any{
-						"id": "turn-1:error", "revision": 1, "category": "service",
-						"severity": "error", "title": "API Error: 529 Overloaded", "actions": []any{"retry"},
-					}}},
+					"error": map[string]any{"code": -32603, "message": "Internal error: API Error: 529 Overloaded", "actions": []any{"retry"}},
 				})
 			case strings.Contains(message, "overload"):
 				state(map[string]any{"state": "running", "background": []any{}})
 				state(map[string]any{
 					"state": "idle", "stopReason": "error",
-					"error": map[string]any{"code": -32603, "message": "Internal error: API Error: 529 Overloaded"},
-					"_meta": map[string]any{"jaz": map[string]any{"sessionFailure": map[string]any{
-						"id": "turn-1:error", "revision": 1, "category": "service",
-						"severity": "error", "title": "API Error: 529 Overloaded", "actions": []any{"retry"},
-					}}},
+					"error": map[string]any{"code": -32603, "message": "Internal error: API Error: 529 Overloaded", "actions": []any{"retry"}},
 				})
 			case strings.Contains(message, "phased"):
 				state(map[string]any{"state": "running", "background": []any{}})
 				notify(map[string]any{
-					"sessionUpdate": "agent_message_chunk", "messageId": "c1",
+					"sessionUpdate": "agent_thought_chunk", "messageId": "c1",
 					"content": map[string]any{"type": "text", "text": "checking things"},
-					"_meta":   map[string]any{"jaz": map[string]any{"phase": "commentary"}},
 				})
 				text("a1", "final answer")
 				state(map[string]any{"state": "idle", "stopReason": "end_turn", "background": []any{}})

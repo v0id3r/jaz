@@ -46,27 +46,11 @@ var fakeFailureKinds = map[string]map[string]any{
 	"invalid":      {"title": "Unable to submit request because `create_issue` functionDeclaration `parameters.estimate` schema didn't specify the schema type field.", "antigravity": true},
 }
 
-// fakeTypedFailures reports whether initialize negotiated AIR sessionFailure,
-// which makes the adapters return failures as records instead of text.
-func fakeTypedFailures(params json.RawMessage) bool {
-	var req struct {
-		ClientCapabilities struct {
-			Meta struct {
-				Jetbrains struct {
-					Air struct {
-						Capabilities []string `json:"capabilities"`
-					} `json:"air"`
-				} `json:"jetbrains"`
-			} `json:"_meta"`
-		} `json:"clientCapabilities"`
-	}
-	_ = json.Unmarshal(params, &req)
-	for _, capability := range req.ClientCapabilities.Meta.Jetbrains.Air.Capabilities {
-		if capability == "sessionFailure" {
-			return true
-		}
-	}
-	return false
+// fakeTypedFailures reports whether the fake answers a failure as the typed
+// ext.failure record it declares, or as the plain text a client without the
+// extension reads.
+func fakeTypedFailures(json.RawMessage) bool {
+	return os.Getenv("JAZ_FAKE_ACP_PLAIN_FAILURE") != "1"
 }
 
 // fakeProviderNoticeUpdate reports a prompt's notice the way the adapters do.
@@ -129,10 +113,13 @@ func fakeProviderFailure(conn jsonrpc.MessageConn, msg *jsonrpc.Message, typed b
 	retrying, _ := kind["retrying"].([]string)
 	for n, category := range retrying {
 		meta := fakeFailureMeta(map[string]any{"id": fmt.Sprintf("%s:retry:%d", fakeSessionID, n), "revision": 1, "category": category, "severity": "warning", "title": "Retrying...", "actions": []string{}})
+		// A side chat's retry rides on the side chat's own fork session,
+		// never on the turn's.
+		sessionID := fakeSessionID
 		if kind["sideChat"] == true {
-			meta["codex"] = map[string]any{"sideChat": map[string]any{"id": "side-1", "command": "side"}}
+			sessionID = "fake-side-1"
 		}
-		notify(conn, "session/update", map[string]any{"sessionId": fakeSessionID, "update": map[string]any{
+		notify(conn, "session/update", map[string]any{"sessionId": sessionID, "update": map[string]any{
 			"sessionUpdate": "session_info_update", "_meta": meta,
 		}})
 	}
@@ -144,13 +131,12 @@ func fakeProviderFailure(conn jsonrpc.MessageConn, msg *jsonrpc.Message, typed b
 	failure := fakeFailureMeta(map[string]any{
 		"id": id, "revision": 1, "category": kind["category"], "severity": "error", "title": title, "actions": kind["actions"],
 	})
-	fakeTurnFails(conn, failure)
 	sendResult(conn, msg, map[string]any{"stopReason": "end_turn", "_meta": failure})
 	return true
 }
 
 func fakeFailureMeta(failure map[string]any) map[string]any {
-	return map[string]any{"jetbrains": map[string]any{"air": map[string]any{"version": 1, "sessionFailure": failure}}}
+	return map[string]any{"jetbrains": map[string]any{"air": map[string]any{"sessionFailure": failure}}}
 }
 
 // fakeSteerFailure is the record a turn a native steer joined ends with when

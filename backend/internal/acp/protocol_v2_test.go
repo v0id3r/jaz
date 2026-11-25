@@ -967,48 +967,9 @@ func TestV2FailureEndsTurn(t *testing.T) {
 	}
 }
 
-func TestV2SessionFailureRetryHint(t *testing.T) {
-	acp.SetProviderRetryDelays(t, time.Millisecond)
-	store, err := jsonstore.New(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager := newV2TestManager(t, store, nil)
-	spawned := spawnV2Session(t, manager, "v2-overload")
-	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
-
-	// The failure's retry action continues the turn, and the continuation
-	// prompt ("Continue from where you left off.") gets the fake's answer.
-	sendV2(t, manager, spawned.Slug, "overload please")
-	job := waitTurnV2(t, manager, spawned.SessionID)
-	if job.State != acp.StateIdle || job.Assistant != "hello world" {
-		t.Fatalf("retried turn ended %s with %q", job.State, job.Assistant)
-	}
-}
-
-// A provider failure the agent already retried itself (its warning preceded
-// the error) must not get a Jaz-side continuation.
-func TestV2ProviderRetryWarningSkipsJazRetry(t *testing.T) {
-	acp.SetProviderRetryDelays(t, time.Millisecond)
-	store, err := jsonstore.New(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager := newV2TestManager(t, store, nil)
-	spawned := spawnV2Session(t, manager, "v2-overload-warned")
-	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
-
-	sendV2(t, manager, spawned.Slug, "overload-warned please")
-	job := waitTurnV2(t, manager, spawned.SessionID)
-	if job.State != acp.StateFailed {
-		t.Fatalf("warned turn ended %s with %q", job.State, job.Assistant)
-	}
-	if !strings.Contains(job.Error, "Overloaded") {
-		t.Fatalf("error = %q", job.Error)
-	}
-}
-
-func TestV2MessagePhaseKeepsCommentaryOutOfResult(t *testing.T) {
+// v2 marks no phases: interim text arrives as thoughts and stays out of the
+// result, and every agent message counts toward it.
+func TestV2ThoughtsStayOutOfResult(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1025,8 +986,11 @@ func TestV2MessagePhaseKeepsCommentaryOutOfResult(t *testing.T) {
 	if job.Result != "final answer" {
 		t.Fatalf("result = %q", job.Result)
 	}
-	if job.Assistant != "checking thingsfinal answer" {
+	if job.Assistant != "final answer" {
 		t.Fatalf("assistant = %q", job.Assistant)
+	}
+	if job.Thought != "checking things" {
+		t.Fatalf("thought = %q", job.Thought)
 	}
 }
 
@@ -1052,7 +1016,7 @@ func TestV2UpsertAfterChunksDoesNotDuplicate(t *testing.T) {
 	if job.Thought != "thinking" {
 		t.Fatalf("thought = %q", job.Thought)
 	}
-	if job.Result != "final" {
+	if job.Result != "interim final" {
 		t.Fatalf("result = %q", job.Result)
 	}
 }

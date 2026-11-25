@@ -60,12 +60,20 @@ func TestProviderRetryStatusClearsWhenTheTurnMakesProgress(t *testing.T) {
 				t.Fatalf("retry warning changed prompt confirmation: %+v, %v", stored.Turn, err)
 			}
 			manager.applyJobUpdate(job, json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":""}}`))
-			meta := warning["_meta"].(map[string]any)
-			meta["codex"] = map[string]any{"sideChat": map[string]any{"id": "side-1", "command": "side"}}
-			meta["jetbrains"].(map[string]any)["air"].(map[string]any)["sessionFailure"] = sessionFailure{ID: "side-retry", Category: "limit", Severity: "warning", Title: "Side chat is retrying"}
-			manager.applyJobUpdate(job, mustJSON(t, warning))
-			manager.applyJobUpdate(job, json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"side answer"},"_meta":{"codex":{"sideChat":{"id":"side-1","command":"side"}}}}`))
-			manager.applyJobUpdate(job, json.RawMessage(`{"sessionUpdate":"plan","entries":[{"content":"side work","status":"in_progress","priority":"high"}],"_meta":{"codex":{"sideChat":{"id":"side-1","command":"side"}}}}`))
+			// The side chat's warning, message and plan ride on the side
+			// chat's fork session, so none of them is the turn's progress.
+			manager.rememberSideChatFork("fake-side-1", sideChatFork{
+				jobID: session.ID,
+				scope: sideChatScope{ID: "side-1", Command: "side", ParentSessionID: session.ID},
+			})
+			manager.applyUpdate("fake-side-1", mustJSON(t, map[string]any{
+				"sessionUpdate": "session_info_update",
+				"_meta": map[string]any{"jetbrains": map[string]any{"air": map[string]any{
+					"sessionFailure": sessionFailure{ID: "side-retry", Category: "limit", Severity: "warning", Title: "Side chat is retrying"},
+				}}},
+			}))
+			manager.applyUpdate("fake-side-1", json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"side answer"}}`))
+			manager.applyUpdate("fake-side-1", json.RawMessage(`{"sessionUpdate":"plan","entries":[{"content":"side work","status":"in_progress","priority":"high"}]}`))
 			manager.applyJobUpdate(job, json.RawMessage(`{"sessionUpdate":"session_info_update","_meta":{"jetbrains":{"air":{"sessionFailure":{"id":"notice-1","category":"unknown","severity":"warning","title":"Configuration notice"}}}}}`))
 			manager.applyJobUpdate(job, json.RawMessage(`{"sessionUpdate":"plan","entries":[]}`))
 			if snapshot := job.Snapshot(); snapshot.Error != want || len(snapshot.Plan) != 0 {

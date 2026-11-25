@@ -112,7 +112,7 @@ func fakeFinalReply(conn jsonrpc.MessageConn, prompt *jsonrpc.Message, nextMessa
 			"content": map[string]any{"type": "text", "text": text},
 		}
 		if phase != "" {
-			update["_meta"] = map[string]any{"jetbrains": map[string]any{"air": map[string]any{"version": 1, "phase": phase}}}
+			update["_meta"] = map[string]any{"jetbrains": map[string]any{"air": map[string]any{"phase": phase}}}
 		}
 		notify(conn, "session/update", map[string]any{
 			"sessionId": fakeSessionID,

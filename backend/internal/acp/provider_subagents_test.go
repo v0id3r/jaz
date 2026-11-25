@@ -64,6 +64,7 @@ func TestProviderSubagentPluralMetadataRejectsPartialBatch(t *testing.T) {
 	update, err := acpschema.DecodeSessionUpdate(json.RawMessage(`{
 		"sessionUpdate":"tool_call","toolCallId":"spawn","title":"spawnAgent",
 		"_meta":{"codex":{"providerSubagents":[
+
 			{"id":"child","status":"running"},
 			{"status":"failed"}
 		]}}
