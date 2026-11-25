@@ -566,8 +566,11 @@ func liveAgentEnv() map[string]string {
 // agent confirms the end with a terminal_update carrying an exitStatus — the
 // cancel itself leaves the referencing tool call's status alone (see
 // docs/protocol/v2/tool-calls.mdx, "Cancelling terminals"); on v1 the
-// adapter closes the call with the backgrounded result. ACP_LIVE_V2=1 runs
-// it on v2, otherwise on v1.
+// adapter closes the call with the backgrounded result. Codex discovers a
+// background terminal only from an exec session that outlives its turn, so
+// there the test has the model yield the call (yield_time_ms) instead of
+// asking for a shell background job. ACP_LIVE_V2=1 runs it on v2, otherwise
+// on v1.
 func TestLiveBackgroundStop(t *testing.T) {
 	agent := os.Getenv("ACP_LIVE_AGENT")
 	command := os.Getenv("ACP_LIVE_AGENT_COMMAND")
@@ -604,7 +607,14 @@ func TestLiveBackgroundStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	if _, err := manager.Send(ctx, SendRequest{Session: spawned.SessionID, Message: "Start this as a background task without waiting for it: sleep 120 && echo jaz-bg-done. Then immediately reply with exactly: started", Completion: CompletionInline}); err != nil {
+	prompt := "Start this as a background task without waiting for it: sleep 120 && echo jaz-bg-done. Then immediately reply with exactly: started"
+	if v2 && agent == AgentCodex {
+		// Codex discovers a background terminal only when an exec session outlives
+		// its turn (upstream session-close-background test, PR #777): the call
+		// yields while the process keeps running.
+		prompt = "Run the shell command sleep 120 with yield_time_ms set to 1000 so the call returns while the command keeps running. Then reply with exactly: started"
+	}
+	if _, err := manager.Send(ctx, SendRequest{Session: spawned.SessionID, Message: prompt, Completion: CompletionInline}); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	job, err := manager.Wait(ctx, WaitRequest{Session: spawned.SessionID, Timeout: 3 * time.Minute})
@@ -613,10 +623,16 @@ func TestLiveBackgroundStop(t *testing.T) {
 	}
 	t.Logf("[%s] turn: state=%s assistant=%q tools=%s", label, job.State, truncateRunes(job.Assistant, 120), toolCallSummary(job))
 	var taskID, toolCallID string
-	for _, task := range manager.BackgroundTasksForTest(spawned.SessionID) {
-		if task.CanStop && task.State == "running" {
-			taskID, toolCallID = task.ID, task.ToolCallID
-			break
+	grace := time.Now().Add(10 * time.Second)
+	for time.Now().Before(grace) && taskID == "" {
+		for _, task := range manager.BackgroundTasksForTest(spawned.SessionID) {
+			if task.CanStop && task.State == "running" {
+				taskID, toolCallID = task.ID, task.ToolCallID
+				break
+			}
+		}
+		if taskID == "" {
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 	if taskID == "" {
