@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	acpschema "github.com/gluonfield/acp-transport/acp"
@@ -418,6 +419,18 @@ func setSessionConfigOption(ctx context.Context, peer *jsonrpc.Peer, protocol in
 		SessionID: sessionID,
 		ConfigID:  acpschema.SessionConfigID(configID),
 		Value:     acpschema.EncodeSessionConfigValue(acpschema.SessionConfigValueID(value)),
+	})
+	return normalizeConfigOptionsV2(raw), err
+}
+
+// setSessionConfigBoolean sets a boolean option, which only v2 has: the value
+// travels as a JSON boolean with the "boolean" type tag the version requires.
+func setSessionConfigBoolean(ctx context.Context, peer *jsonrpc.Peer, sessionID acpschema.SessionID, configID string, value bool) (json.RawMessage, error) {
+	raw, err := peer.Call(ctx, acpv2.AgentMethodSessionSetConfigOption, acpv2.SetSessionConfigOptionRequest{
+		SessionID: acpv2.SessionID(sessionID),
+		ConfigID:  acpv2.SessionConfigID(configID),
+		Type:      "boolean",
+		Value:     json.RawMessage(strconv.FormatBool(value)),
 	})
 	return normalizeConfigOptionsV2(raw), err
 }

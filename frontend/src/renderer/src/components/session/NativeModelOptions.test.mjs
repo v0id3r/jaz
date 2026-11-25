@@ -38,6 +38,30 @@ test('Fast Mode waits for acknowledgement and disappears when the provider withd
 
 const selectableOption = (fields) => ({ name: 'Option', current_value: 'value', options: [], ...fields })
 
+test('a v2 boolean fast mode renders as the same switch as the v1 select', () => {
+  const boolean = [{
+    id: 'fast-mode', name: 'Fast mode', category: 'speed', type: 'boolean', current_value: 'off',
+    description: '1.5x speed, increased usage', options: [],
+  }]
+  const html = renderToStaticMarkup(createElement(NativeModelOptions, {
+    options: boolean, running: true, pending: false, onChange() {},
+  }))
+  const fast = html.match(/<button\b[^>]*role="switch"[^>]*>/)[0]
+  expect(fast).toContain('aria-label="Fast Mode"')
+  expect(fast).toContain('aria-checked="false"')
+  expect(html).not.toContain('1.5x')
+})
+
+test('a boolean option that is not fast mode renders as a switch with its own name', () => {
+  const boolean = [selectableOption({ id: 'web-search', name: 'Web search', category: 'model_config', type: 'boolean', current_value: 'on' })]
+  const html = renderToStaticMarkup(createElement(NativeModelOptions, {
+    options: boolean, running: false, pending: false, onChange() {},
+  }))
+  const toggle = html.match(/<button\b[^>]*role="switch"[^>]*>/)[0]
+  expect(toggle).toContain('aria-label="Web search"')
+  expect(toggle).toContain('aria-checked="true"')
+})
+
 test('kimi model and thinking options show while the mode option stays hidden', () => {
   expect(shownConfigOption(selectableOption({ id: 'model', category: 'model' }))).toBe(true)
   expect(shownConfigOption(selectableOption({ id: 'thinking', category: 'thought_level' }))).toBe(true)

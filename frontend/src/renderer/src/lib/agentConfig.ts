@@ -8,10 +8,11 @@ export interface FastModeControl {
 
 export function fastModeOption(options?: AgentSessionConfigOption[] | null) {
   return options?.find((option) =>
-    option.category === 'model_config' &&
+    (option.category === 'model_config' || option.category === 'speed') &&
     option.name.toLowerCase() === 'fast mode' &&
-    option.options.length === 2 &&
-    option.options.some((value) => value.value === 'on') &&
-    option.options.some((value) => value.value === 'off'),
+    (option.type === 'boolean' ||
+      (option.options.length === 2 &&
+        option.options.some((value) => value.value === 'on') &&
+        option.options.some((value) => value.value === 'off'))),
   )
 }

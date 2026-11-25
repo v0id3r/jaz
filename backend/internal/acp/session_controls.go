@@ -87,6 +87,13 @@ func (m *Manager) applySessionControls(job *jobState, raw json.RawMessage) bool 
 	return true
 }
 
+// Boolean config options carry their value through Jaz as "on"/"off", the
+// vocabulary the adapters themselves use for the v1 fast-mode select.
+const (
+	configValueOn  = "on"
+	configValueOff = "off"
+)
+
 func translateConfigOptions(raw json.RawMessage) []sessionevents.AgentConfigOption {
 	var rawList []json.RawMessage
 	if json.Unmarshal(raw, &rawList) != nil {
@@ -97,12 +104,12 @@ func translateConfigOptions(raw json.RawMessage) []sessionevents.AgentConfigOpti
 		// One option decodes alone: a boolean option's JSON currentValue must
 		// not fail the whole list the way one bad element fails a slice.
 		var option struct {
-			ID           string `json:"id"`
-			Name         string `json:"name"`
-			Description  string `json:"description"`
-			Category     string `json:"category"`
-			Type         string `json:"type"`
-			CurrentValue string `json:"currentValue"`
+			ID           string          `json:"id"`
+			Name         string          `json:"name"`
+			Description  string          `json:"description"`
+			Category     string          `json:"category"`
+			Type         string          `json:"type"`
+			CurrentValue json.RawMessage `json:"currentValue"`
 			Options      []struct {
 				Value       string                           `json:"value"`
 				Name        string                           `json:"name"`
@@ -111,26 +118,45 @@ func translateConfigOptions(raw json.RawMessage) []sessionevents.AgentConfigOpti
 			} `json:"options"`
 			Meta configOptionMeta `json:"_meta"`
 		}
-		if json.Unmarshal(rawOption, &option) != nil || option.Type != "select" {
+		if json.Unmarshal(rawOption, &option) != nil {
 			continue
 		}
 		item := sessionevents.AgentConfigOption{
 			ID: option.ID, Name: option.Name, Description: option.Description,
-			Category: option.Category, CurrentValue: option.CurrentValue,
+			Category: option.Category,
+			Options:  []sessionevents.AgentConfigValue{},
+			// RecommendedValue rides the JetBrains AIR extension.
 			RecommendedValue: option.Meta.Jetbrains.Air.RecommendedValue,
-			Options:          []sessionevents.AgentConfigValue{},
 		}
-		for _, value := range option.Options {
-			if value.Options != nil {
-				for _, child := range value.Options {
-					child.Group = value.Name
-					item.Options = append(item.Options, child)
-				}
-			} else {
-				item.Options = append(item.Options, sessionevents.AgentConfigValue{
-					Value: value.Value, Name: value.Name, Description: value.Description,
-				})
+		switch option.Type {
+		case "boolean":
+			var current bool
+			if json.Unmarshal(option.CurrentValue, &current) != nil {
+				continue
 			}
+			item.Type = "boolean"
+			item.CurrentValue = configValueOff
+			if current {
+				item.CurrentValue = configValueOn
+			}
+		case "select":
+			if json.Unmarshal(option.CurrentValue, &item.CurrentValue) != nil {
+				continue
+			}
+			for _, value := range option.Options {
+				if value.Options != nil {
+					for _, child := range value.Options {
+						child.Group = value.Name
+						item.Options = append(item.Options, child)
+					}
+				} else {
+					item.Options = append(item.Options, sessionevents.AgentConfigValue{
+						Value: value.Value, Name: value.Name, Description: value.Description,
+					})
+				}
+			}
+		default:
+			continue
 		}
 		result = append(result, item)
 	}
@@ -170,7 +196,16 @@ func (m *Manager) setSessionConfig(ctx context.Context, job *jobState, id, value
 	defer job.sendMu.Unlock()
 	job.mu.RLock()
 	optionIndex := slices.IndexFunc(job.agentSession.ConfigOptions, func(option sessionevents.AgentConfigOption) bool { return option.ID == id })
-	valid := optionIndex >= 0 && slices.ContainsFunc(job.agentSession.ConfigOptions[optionIndex].Options, func(option sessionevents.AgentConfigValue) bool { return option.Value == value })
+	boolean := optionIndex >= 0 && job.agentSession.ConfigOptions[optionIndex].Type == "boolean"
+	valid := false
+	if optionIndex >= 0 {
+		option := job.agentSession.ConfigOptions[optionIndex]
+		if boolean {
+			valid = value == configValueOn || value == configValueOff
+		} else {
+			valid = slices.ContainsFunc(option.Options, func(item sessionevents.AgentConfigValue) bool { return item.Value == value })
+		}
+	}
 	modelChange := valid && job.agentSession.ConfigOptions[optionIndex].Category == "model" && job.agentSession.ConfigOptions[optionIndex].CurrentValue != value
 	modelConfig := valid && job.agentSession.ConfigOptions[optionIndex].Category == "model_config"
 	job.mu.RUnlock()
@@ -187,7 +222,13 @@ func (m *Manager) setSessionConfig(ctx context.Context, job *jobState, id, value
 	if peer == nil {
 		return fmt.Errorf("agent connection is unavailable")
 	}
-	raw, err := setSessionConfigOption(ctx, peer, job.protocol, acpschema.SessionID(job.ACPSession), id, value)
+	var raw json.RawMessage
+	var err error
+	if boolean {
+		raw, err = setSessionConfigBoolean(ctx, peer, acpschema.SessionID(job.ACPSession), id, value == configValueOn)
+	} else {
+		raw, err = setSessionConfigOption(ctx, peer, job.protocol, acpschema.SessionID(job.ACPSession), id, value)
+	}
 	if err != nil {
 		return err
 	}

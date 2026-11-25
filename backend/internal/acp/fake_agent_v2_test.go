@@ -160,27 +160,52 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			answer(*msg.ID, result)
 		case "session/set_config_option":
 			var req struct {
-				ConfigID string `json:"configId"`
-				Type     string `json:"type"`
-				Value    string `json:"value"`
+				ConfigID string          `json:"configId"`
+				Type     string          `json:"type"`
+				Value    json.RawMessage `json:"value"`
 			}
 			_ = json.Unmarshal(msg.Params, &req)
-			// Like the real v2 adapters: a value without its type tag is
-			// invalid params.
-			if req.Type != "id" {
-				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("config option value needs its type tag", nil))
-				_ = conn.Send(ctx, resp)
-				continue
+			// Like the real v2 adapters: the value's type tag must match the
+			// option's own type, "boolean" for a boolean and "id" for a
+			// select, and an unknown option is invalid params.
+			optionType := ""
+			for _, raw := range configOptions {
+				if option := raw.(map[string]any); option["configId"] == req.ConfigID {
+					optionType, _ = option["type"].(string)
+				}
 			}
-			if req.Value == "fake-rejected" {
-				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("Invalid value for config option model", json.RawMessage(`{"detail":"model is not available on this account"}`)))
+			var value any
+			switch {
+			case optionType == "":
+				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("unknown config option", nil))
 				_ = conn.Send(ctx, resp)
 				continue
+			case optionType == "boolean":
+				var current bool
+				if req.Type != "boolean" || json.Unmarshal(req.Value, &current) != nil {
+					resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("config option value needs its boolean type tag", nil))
+					_ = conn.Send(ctx, resp)
+					continue
+				}
+				value = current
+			default:
+				var current string
+				if req.Type != "id" || json.Unmarshal(req.Value, &current) != nil {
+					resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("config option value needs its type tag", nil))
+					_ = conn.Send(ctx, resp)
+					continue
+				}
+				if current == "fake-rejected" {
+					resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("Invalid value for config option model", json.RawMessage(`{"detail":"model is not available on this account"}`)))
+					_ = conn.Send(ctx, resp)
+					continue
+				}
+				value = current
 			}
 			for _, raw := range configOptions {
 				option := raw.(map[string]any)
 				if option["configId"] == req.ConfigID {
-					option["currentValue"] = req.Value
+					option["currentValue"] = value
 				}
 			}
 			answer(*msg.ID, map[string]any{"configOptions": configOptions})

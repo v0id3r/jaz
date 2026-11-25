@@ -4,7 +4,7 @@ import { SwitchRow } from '@/components/ui/Switch'
 import { fastModeOption, type FastModeControl } from '@/lib/agentConfig'
 import type { AgentSessionConfigOption } from '@/lib/api/types'
 
-const shownCategories = ['model_config', 'model', 'thought_level']
+const shownCategories = ['model_config', 'model', 'thought_level', 'speed']
 
 export function shownConfigOption(option: AgentSessionConfigOption): boolean {
   return option.category !== undefined && shownCategories.includes(option.category)
@@ -21,13 +21,25 @@ export function NativeModelOptions({ options, running, pending, onChange }: {
   onChange: (id: string, value: string) => void
 }) {
   const fastMode = fastModeOption(options)
-  return options?.filter(shownConfigOption).map((option) => (
-    option === fastMode ? <FastModeOption
-      key={option.id}
-      checked={option.current_value === 'on'}
-      disabled={pending}
-      onChange={(checked) => onChange(option.id, checked ? 'on' : 'off')}
-    /> : <div key={option.id} className="px-2.5 py-1">
+  return options?.filter(shownConfigOption).map((option) => {
+    if (option === fastMode) {
+      return <FastModeOption
+        key={option.id}
+        checked={option.current_value === 'on'}
+        disabled={pending}
+        onChange={(checked) => onChange(option.id, checked ? 'on' : 'off')}
+      />
+    }
+    if (option.type === 'boolean') {
+      return <SwitchRow
+        key={option.id}
+        label={option.name}
+        checked={option.current_value === 'on'}
+        disabled={pending}
+        onChange={(checked) => onChange(option.id, checked ? 'on' : 'off')}
+      />
+    }
+    return <div key={option.id} className="px-2.5 py-1">
       <div className="flex min-h-10 items-center justify-between gap-3">
         <span className="text-[13px] text-ink-2">{option.name}</span>
         <Select
@@ -40,5 +52,5 @@ export function NativeModelOptions({ options, running, pending, onChange }: {
       </div>
       {option.description ? <p className="max-w-64 text-[11px] text-ink-3">{option.description}</p> : null}
     </div>
-  ))
+  })
 }

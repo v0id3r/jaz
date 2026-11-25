@@ -8,10 +8,13 @@ type AgentSession struct {
 }
 
 type AgentConfigOption struct {
-	ID               string             `json:"id"`
-	Name             string             `json:"name"`
-	Description      string             `json:"description,omitempty"`
-	Category         string             `json:"category,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
+	// Type is "boolean" for an on/off option; empty means a select, whose
+	// choices Options lists. A boolean's values cross Jaz as "on"/"off".
+	Type             string             `json:"type,omitempty"`
 	CurrentValue     string             `json:"current_value"`
 	UserValue        *string            `json:"user_value,omitempty"`
 	RecommendedValue string             `json:"recommended_value,omitempty"`

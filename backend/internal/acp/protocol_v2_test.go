@@ -128,6 +128,58 @@ func TestV2SessionExposesConfigOptions(t *testing.T) {
 	if categories["mode"] != "default" {
 		t.Errorf("agent_session mode option = %q, options: %#v", categories["mode"], session.ConfigOptions)
 	}
+	fastMode := slices.IndexFunc(session.ConfigOptions, func(option sessionevents.AgentConfigOption) bool { return option.ID == "fast-mode" })
+	if fastMode < 0 {
+		t.Fatalf("boolean fast-mode option missing: %#v", session.ConfigOptions)
+	}
+	if option := session.ConfigOptions[fastMode]; option.Type != "boolean" || option.CurrentValue != "off" {
+		t.Errorf("fast-mode option = %#v, want a boolean at off", option)
+	}
+}
+
+// A boolean config option round-trips: setting it sends the value with v2's
+// "boolean" type tag (the fake, like the real adapters, rejects any other
+// tag), and the agent_session state and the user's pick reflect it.
+func TestV2BooleanConfigOptionSet(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	defer manager.Close()
+	spawned := spawnV2Session(t, manager, "v2-boolean")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := manager.SetSessionConfig(ctx, spawned.SessionID, "fast-mode", "turbo"); err == nil {
+		t.Error("a value outside on/off was accepted for a boolean option")
+	}
+	if err := manager.SetSessionConfig(ctx, spawned.SessionID, "fast-mode", "on"); err != nil {
+		t.Fatalf("set fast-mode on: %v", err)
+	}
+	var session *sessionevents.AgentSession
+	events, err := store.LoadSessionEvents(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.AgentSession != nil {
+			state := *event.AgentSession
+			session = &state
+		}
+	}
+	if session == nil {
+		t.Fatal("no agent_session event")
+	}
+	index := slices.IndexFunc(session.ConfigOptions, func(option sessionevents.AgentConfigOption) bool { return option.ID == "fast-mode" })
+	if index < 0 {
+		t.Fatalf("boolean fast-mode option missing: %#v", session.ConfigOptions)
+	}
+	option := session.ConfigOptions[index]
+	if option.CurrentValue != "on" || option.UserValue == nil || *option.UserValue != "on" {
+		t.Errorf("fast-mode after set = %#v, want current and user value on", option)
+	}
 }
 
 // A v2 Codex session takes its permission baseline through the separate mode

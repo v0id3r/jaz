@@ -117,6 +117,18 @@ func TestLiveV2Scenarios(t *testing.T) {
 	if got := liveConfigOptionValue(manager, spawned.SessionID, "mode"); got == "" {
 		t.Errorf("[%s] no mode config option after spawn", label)
 	}
+	// The v2 Codex adapter advertises fast mode as a boolean option; setting
+	// it must reach the adapter with v2's boolean type tag, which the adapter
+	// requires and Jaz's select-only path could not send.
+	if v2 && agent == "codex" {
+		if got := liveConfigOptionByID(manager, spawned.SessionID, "fast-mode"); got != "off" && got != "on" {
+			t.Errorf("[%s] no boolean fast-mode option after spawn: %q, options: %s", label, got, liveConfigOptionsSummary(manager, spawned.SessionID))
+		} else if err := manager.SetSessionConfig(ctx, spawned.SessionID, "fast-mode", "on"); err != nil {
+			t.Errorf("[%s] set fast-mode on: %v", label, err)
+		} else if got := liveConfigOptionByID(manager, spawned.SessionID, "fast-mode"); got != "on" {
+			t.Errorf("[%s] fast-mode after set = %q, want on", label, got)
+		}
+	}
 
 	turn := func(name, message string) Job {
 		t.Helper()
@@ -259,6 +271,13 @@ func TestLiveV2Scenarios(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(resumed.Assistant), "done") {
 		t.Logf("[%s] resume answer did not recall 'done': %q", label, resumed.Assistant)
+	}
+	// The user's fast-mode pick rides restoreSessionControls into the resumed
+	// session, through the same boolean set path.
+	if v2 && agent == "codex" {
+		if got := liveConfigOptionByID(restarted, spawned.SessionID, "fast-mode"); got != "on" {
+			t.Errorf("[%s] fast-mode after resume = %q, want the restored on", label, got)
+		}
 	}
 }
 
@@ -405,6 +424,14 @@ func TestLiveBackgroundOutcomes(t *testing.T) {
 // liveConfigOptionValue reads the current value of the session's config
 // option of a category, as the agent_session event publishes it.
 func liveConfigOptionValue(manager *Manager, session, category string) string {
+	return liveConfigOption(manager, session, func(option sessionevents.AgentConfigOption) bool { return option.Category == category })
+}
+
+func liveConfigOptionByID(manager *Manager, session, id string) string {
+	return liveConfigOption(manager, session, func(option sessionevents.AgentConfigOption) bool { return option.ID == id })
+}
+
+func liveConfigOption(manager *Manager, session string, match func(sessionevents.AgentConfigOption) bool) string {
 	job, err := manager.job(session)
 	if err != nil {
 		return ""
@@ -412,11 +439,25 @@ func liveConfigOptionValue(manager *Manager, session, category string) string {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
 	for _, option := range job.agentSession.ConfigOptions {
-		if option.Category == category {
+		if match(option) {
 			return option.CurrentValue
 		}
 	}
 	return ""
+}
+
+func liveConfigOptionsSummary(manager *Manager, session string) string {
+	job, err := manager.job(session)
+	if err != nil {
+		return "no job"
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	parts := make([]string, 0, len(job.agentSession.ConfigOptions))
+	for _, option := range job.agentSession.ConfigOptions {
+		parts = append(parts, fmt.Sprintf("%s[%s]=%s", option.ID, option.Type, option.CurrentValue))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func stoppableBackgroundTask(manager *Manager, session string) string {
