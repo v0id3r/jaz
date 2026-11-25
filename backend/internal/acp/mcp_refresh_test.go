@@ -25,14 +25,10 @@ func (r *testMCPRevision) Revision() uint64 {
 
 func TestMCPRefreshRequiresAdvertisedCapabilityAndPolicy(t *testing.T) {
 	for _, test := range []struct{ name, raw, policy, want string }{
-		{"native", `{"agentCapabilities":{"mcpCapabilities":{"http":true},"_meta":{"mcpRefresh":{"method":"_session/mcp/refresh"}}}}`, MCPServerPolicyAll, mcpRefreshMethod},
-		{"widget", `{"agentCapabilities":{"mcpCapabilities":{"http":true},"_meta":{"mcpRefresh":{"method":"_session/mcp/refresh"}}}}`, MCPServerPolicyWidget, mcpRefreshMethod},
-		{"restricted", `{"agentCapabilities":{"mcpCapabilities":{"http":true},"_meta":{"mcpRefresh":{"method":"_session/mcp/refresh"}}}}`, "memory_search", ""},
 		{"grok", `{"agentCapabilities":{"mcpCapabilities":{"http":true}},"_meta":{"grokShell":true,"x.ai/mcp/sdk":true}}`, MCPServerPolicyAll, grokMCPUpdateMethod},
 		{"grok without MCP SDK", `{"agentCapabilities":{"mcpCapabilities":{"http":true}},"_meta":{"grokShell":true}}`, MCPServerPolicyAll, ""},
 		{"notifications", `{"agentCapabilities":{"mcpCapabilities":{"http":true}}}`, MCPServerPolicyAll, ""},
-		{"unsupported transport", `{"agentCapabilities":{"_meta":{"mcpRefresh":{"method":"_session/mcp/refresh"}}}}`, MCPServerPolicyAll, ""},
-		{"unknown method", `{"agentCapabilities":{"mcpCapabilities":{"http":true},"_meta":{"mcpRefresh":{"method":"_unknown"}}}}`, MCPServerPolicyAll, ""},
+		{"fork refresh method is not standard", `{"agentCapabilities":{"mcpCapabilities":{"http":true},"_meta":{"mcpRefresh":{"method":"_session/mcp/refresh"}}}}`, MCPServerPolicyAll, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := supportedMCPRefresh(json.RawMessage(test.raw), test.policy); got != test.want {
@@ -42,104 +38,39 @@ func TestMCPRefreshRequiresAdvertisedCapabilityAndPolicy(t *testing.T) {
 	}
 }
 
-func TestMCPRefreshBeforeTurnCoalescesAndRetries(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+func TestRetireStaleMCPCatalog(t *testing.T) {
+	revision := &testMCPRevision{}
+	revision.value.Store(2)
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := store.CreateSession(storage.CreateSession{Slug: "mcp-refresh", Runtime: storage.RuntimeACP})
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager := NewManager(store, Config{Agents: map[string]AgentConfig{"fake": {}}}, nil)
-	revision := &testMCPRevision{}
+	manager := NewManager(store, Config{}, nil)
 	manager.SetMCPRevisionSource(revision)
-	left, right := net.Pipe()
-	clientConn, remoteConn := stdio.New(left, left), stdio.New(right, right)
-	defer clientConn.Close()
-	defer remoteConn.Close()
-	requests := make(chan string, 10)
-	var fail atomic.Bool
-	remote := jsonrpc.NewPeer(remoteConn, jsonrpc.HandlerFunc(func(ctx context.Context, request jsonrpc.Request) (json.RawMessage, *jsonrpc.Error) {
-		requests <- request.Method
-		if request.Method == mcpRefreshMethod {
-			var params struct {
-				SessionID   string   `json:"sessionId"`
-				ServerNames []string `json:"serverNames"`
+	for _, test := range []struct {
+		name    string
+		agent   string
+		fresh   bool
+		refresh string
+		retired bool
+	}{
+		{"claude stale catalog retires", AgentClaude, false, "", true},
+		{"codex stale catalog retires", AgentCodex, false, "", true},
+		{"kimi keeps its live session", AgentKimi, false, "", false},
+		{"fresh catalog stays", AgentClaude, true, "", false},
+		{"live refresh method stays", AgentClaude, false, grokMCPUpdateMethod, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			job := newIdleJob(storage.Session{ID: "mcp-retire"}, test.agent, "native", "", ModeState{})
+			process := &agentProcess{mcpPolicy: MCPServerPolicyAll, mcpRefresh: test.refresh}
+			if test.fresh {
+				process.mcpRevision = 2
 			}
-			if json.Unmarshal(request.Params, &params) != nil || params.SessionID != "native" || !reflect.DeepEqual(params.ServerNames, []string{"jaz_mcp"}) {
-				return nil, jsonrpc.InvalidParams("wrong refresh scope", nil)
+			manager.retireStaleMCPCatalog(job, process)
+			if job.retired != test.retired {
+				t.Fatalf("retired = %v, want %v", job.retired, test.retired)
 			}
-			if fail.Load() {
-				return nil, jsonrpc.InternalError("fixture failure", nil)
-			}
-			return json.RawMessage(`{}`), nil
-		}
-		if request.Method == "session/prompt" {
-			return json.RawMessage(`{"stopReason":"cancelled"}`), nil
-		}
-		return nil, jsonrpc.MethodNotFound(request.Method)
-	}))
-	peer := jsonrpc.NewPeer(clientConn, jsonrpc.HandlerFunc(manager.handleJSONRPC))
-	go remote.Serve(ctx)
-	go peer.Serve(ctx)
-	job := newIdleJob(session, "fake", "native", "", ModeState{})
-	process := newAgentProcess(&agentConn{conn: clientConn, peer: peer})
-	process.mcpRefresh = mcpRefreshMethod
-	manager.addJob(job, process)
-	expectRequest := func(want string) {
-		t.Helper()
-		select {
-		case got := <-requests:
-			if got != want {
-				t.Fatalf("request = %q, want %q", got, want)
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-	}
-	send := func() {
-		t.Helper()
-		if _, err := manager.Send(ctx, SendRequest{Session: session.ID, Message: "hello"}); err != nil {
-			t.Fatal(err)
-		}
-		expectRequest("session/prompt")
-		if done := job.turnDone(); done != nil {
-			select {
-			case <-done:
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			}
-		}
-	}
-	send()
-	revision.value.Store(3)
-	fail.Store(true)
-	if _, err := manager.Send(ctx, SendRequest{Session: session.ID, Message: "retry me"}); err == nil {
-		t.Fatal("failed refresh admitted a turn")
-	}
-	expectRequest(mcpRefreshMethod)
-	messages, err := store.LoadMessages(session.ID)
-	if err != nil || len(messages) != 1 {
-		t.Fatalf("unaccepted message persisted: %d, %v", len(messages), err)
-	}
-	if process.mcpRevision != 0 {
-		t.Fatal("failed refresh marked revision applied")
-	}
-	fail.Store(false)
-	if _, err := manager.Send(ctx, SendRequest{Session: session.ID, Message: "hello again"}); err != nil {
-		t.Fatal(err)
-	}
-	expectRequest(mcpRefreshMethod)
-	expectRequest("session/prompt")
-	if done := job.turnDone(); done != nil {
-		<-done
-	}
-	send()
-	if process.mcpRevision != 3 || manager.jobByID(session.ID) != job {
-		t.Fatal("refresh lost revision or session identity")
+		})
 	}
 }
 

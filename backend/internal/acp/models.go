@@ -81,6 +81,11 @@ type agentPolicy struct {
 	systemPromptAppendMeta  bool
 	promptSuggestions       bool
 	idleCompactionOff       bool
+	// airRecommendedValue marks adapters whose recommended config value Jaz
+	// consumes (Codex's default model). Where nothing consumes it, declaring
+	// the capability only invites the adapter to replace native "default"
+	// resolution with its own guess.
+	airRecommendedValue bool
 }
 
 var baseReasoningEffortOptions = []ReasoningEffortOption{
@@ -141,6 +146,7 @@ func agentPolicyForAgent(agentName string) agentPolicy {
 			materializesOnPrompt:    true,
 			unadvertisedModel:       unadvertisedModelSkipped,
 			effortOptions:           codexReasoningEffortOptions,
+			airRecommendedValue:     true,
 		}
 	case AgentKimi:
 		return agentPolicy{

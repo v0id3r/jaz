@@ -129,7 +129,7 @@ func (m *Manager) acquireSessionProcess(ctx context.Context, job *jobState) (*jo
 			continue
 		}
 		if current == job && process != nil && serveErr == nil && !job.claudeAuthFailed() {
-			m.retireStaleCodexCatalog(job, process)
+			m.retireStaleMCPCatalog(job, process)
 			if job.lease() {
 				return job, nil
 			}

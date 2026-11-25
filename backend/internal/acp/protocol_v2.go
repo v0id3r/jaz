@@ -116,7 +116,7 @@ func normalizeInitializeV2(raw json.RawMessage) json.RawMessage {
 			Meta map[string]any `json:"_meta"`
 		} `json:"capabilities"`
 		AuthMethods []map[string]any `json:"authMethods"`
-		Meta json.RawMessage `json:"_meta"`
+		Meta        json.RawMessage  `json:"_meta"`
 	}
 	if json.Unmarshal(raw, &resp) != nil || resp.Capabilities == nil {
 		return raw
@@ -202,13 +202,19 @@ func (m *Manager) initializeConn(ctx context.Context, peer *jsonrpc.Peer, name s
 		return nil, 0, fmt.Errorf("initialize acp agent: %w", withProcessStderr(err, stderr))
 	}
 	// v1 adapters gate terminal auth and streamed terminal output on these
-	// client capability flags; the AIR record negotiates typed failures, the
-	// recommended config values and async task reports of the v1 adapters
-	// that implement it.
+	// client capability flags; the AIR record negotiates typed failures and
+	// async task reports. recommendedValue is declared only where Jaz consumes
+	// the recommendation: elsewhere it replaces the adapter's native "default"
+	// resolution with a guess of its own (Claude Code's effort default is not
+	// the "medium" an adapter recommends).
+	airCapabilities := []string{"asyncTasks", "sessionFailure"}
+	if agentPolicyForAgent(name).airRecommendedValue {
+		airCapabilities = append(airCapabilities, "recommendedValue")
+	}
 	meta := map[string]any{
 		"terminal-auth":         true,
 		"terminal_output_delta": true,
-		"jetbrains":             map[string]any{"air": map[string]any{"version": 1, "capabilities": []string{"asyncTasks", "recommendedValue", "sessionFailure"}}},
+		"jetbrains":             map[string]any{"air": map[string]any{"version": 1, "capabilities": airCapabilities}},
 		"jaz.dev/widget":        map[string]any{"version": 1},
 	}
 	raw, err := peer.Call(ctx, acpschema.AgentMethodInitialize, acpschema.InitializeRequest{

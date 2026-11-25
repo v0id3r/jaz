@@ -12,8 +12,6 @@ import (
 	acpschema "github.com/gluonfield/acp-transport/acp"
 )
 
-const mcpRefreshMethod = "_session/mcp/refresh"
-
 const grokMCPUpdateMethod = "_x.ai/session/update_mcp_servers"
 
 type MCPRevisionSource interface {
@@ -48,20 +46,19 @@ func supportedMCPRefresh(raw json.RawMessage, policy string) string {
 	if capabilities.MCPCapabilities == nil || !capabilities.MCPCapabilities.HTTP {
 		return ""
 	}
-	refresh, _ := capabilities.Meta["mcpRefresh"].(map[string]any)
-	if refresh["method"] == mcpRefreshMethod {
-		return mcpRefreshMethod
-	}
 	if boolMeta(response.Meta, "grokShell") && boolMeta(response.Meta, "x.ai/mcp/sdk") {
 		return grokMCPUpdateMethod
 	}
 	return ""
 }
 
-// Codex keeps a loaded thread's tool catalog through reloads and tool-list
-// notifications, so only a relaunch that resumes the thread reads the new one.
-func (m *Manager) retireStaleCodexCatalog(job *jobState, process *agentProcess) {
-	if job.ACPAgent != AgentCodex || process.mcpRefresh != "" || !fullMCPPolicy(process.mcpPolicy) || process.mcpRevision == m.mcpRevision() {
+// A changed MCP catalog reaches these agents only through a relaunch that
+// resumes the thread with the fresh server list: upstream Claude replaces the
+// query on a resume whose mcpServers differ, Codex keeps a loaded thread's
+// tool catalog through reloads, and neither offers a live refresh method.
+// Grok updates in place through its own method and never retires here.
+func (m *Manager) retireStaleMCPCatalog(job *jobState, process *agentProcess) {
+	if (job.ACPAgent != AgentCodex && job.ACPAgent != AgentClaude) || process.mcpRefresh != "" || !fullMCPPolicy(process.mcpPolicy) || process.mcpRevision == m.mcpRevision() {
 		return
 	}
 	if !m.subagentsRunning(job) && !m.hasLivePermissionWaiter(job.ID) {
@@ -81,28 +78,22 @@ func (m *Manager) refreshMCPBeforeTurn(ctx context.Context, job *jobState) error
 		return nil
 	}
 	params := map[string]any{"sessionId": job.ACPSession}
-	if process.mcpRefresh == grokMCPUpdateMethod {
-		servers, err := m.grokMCPServers(m.mcpAuthContext(ctx, process.sandboxed), job, process.mcpPolicy, revision)
-		if err != nil {
-			return err
-		}
-		params["mcpServers"] = servers
-	} else {
-		params["serverNames"] = []string{"jaz_mcp"}
+	servers, err := m.grokMCPServers(m.mcpAuthContext(ctx, process.sandboxed), job, process.mcpPolicy, revision)
+	if err != nil {
+		return err
 	}
+	params["mcpServers"] = servers
 	raw, err := process.peer.Call(ctx, process.mcpRefresh, params)
 	if err != nil {
 		return fmt.Errorf("refresh agent MCP tools: %w", err)
 	}
-	if process.mcpRefresh == grokMCPUpdateMethod {
-		var response struct {
-			Result struct {
-				OK bool `json:"ok"`
-			} `json:"result"`
-		}
-		if json.Unmarshal(raw, &response) != nil || !response.Result.OK {
-			return fmt.Errorf("agent did not acknowledge MCP update")
-		}
+	var response struct {
+		Result struct {
+			OK bool `json:"ok"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(raw, &response) != nil || !response.Result.OK {
+		return fmt.Errorf("agent did not acknowledge MCP update")
 	}
 	process.mcpRevision = revision
 	return nil
