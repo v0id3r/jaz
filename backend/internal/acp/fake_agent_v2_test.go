@@ -36,10 +36,10 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 				map[string]any{"value": "fake-large", "name": "Fake Large"},
 			},
 		},
+		// Boolean config options are baseline on v2, and the real adapters send
+		// one for fast mode; its JSON boolean currentValue must not poison the
+		// select options around it.
 		map[string]any{
-			// Boolean config options are baseline on v2, and the real adapters
-			// send one for fast mode; its JSON boolean currentValue must not
-			// poison the select options around it.
 			"type": "boolean", "configId": "fast-mode", "name": "Fast mode", "category": "speed",
 			"currentValue": false,
 		},
@@ -54,6 +54,32 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 	}
 	prompts := 0
 	declineV2 := os.Getenv("JAZ_FAKE_ACP_V2_DECLINE") == "1"
+	if os.Getenv("JAZ_FAKE_ACP_V2_CODEX_MODES") == "1" {
+		// The Codex adapter's shape: the permission mode and plan are separate
+		// options, and the mode's values carry no "plan".
+		configOptions = []any{
+			configOptions[0],
+			configOptions[1],
+			map[string]any{
+				"type": "select", "configId": "mode", "name": "Mode", "category": "mode",
+				"currentValue": "agent",
+				"options": []any{
+					map[string]any{"value": "read-only", "name": "Read-only"},
+					map[string]any{"value": "workspace-write", "name": "Workspace access"},
+					map[string]any{"value": "agent", "name": "Auto review"},
+					map[string]any{"value": "agent-full-access", "name": "Full access"},
+				},
+			},
+			map[string]any{
+				"type": "select", "configId": "collaboration_mode", "name": "Collaboration mode", "category": "collaboration_mode",
+				"currentValue": "default",
+				"options": []any{
+					map[string]any{"value": "default", "name": "Default"},
+					map[string]any{"value": "plan", "name": "Plan"},
+				},
+			},
+		}
+	}
 
 	notify := func(update map[string]any) {
 		notifyRaw(conn, sessionID, update)

@@ -130,6 +130,82 @@ func TestV2SessionExposesConfigOptions(t *testing.T) {
 	}
 }
 
+// A v2 Codex session takes its permission baseline through the separate mode
+// config option, at spawn and again before each turn, while plan rides the
+// collaboration_mode option.
+func TestV2CodexBaselineMode(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := acp.NewManager(store, acp.Config{
+		Root:         t.TempDir(),
+		Workspace:    t.TempDir(),
+		SystemPrompt: staticPrompt("skill prompt"),
+		Agents: map[string]acp.AgentConfig{
+			"codex": {
+				ProtocolV2: true,
+				Command:    os.Args[0],
+				Args:       []string{"-test.run=TestFakeACPAgentV2Process"},
+				Env:        fakeV2ManagerConfig(t, map[string]string{"JAZ_FAKE_ACP_V2_CODEX_MODES": "1"}),
+			},
+		},
+	}, log.New(io.Discard))
+	defer manager.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	spawned, err := manager.Spawn(ctx, acp.SpawnRequest{ACPAgent: "codex", Slug: "v2-codex-modes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	modeValues := func() map[string]string {
+		t.Helper()
+		events, err := store.LoadSessionEvents(spawned.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := map[string]string{}
+		for _, event := range events {
+			if event.AgentSession == nil {
+				continue
+			}
+			for _, option := range event.AgentSession.ConfigOptions {
+				values[option.ID] = option.CurrentValue
+			}
+		}
+		return values
+	}
+	if values := modeValues(); values["mode"] != "agent-full-access" {
+		t.Fatalf("mode after spawn = %q, want agent-full-access (%v)", values["mode"], values)
+	}
+
+	if _, err := manager.Send(ctx, acp.SendRequest{Session: spawned.SessionID, Message: "make a plan", Completion: acp.CompletionInline, PlanRequested: true}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := manager.Wait(ctx, acp.WaitRequest{Session: spawned.SessionID, Timeout: 15 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != acp.StateIdle {
+		t.Fatalf("plan turn ended %s (%s)", job.State, job.Error)
+	}
+	if values := modeValues(); values["mode"] != "agent-full-access" || values["collaboration_mode"] != "plan" {
+		t.Fatalf("after the plan turn: %v", values)
+	}
+
+	if _, err := manager.Send(ctx, acp.SendRequest{Session: spawned.SessionID, Message: "approved", Completion: acp.CompletionInline}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Wait(ctx, acp.WaitRequest{Session: spawned.SessionID, Timeout: 15 * time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if values := modeValues(); values["mode"] != "agent-full-access" || values["collaboration_mode"] != "default" {
+		t.Fatalf("after the ordinary turn: %v", values)
+	}
+}
+
 func TestV2SimpleTurn(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {
