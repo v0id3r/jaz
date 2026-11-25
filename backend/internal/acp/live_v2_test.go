@@ -154,6 +154,28 @@ func TestLiveV2Scenarios(t *testing.T) {
 	if !strings.Contains(codeword.Result, "jaz-owl-77") {
 		t.Errorf("[%s] system prompt codeword missing from the result: %q", label, truncateRunes(codeword.Result, 200))
 	}
+	// An adapter-generated title must be meaningful — not the raw prompt and
+	// not leaking the system prompt — and Claude asks for it right after the
+	// first prompt, so it must arrive within the turns above.
+	titleDeadline := time.Now().Add(30 * time.Second)
+	title := ""
+	for time.Now().Before(titleDeadline) {
+		session, err := store.LoadSession(spawned.SessionID)
+		if err == nil {
+			title = strings.TrimSpace(session.Title)
+		}
+		if title != "" {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Logf("[%s] session title: %q", label, title)
+	if strings.Contains(title, "jaz-owl-77") {
+		t.Errorf("[%s] session title leaks the system prompt: %q", label, title)
+	}
+	if agent == AgentClaude && title == "" {
+		t.Errorf("[%s] claude returned no session title", label)
+	}
 	// The turn's prepareModeForTurn sets the agent's baseline mode through the
 	// mode config option; Codex left in its default mode sandboxes every
 	// command into bwrap failures.
