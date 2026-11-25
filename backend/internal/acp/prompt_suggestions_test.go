@@ -53,6 +53,23 @@ func TestPromptSuggestionsOnlyWhereSomeoneWrites(t *testing.T) {
 	}
 }
 
+
+func TestIdleCompactionDisabledForClaudeOnly(t *testing.T) {
+	opened, _ := sessionPromptSuggestionOptions(t, acp.AgentClaude, storage.SourceBot)
+	for method, options := range opened {
+		settings, _ := options["settings"].(map[string]any)
+		if settings["idleCompaction"] != false {
+			t.Errorf("claude %s settings.idleCompaction = %#v, want false on new and resume", method, settings["idleCompaction"])
+		}
+	}
+	other, _ := sessionPromptSuggestionOptions(t, acp.AgentCodex, storage.SourceBot)
+	for method, options := range other {
+		if settings, ok := options["settings"].(map[string]any); ok && settings["idleCompaction"] != nil {
+			t.Errorf("codex %s unexpectedly carries settings.idleCompaction", method)
+		}
+	}
+}
+
 func TestOtherAgentsKeepPromptSuggestionDefault(t *testing.T) {
 	for _, agent := range []string{acp.AgentCodex, acp.AgentKimi, acp.AgentGrok, acp.AgentOpenCode, acp.AgentMuse, acp.AgentAntigravity} {
 		t.Run(agent, func(t *testing.T) {

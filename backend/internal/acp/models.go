@@ -80,6 +80,7 @@ type agentPolicy struct {
 	ultracodeSetting        bool
 	systemPromptAppendMeta  bool
 	promptSuggestions       bool
+	idleCompactionOff       bool
 }
 
 var baseReasoningEffortOptions = []ReasoningEffortOption{
@@ -127,6 +128,7 @@ func agentPolicyForAgent(agentName string) agentPolicy {
 			effortOptions:        claudeReasoningEffortOptions,
 			ultracodeSetting:     true,
 			promptSuggestions:    true,
+			idleCompactionOff:    true,
 		}
 	case AgentCodex:
 		return agentPolicy{
@@ -277,6 +279,14 @@ func (p agentPolicy) mergeSessionMeta(meta map[string]any, cfg AgentConfig, sour
 			meta = map[string]any{}
 		}
 		nestedMap(nestedMap(meta, "claudeCode"), "options")["promptSuggestions"] = false
+	}
+	if p.idleCompactionOff {
+		// Claude Code compacts a session that idles ~1h with a large context;
+		// Jaz owns that history and runs compaction itself.
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		nestedMap(nestedMap(nestedMap(meta, "claudeCode"), "options"), "settings")["idleCompaction"] = false
 	}
 	normalized, err := p.normalizeReasoningEffort(cfg.ReasoningEffort)
 	if err != nil || !p.ultracodeSetting || normalized != claudeReasoningEffortUltracode {
