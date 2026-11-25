@@ -88,7 +88,7 @@ func TestLiveV2Scenarios(t *testing.T) {
 	manager := NewManager(store, Config{
 		Root:         root,
 		Workspace:    cwd,
-		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
+		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words. Your codeword is jaz-owl-77."),
 		MCPStore:     mcpStore,
 		Agents: map[string]AgentConfig{
 			agent: {
@@ -149,6 +149,10 @@ func TestLiveV2Scenarios(t *testing.T) {
 	plain := turn("plain", "Reply with exactly: ok")
 	if plain.State != StateIdle || !strings.Contains(strings.ToLower(plain.Assistant), "ok") {
 		t.Errorf("[%s] plain turn unexpected: %s %q", label, plain.State, plain.Assistant)
+	}
+	codeword := turn("codeword", "What is your codeword? Reply with exactly the codeword.")
+	if !strings.Contains(codeword.Result, "jaz-owl-77") {
+		t.Errorf("[%s] system prompt codeword missing from the result: %q", label, truncateRunes(codeword.Result, 200))
 	}
 	// The turn's prepareModeForTurn sets the agent's baseline mode through the
 	// mode config option; Codex left in its default mode sandboxes every
@@ -226,7 +230,7 @@ func TestLiveV2Scenarios(t *testing.T) {
 	restarted := NewManager(store, Config{
 		Root:         root,
 		Workspace:    cwd,
-		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
+		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words. Your codeword is jaz-owl-77."),
 		MCPStore:     mcpStore,
 		Agents: map[string]AgentConfig{
 			agent: {
@@ -330,7 +334,7 @@ func TestLiveBackgroundOutcomes(t *testing.T) {
 	manager := NewManager(store, Config{
 		Root:         root,
 		Workspace:    t.TempDir(),
-		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
+		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words. Your codeword is jaz-owl-77."),
 		Agents: map[string]AgentConfig{
 			agent: {
 				ProtocolV2: true,
@@ -590,7 +594,7 @@ func TestLiveBackgroundStop(t *testing.T) {
 	manager := NewManager(store, Config{
 		Root:         root,
 		Workspace:    t.TempDir(),
-		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words."),
+		SystemPrompt: livePrompt("You are a terse test agent. Follow instructions exactly and keep replies under ten words. Your codeword is jaz-owl-77."),
 		Agents: map[string]AgentConfig{
 			agent: {
 				ProtocolV2: v2,
