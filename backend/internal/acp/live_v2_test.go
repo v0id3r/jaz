@@ -449,6 +449,40 @@ func TestLiveBackgroundOutcomes(t *testing.T) {
 
 // liveConfigOptionValue reads the current value of the session's config
 // option of a category, as the agent_session event publishes it.
+func liveConfigOptionID(manager *Manager, session, category string) string {
+	job, err := manager.job(session)
+	if err != nil {
+		return ""
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	for _, option := range job.agentSession.ConfigOptions {
+		if option.Category == category {
+			return option.ID
+		}
+	}
+	return ""
+}
+
+func liveConfigOptions(manager *Manager, session, category string) []string {
+	job, err := manager.job(session)
+	if err != nil {
+		return nil
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	for _, option := range job.agentSession.ConfigOptions {
+		if option.Category == category {
+			values := make([]string, 0, len(option.Options))
+			for _, choice := range option.Options {
+				values = append(values, choice.Value)
+			}
+			return values
+		}
+	}
+	return nil
+}
+
 func liveConfigOptionValue(manager *Manager, session, category string) string {
 	return liveConfigOption(manager, session, func(option sessionevents.AgentConfigOption) bool { return option.Category == category })
 }
@@ -607,16 +641,34 @@ func TestLiveEffortTransparency(t *testing.T) {
 	}
 	baseline := liveConfigOptionValue(manager, spawned.SessionID, "thought_level")
 	t.Logf("[%s] effort before any set: %q (options: %s)", label, baseline, liveConfigOptionsSummary(manager, spawned.SessionID))
-	if baseline != "default" {
+	// Claude keeps a "default" row for its own resolution; Codex reports the
+	// concrete level it runs at. Either way Jaz must not have written a flag:
+	// the value is the agent's own until one is chosen below.
+	if agent == AgentClaude && baseline != "default" {
 		t.Errorf("[%s] effort before any set = %q, want the agent's default row", label, baseline)
 	}
-	if err := manager.SetSessionConfig(ctx, spawned.SessionID, "effort", "low"); err != nil {
-		t.Fatalf("[%s] set effort low: %v", label, err)
+	pick := "low"
+	for _, option := range liveConfigOptions(manager, spawned.SessionID, "thought_level") {
+		if option != baseline {
+			pick = option
+			break
+		}
+	}
+	if pick == baseline {
+		t.Logf("[%s] agent offers only %q; nothing else to set", label, baseline)
+		return
+	}
+	effortID := liveConfigOptionID(manager, spawned.SessionID, "thought_level")
+	if effortID == "" {
+		t.Fatalf("[%s] no thought_level config option advertised: %s", label, liveConfigOptionsSummary(manager, spawned.SessionID))
+	}
+	if err := manager.SetSessionConfig(ctx, spawned.SessionID, effortID, pick); err != nil {
+		t.Fatalf("[%s] set effort %s: %v", label, pick, err)
 	}
 	settled := liveConfigOptionValue(manager, spawned.SessionID, "thought_level")
-	t.Logf("[%s] effort after set low: %q", label, settled)
-	if settled != "low" {
-		t.Errorf("[%s] effort after set low = %q, want low", label, settled)
+	t.Logf("[%s] effort after set %s: %q", label, pick, settled)
+	if settled != pick {
+		t.Errorf("[%s] effort after set %s = %q, want %s", label, pick, settled, pick)
 	}
 }
 
