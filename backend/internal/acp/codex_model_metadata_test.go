@@ -90,7 +90,7 @@ func TestResolveCodexCustomProviderContextWindowPropagatesCatalogError(t *testin
 
 func TestConfigureCodexEnvWritesModelContextWindow(t *testing.T) {
 	env := map[string]string{}
-	err := configureCodexEnv(t.TempDir(), env, customProviderCodexConfig("custom", "qwen3.8-max-preview"), nil, 1_000_000)
+	err := configureCodexEnv(env, customProviderCodexConfig("custom", "qwen3.8-max-preview"), nil, 1_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestConfigureCodexEnvWritesModelContextWindow(t *testing.T) {
 
 func TestConfigureCodexEnvOmitsModelContextWindow(t *testing.T) {
 	env := map[string]string{}
-	err := configureCodexEnv(t.TempDir(), env, customProviderCodexConfig("custom", "qwen3.8-max-preview"), nil, 0)
+	err := configureCodexEnv(env, customProviderCodexConfig("custom", "qwen3.8-max-preview"), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

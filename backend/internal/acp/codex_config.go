@@ -2,7 +2,6 @@ package acp
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -49,7 +48,6 @@ func codexProviderKeyID(id string) string {
 }
 
 func configureCodexEnv(
-	dir string,
 	env map[string]string,
 	cfg AgentConfig,
 	providers map[string]modelprovider.ModelProviderConfig,
@@ -90,16 +88,11 @@ func configureCodexEnv(
 		config["model_context_window"] = contextWindow
 	}
 
-	file, err := os.CreateTemp(dir, "codex-config-*.json")
+	data, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("create CODEX_CONFIG: %w", err)
 	}
-	writeErr := json.NewEncoder(file).Encode(config)
-	closeErr := file.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
-		return fmt.Errorf("write CODEX_CONFIG: %w", err)
-	}
-	env["CODEX_CONFIG"] = "@" + file.Name()
+	env["CODEX_CONFIG"] = string(data)
 	return nil
 }
 

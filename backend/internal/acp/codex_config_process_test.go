@@ -6,8 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 	"time"
 )
@@ -17,16 +15,8 @@ func TestCodexConfigProcessHelper(t *testing.T) {
 		return
 	}
 	raw := os.Getenv("CODEX_CONFIG")
-	if !strings.HasPrefix(raw, "@") {
-		t.Fatal("expected config file reference")
-	}
-	path := strings.TrimPrefix(raw, "@")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
 		t.Fatal(err)
 	}
 	// The system prompt travels session/new's standard field, not the launch config.
@@ -42,14 +32,16 @@ func TestCodexConfigProcessHelper(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(os.Getenv("JAZ_CODEX_CONFIG_RECEIPT"), []byte(path), 0o600); err != nil {
+	if err := os.WriteFile(os.Getenv("JAZ_CODEX_CONFIG_RECEIPT"), []byte("read"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, _ = io.Copy(io.Discard, os.Stdin)
 	os.Exit(0)
 }
 
-func TestCodexConfigFileProcessLifecycle(t *testing.T) {
+// The launch config reaches the process inline, preserves the incoming
+// CODEX_CONFIG, and writes nothing into CODEX_HOME.
+func TestCodexConfigProcessLifecycle(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +54,6 @@ func TestCodexConfigFileProcessLifecycle(t *testing.T) {
 	if err := os.WriteFile(auth, []byte("test-credential"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var paths []string
 	for range 2 {
 		receipt := filepath.Join(t.TempDir(), "receipt")
 		env := map[string]string{"CODEX_HOME": home, "CODEX_CONFIG": `{"custom":"preserved"}`, "JAZ_CODEX_CONFIG_PROBE": "1", "JAZ_CODEX_CONFIG_RECEIPT": receipt}
@@ -70,13 +61,8 @@ func TestCodexConfigFileProcessLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() {
-			_ = conn.Close()
-		})
-		var path string
-		for path == "" {
+		for {
 			if data, err := os.ReadFile(receipt); err == nil && len(data) > 0 {
-				path = string(data)
 				break
 			}
 			select {
@@ -88,29 +74,12 @@ func TestCodexConfigFileProcessLifecycle(t *testing.T) {
 			case <-time.After(10 * time.Millisecond):
 			}
 		}
-		paths = append(paths, path)
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
+		_ = conn.Close()
+		select {
+		case <-stderr.done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("helper did not stop")
 		}
-		if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-			t.Fatal("config accessible by other users")
-		}
-		t.Cleanup(func() {
-			_ = conn.Close()
-			select {
-			case <-stderr.done:
-			case <-time.After(10 * time.Second):
-				t.Error("helper did not stop")
-				return
-			}
-			if _, err := os.Stat(path); !os.IsNotExist(err) {
-				t.Errorf("config remains after process exit: %v", err)
-			}
-		})
-	}
-	if paths[0] == paths[1] {
-		t.Fatal("concurrent processes share a config")
 	}
 	data, err := os.ReadFile(auth)
 	if err != nil || string(data) != "test-credential" {
@@ -118,21 +87,5 @@ func TestCodexConfigFileProcessLifecycle(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "config.toml")); !os.IsNotExist(err) {
 		t.Fatal("shared config written")
-	}
-}
-
-func TestCodexConfigFileRemovedOnStartFailure(t *testing.T) {
-	manager := NewManager(nil, Config{Root: t.TempDir()}, nil)
-	env := map[string]string{}
-	_, _, err := manager.openConn(context.Background(), AgentCodex, AgentConfig{Command: filepath.Join(t.TempDir(), "missing-executable")}, env, t.TempDir(), "")
-	if err == nil {
-		t.Fatal("missing executable started")
-	}
-	path := strings.TrimPrefix(env["CODEX_CONFIG"], "@")
-	if path == "" {
-		t.Fatal("config was not created")
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("config remains after failed launch: %v", err)
 	}
 }

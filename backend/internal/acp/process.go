@@ -154,7 +154,7 @@ func (m *Manager) openConn(ctx context.Context, name string, cfg AgentConfig, en
 		if cfg.Model, err = m.startingModel(name, cfg); err == nil {
 			var contextWindow int
 			if contextWindow, err = m.resolveCodexCustomProviderContextWindow(name, cfg); err == nil {
-				err = configureCodexEnv(launchDir, env, cfg, m.providers(), contextWindow)
+				err = configureCodexEnv(env, cfg, m.providers(), contextWindow)
 			}
 		}
 	case AgentMuse:
