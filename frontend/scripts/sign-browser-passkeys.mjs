@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import sign from './sign-mac.mjs'
 
 export function browserPasskeySigning(options, packager, execute = execFileSync) {
   const command = (file, args, input) => execute(file, args, { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10_000 })
@@ -41,4 +40,8 @@ export function browserPasskeySigning(options, packager, execute = execFileSync)
   }
 }
 
-export default (options, packager) => sign(browserPasskeySigning(options, packager), packager)
+// Loaded on use: electron-builder installs source-map-support process-wide on import.
+export default async (options, packager) => {
+  const { default: sign } = await import('./sign-mac.mjs')
+  return sign(browserPasskeySigning(options, packager), packager)
+}
