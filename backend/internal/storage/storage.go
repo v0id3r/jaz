@@ -426,8 +426,10 @@ type Message struct {
 }
 
 type CreateSession struct {
-	Slug            string
-	Title           string
+	Slug  string
+	Title string
+	// TitleLocked keeps Title through runtime and generated titles.
+	TitleLocked     bool
 	ParentID        string
 	Runtime         string
 	RuntimeRef      *RuntimeRef

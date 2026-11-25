@@ -211,6 +211,7 @@ func (m *Manager) createStoredSession(req SpawnRequest, cfg AgentConfig, effort 
 	return m.store.CreateSession(storage.CreateSession{
 		Slug:            req.Slug,
 		Title:           req.Title,
+		TitleLocked:     req.Title != "",
 		ParentID:        req.ParentID,
 		Runtime:         storage.RuntimeACP,
 		ModelProvider:   sessionModelProvider(req.ACPAgent, cfg),

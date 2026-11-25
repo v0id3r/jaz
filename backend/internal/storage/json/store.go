@@ -85,6 +85,7 @@ func (s *Store) CreateSession(input storage.CreateSession) (storage.Session, err
 		ID:              s.NewSessionID(),
 		Slug:            input.Slug,
 		Title:           input.Title,
+		TitleLocked:     input.TitleLocked,
 		ParentID:        input.ParentID,
 		Status:          storage.StatusIdle,
 		Runtime:         runtime,
