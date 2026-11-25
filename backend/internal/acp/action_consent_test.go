@@ -41,7 +41,7 @@ func TestCodexBotPoliciesReachLaunchAndRetainedRefresh(t *testing.T) {
 			}
 			newManager := func() *acp.Manager {
 				return newFakeNamedAgentManagerWithOptions(t, store, root, acp.AgentCodex, map[string]string{
-					"JAZ_FAKE_ACP_RESUME": "1", "JAZ_FAKE_ACP_REQUEST_LOG": requestLog, "JAZ_FAKE_ACP_CODEX_PROMPT_CAPTURE": capture,
+					"JAZ_FAKE_ACP_RESUME": "1", "JAZ_FAKE_ACP_SYSTEM_PROMPT_CAP": "1", "JAZ_FAKE_ACP_REQUEST_LOG": requestLog, "JAZ_FAKE_ACP_CODEX_PROMPT_CAPTURE": capture,
 				}, "", "", func(cfg *acp.Config) {
 					cfg.SystemPrompt = wiring.SystemPrompt
 					cfg.TurnNote = wiring.TurnNote

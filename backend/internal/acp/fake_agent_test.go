@@ -206,6 +206,12 @@ func TestFakeACPAgentProcess(t *testing.T) {
 					"resume": map[string]any{},
 				}
 			}
+			if os.Getenv("JAZ_FAKE_ACP_SYSTEM_PROMPT_CAP") == "1" {
+				capabilities["sessionCapabilities"] = map[string]any{
+					"resume":       map[string]any{},
+					"systemPrompt": map[string]any{},
+				}
+			}
 			if os.Getenv("JAZ_FAKE_ACP_MCP_HTTP") == "1" {
 				capabilities["mcpCapabilities"] = map[string]any{"http": true}
 			}
@@ -318,9 +324,13 @@ func TestFakeACPAgentProcess(t *testing.T) {
 		case "session/new":
 			fakeHold(os.Getenv("JAZ_FAKE_ACP_NEW_HOLD"))
 			var req struct {
-				Meta       map[string]any    `json:"_meta"`
-				Cwd        string            `json:"cwd"`
-				MCPServers []json.RawMessage `json:"mcpServers"`
+				Meta         map[string]any    `json:"_meta"`
+				Cwd          string            `json:"cwd"`
+				MCPServers   []json.RawMessage `json:"mcpServers"`
+				SystemPrompt *struct {
+					Mode    string            `json:"mode"`
+					Content []json.RawMessage `json:"content"`
+				} `json:"systemPrompt"`
 			}
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams("invalid session/new params", nil))
@@ -329,6 +339,21 @@ func TestFakeACPAgentProcess(t *testing.T) {
 			}
 			openFakeSession(req.Cwd, false)
 			rememberFakeSession(t)
+			if path := os.Getenv("JAZ_FAKE_ACP_CODEX_PROMPT_CAPTURE"); path != "" && req.SystemPrompt != nil {
+				var text string
+				for _, raw := range req.SystemPrompt.Content {
+					var block struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					}
+					if json.Unmarshal(raw, &block) == nil && block.Type == "text" {
+						text += block.Text
+					}
+				}
+				if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := validateFakeMCPServers(req.MCPServers); err != nil {
 				resp, _ := jsonrpc.NewErrorResponse(*msg.ID, jsonrpc.InvalidParams(err.Error(), nil))
 				_ = conn.Send(context.Background(), resp)

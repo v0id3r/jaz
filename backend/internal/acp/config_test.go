@@ -178,17 +178,6 @@ func TestSessionPromptMetaAllowsExtensionWithoutBasePrompt(t *testing.T) {
 	}
 }
 
-func TestCodexSystemPromptIsNotDuplicatedInSessionMeta(t *testing.T) {
-	manager := &Manager{cfg: Config{SystemPrompt: testPrompt("launch prompt")}}
-	got, err := manager.sessionPromptMeta(context.Background(), AgentCodex, "", "", "", []string{"run context"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Fatalf("Codex session metadata = %#v, want launch-only prompt", got)
-	}
-}
-
 func TestSessionMetaSendsGrokModelWithRules(t *testing.T) {
 	manager := &Manager{cfg: Config{SystemPrompt: testPrompt("jaz platform prompt")}}
 	got, err := manager.sessionMeta(context.Background(), AgentGrok, AgentConfig{Model: "grok-4.6"}, "", "", "", "", nil)
