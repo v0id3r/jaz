@@ -37,6 +37,13 @@ func TestFakeACPAgentV2Process(t *testing.T) {
 			},
 		},
 		map[string]any{
+			// Boolean config options are baseline on v2, and the real adapters
+			// send one for fast mode; its JSON boolean currentValue must not
+			// poison the select options around it.
+			"type": "boolean", "configId": "fast-mode", "name": "Fast mode", "category": "speed",
+			"currentValue": false,
+		},
+		map[string]any{
 			"type": "select", "configId": "mode", "name": "Mode", "category": "mode",
 			"currentValue": "default",
 			"options": []any{

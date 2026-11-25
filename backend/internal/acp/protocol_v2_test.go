@@ -81,6 +81,55 @@ func waitV2Idle(t *testing.T, manager *acp.Manager, session string) acp.Job {
 	return job
 }
 
+// A v2 session's config options reach the agent_session event: the real
+// adapters mix a boolean fast-mode option into the select ones, and its JSON
+// boolean must not blank the whole list.
+func TestV2SessionExposesConfigOptions(t *testing.T) {
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newV2TestManager(t, store, nil)
+	defer manager.Close()
+	spawned := spawnV2Session(t, manager, "v2-options")
+	defer func() { _, _ = manager.Cancel(context.Background(), spawned.SessionID) }()
+
+	status, err := manager.Status(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Model != "fake-small" {
+		t.Errorf("model = %q", status.Model)
+	}
+	if status.Modes.PlanModeID != "plan" {
+		t.Errorf("plan mode from the mode config option not detected: %#v", status.Modes)
+	}
+	var session *sessionevents.AgentSession
+	events, err := store.LoadSessionEvents(spawned.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.AgentSession != nil {
+			state := *event.AgentSession
+			session = &state
+		}
+	}
+	if session == nil {
+		t.Fatal("no agent_session event")
+	}
+	categories := map[string]string{}
+	for _, option := range session.ConfigOptions {
+		categories[option.Category] = option.CurrentValue
+	}
+	if categories["model"] != "fake-small" {
+		t.Errorf("agent_session model option = %q, options: %#v", categories["model"], session.ConfigOptions)
+	}
+	if categories["mode"] != "default" {
+		t.Errorf("agent_session mode option = %q, options: %#v", categories["mode"], session.ConfigOptions)
+	}
+}
+
 func TestV2SimpleTurn(t *testing.T) {
 	store, err := jsonstore.New(t.TempDir())
 	if err != nil {

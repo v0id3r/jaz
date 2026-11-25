@@ -563,17 +563,23 @@ func parseSessionConfigOptions(raw json.RawMessage) sessionConfigOptionsState {
 		return sessionConfigOptionsState{}
 	}
 	state := sessionConfigOptionsState{configOptionsPresent: true}
-	var options []struct {
-		ID           string           `json:"id"`
-		Category     string           `json:"category"`
-		CurrentValue string           `json:"currentValue"`
-		Options      json.RawMessage  `json:"options"`
-		Meta         configOptionMeta `json:"_meta"`
-	}
-	if json.Unmarshal(rawOptions, &options) != nil {
+	var rawList []json.RawMessage
+	if json.Unmarshal(rawOptions, &rawList) != nil {
 		return state
 	}
-	for _, option := range options {
+	for _, rawOption := range rawList {
+		// One option decodes alone: a boolean option's JSON currentValue must
+		// not fail the whole list the way one bad element fails a slice.
+		var option struct {
+			ID           string           `json:"id"`
+			Category     string           `json:"category"`
+			CurrentValue string           `json:"currentValue"`
+			Options      json.RawMessage  `json:"options"`
+			Meta         configOptionMeta `json:"_meta"`
+		}
+		if json.Unmarshal(rawOption, &option) != nil {
+			continue
+		}
 		category := strings.TrimSpace(option.Category)
 		if category == string(acpschema.SessionConfigOptionCategoryMode) && state.modeConfigID == "" {
 			state.modeConfigID = option.ID
