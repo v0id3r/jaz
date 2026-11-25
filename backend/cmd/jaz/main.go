@@ -43,6 +43,12 @@ func main() {
 		os.Exit(mesh.ServeGateway(args))
 	case mainMeshHook:
 		os.Exit(mesh.Hook(args, os.Stdin, os.Stderr))
+	case mainWorktree:
+		if err := runWorktree(args); err != nil {
+			fmt.Fprintln(os.Stderr, "worktree:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	if err := runServe(args); err != nil {
 		fmt.Fprintln(os.Stderr, "serve:", err)
@@ -63,6 +69,7 @@ const (
 	mainRunner
 	mainMeshGateway
 	mainMeshHook
+	mainWorktree
 )
 
 func commandArgs(args []string) ([]string, mainAction) {
@@ -87,6 +94,8 @@ func commandArgs(args []string) ([]string, mainAction) {
 		return args[1:], mainMeshGateway
 	case "mesh-hook":
 		return args[1:], mainMeshHook
+	case "worktree":
+		return args[1:], mainWorktree
 	case "help":
 		return nil, mainHelp
 	}
@@ -108,4 +117,5 @@ func isHelp(arg string) bool {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: jaz [--addr addr] [--public-url url] [--preview-url-template url]\n       jaz --version\n       jaz update [--latest|--version vX.Y.Z]\n       jaz serve [flags]\n       jaz server [flags]\n       jaz devices [--root path]\n       jaz devices [--root path] approve <pairing-or-device-id>\n       jaz runner [--config path]\n\nRun and administer Jaz.")
+	fmt.Fprintln(w, "\nManage Git checkouts with jaz worktree list, run, or adopt.")
 }
