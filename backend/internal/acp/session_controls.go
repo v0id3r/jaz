@@ -125,8 +125,6 @@ func translateConfigOptions(raw json.RawMessage) []sessionevents.AgentConfigOpti
 			ID: option.ID, Name: option.Name, Description: option.Description,
 			Category: option.Category,
 			Options:  []sessionevents.AgentConfigValue{},
-			// RecommendedValue rides the JetBrains AIR extension.
-			RecommendedValue: option.Meta.Jetbrains.Air.RecommendedValue,
 		}
 		switch option.Type {
 		case "boolean":

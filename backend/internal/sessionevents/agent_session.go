@@ -17,7 +17,6 @@ type AgentConfigOption struct {
 	Type             string             `json:"type,omitempty"`
 	CurrentValue     string             `json:"current_value"`
 	UserValue        *string            `json:"user_value,omitempty"`
-	RecommendedValue string             `json:"recommended_value,omitempty"`
 	Options          []AgentConfigValue `json:"options"`
 }
 

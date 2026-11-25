@@ -139,19 +139,6 @@ func TestNormalizeAgentReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestDefaultAgentReasoningEffort(t *testing.T) {
-	for _, agent := range []string{AgentCodex, AgentClaude, AgentOpenCode} {
-		if got := DefaultAgentReasoningEffort(agent); got != "xhigh" {
-			t.Fatalf("%s default effort = %q, want xhigh", agent, got)
-		}
-	}
-	for _, agent := range []string{"", "custom", AgentKimi, AgentGrok, AgentAntigravity} {
-		if got := DefaultAgentReasoningEffort(agent); got != "" {
-			t.Fatalf("%q default effort = %q, want empty", agent, got)
-		}
-	}
-}
-
 // Codex repeats the session's current model in the model config option even when
 // the account cannot use it, so a thread pinned to an unavailable model would
 // otherwise look advertised. Codex also spells one advertised id per reasoning

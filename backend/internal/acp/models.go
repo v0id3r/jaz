@@ -890,18 +890,6 @@ func NormalizeAgentReasoningEffort(agentName, value string) (string, error) {
 	return agentPolicyForAgent(CanonicalAgentName(agentName)).normalizeReasoningEffort(value)
 }
 
-func DefaultAgentReasoningEffort(agentName string) string {
-	switch agentName = CanonicalAgentName(agentName); agentName {
-	case AgentCodex, AgentClaude, AgentOpenCode:
-	default:
-		return ""
-	}
-	if agentPolicyForAgent(agentName).supportsReasoningEffort("xhigh") {
-		return "xhigh"
-	}
-	return ""
-}
-
 func configuredAgentReasoningEffort(agentName, value string) string {
 	effort, err := NormalizeAgentReasoningEffort(agentName, value)
 	if err != nil {

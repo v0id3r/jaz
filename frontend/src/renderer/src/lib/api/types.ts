@@ -873,7 +873,6 @@ export interface AgentSessionConfigOption {
   // Absent means a select over `options`; a boolean crosses as 'on'/'off'.
   type?: 'boolean'
   current_value: string
-  recommended_value?: string
   options: { value: string; name: string; description?: string; group?: string }[]
 }
 

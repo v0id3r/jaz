@@ -34,14 +34,14 @@ func TestAgentConnectionRetainsInitialControlsAndAuth(t *testing.T) {
 	}
 	notify("_auth/status_update", `{"authStatus":{"kind":"account","label":"ChatGPT Pro","account":{"email":"user@example.test","plan":"pro"}}}`)
 	notify("session/update", `{"sessionId":"native","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact","description":"Compact context","input":{"hint":"instructions"}}]}}`)
-	state.initial = json.RawMessage(`{"configOptions":[{"id":"speed","name":"Speed","type":"select","currentValue":"standard","options":[{"value":"standard","name":"Standard"},{"value":"fast","name":"Fast"}],"_meta":{"jetbrains":{"air":{"version":1,"recommendedValue":"standard"}}}}]}`)
+	state.initial = json.RawMessage(`{"configOptions":[{"id":"speed","name":"Speed","type":"select","currentValue":"standard","options":[{"value":"standard","name":"Standard"},{"value":"fast","name":"Fast"}]}]}`)
 	job := &jobState{Job: Job{ID: session.ID, Slug: session.Slug, ACPSession: "native"}}
 	manager.addJob(job, nil)
 	state.attach(manager, job, AgentConfig{})
 	if hasTranscript, err := store.HasAgentTranscript(session.ID); err != nil || hasTranscript {
 		t.Fatalf("agent metadata materialized a conversation: %t, %v", hasTranscript, err)
 	}
-	if got := job.agentSession; got.Auth.Account.Plan != "pro" || len(got.Commands) != 1 || got.ConfigOptions[0].RecommendedValue != "standard" {
+	if got := job.agentSession; got.Auth.Account.Plan != "pro" || len(got.Commands) != 1 || len(got.ConfigOptions) != 1 {
 		t.Fatalf("initial state = %#v", got)
 	}
 	notify("session/update", `{"sessionId":"native","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"speed","name":"Speed","type":"select","currentValue":"fast","options":[{"group":"speeds","name":"Available speeds","options":[{"value":"fast","name":"Fast"}]}]}]}}`)

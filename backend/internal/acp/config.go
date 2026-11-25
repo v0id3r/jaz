@@ -333,7 +333,6 @@ func BuiltinAgents() AgentCatalog {
 		AgentClaude: {
 			ManagedAdapter:  "claude",
 			Model:           "opus[1m]",
-			ReasoningEffort: DefaultAgentReasoningEffort(AgentClaude),
 			// With telemetry off, Claude Code loads its cached feature flags
 			// (idle tool-result clearing) only when this is in its process
 			// environment; settings.json env does not reach that check.
@@ -362,7 +361,6 @@ func BuiltinAgents() AgentCatalog {
 			ModelProviderCapability: provider.CapabilityChatCompletions,
 			ModelProvider:           provider.ProviderOpenRouter,
 			Model:                   provider.DefaultOpenRouterModel,
-			ReasoningEffort:         DefaultAgentReasoningEffort(AgentOpenCode),
 		},
 		AgentAntigravity: {
 			ManagedAdapter:     "antigravity",
@@ -390,7 +388,6 @@ func codexBuiltinAgent() AgentConfig {
 		ModelProvider:           provider.ProviderOpenAI,
 		AuthProviderID:          provider.ProviderOpenAI,
 		Model:                   CodexOpenAIDefaultModel,
-		ReasoningEffort:         DefaultAgentReasoningEffort(AgentCodex),
 	}
 }
 

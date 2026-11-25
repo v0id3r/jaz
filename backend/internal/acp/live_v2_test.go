@@ -566,6 +566,60 @@ func providerSubagentSummary(manager *Manager, store *jsonstore.Store, session s
 	return strings.Join(parts, ", ")
 }
 
+// TestLiveEffortTransparency checks the empty-means-agent-default contract:
+// with no configured effort the adapter shows its own default and no flag is
+// written; setting one level applies exactly that level. ACP_LIVE_V2=1 runs it
+// on v2, otherwise on v1.
+func TestLiveEffortTransparency(t *testing.T) {
+	agent := os.Getenv("ACP_LIVE_AGENT")
+	command := os.Getenv("ACP_LIVE_AGENT_COMMAND")
+	root := os.Getenv("ACP_LIVE_ROOT")
+	if agent == "" || command == "" || root == "" {
+		t.Skip("ACP_LIVE_AGENT, ACP_LIVE_AGENT_COMMAND and ACP_LIVE_ROOT are required")
+	}
+	v2 := os.Getenv("ACP_LIVE_V2") == "1"
+	label := agent + "/v1"
+	if v2 {
+		label = agent + "/v2"
+	}
+	store, err := jsonstore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, Config{
+		Root:      root,
+		Workspace: t.TempDir(),
+		Agents: map[string]AgentConfig{
+			agent: {
+				ProtocolV2: v2,
+				Command:    command,
+				Env:        liveAgentEnv(),
+				Model:      os.Getenv("ACP_LIVE_MODEL"),
+			},
+		},
+	}, log.New(os.Stderr))
+	defer manager.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	spawned, err := manager.Spawn(ctx, SpawnRequest{ACPAgent: agent, Slug: "live-effort-" + label})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	baseline := liveConfigOptionValue(manager, spawned.SessionID, "thought_level")
+	t.Logf("[%s] effort before any set: %q (options: %s)", label, baseline, liveConfigOptionsSummary(manager, spawned.SessionID))
+	if baseline != "default" {
+		t.Errorf("[%s] effort before any set = %q, want the agent's default row", label, baseline)
+	}
+	if err := manager.SetSessionConfig(ctx, spawned.SessionID, "effort", "low"); err != nil {
+		t.Fatalf("[%s] set effort low: %v", label, err)
+	}
+	settled := liveConfigOptionValue(manager, spawned.SessionID, "thought_level")
+	t.Logf("[%s] effort after set low: %q", label, settled)
+	if settled != "low" {
+		t.Errorf("[%s] effort after set low = %q, want low", label, settled)
+	}
+}
+
 type livePrompt string
 
 func (p livePrompt) ACPPromptForContext(context.Context, string, string) (string, error) {
