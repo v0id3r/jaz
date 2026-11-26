@@ -18,11 +18,14 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
+# A newer push to main must not cancel the previous run: the release for each
+# run covers everything since the last release, so a cancelled run would lose
+# its components. PR runs are superseded freely.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
@@ -37,10 +40,34 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      # Compare a main push against the last release, not against the previous
+      # commit, so every release covers everything that changed since the one
+      # before it (a skipped or failed run loses nothing). No release yet, or a
+      # tag push: the empty tree, i.e. every filter matches.
+      - id: base
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The repo's root commit as "beginning of time": every filter matches.
+          root=$(git rev-list --max-parents=0 HEAD | head -1)
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "value=$root" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
+            --jq '[.[] | select(.prerelease | not) | select(.tag_name | startswith("jaz-"))] | first | .tag_name // empty')
+          if [ -n "$tag" ]; then
+            git fetch -q origin "+refs/tags/$tag:refs/tags/$tag"
+            echo "value=$(git rev-list -n1 "$tag")" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$root" >> "$GITHUB_OUTPUT"
+          fi
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           filters: .github/filters.yml
+          base: ${{ steps.base.outputs.value || github.base_ref }}
       - id: sha
         run: |
           sha="${{ github.event.pull_request.head.sha || github.sha }}"

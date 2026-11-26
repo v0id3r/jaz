@@ -76,7 +76,10 @@ jobs:
               [ -n "$merged" ] && notes="$notes"$'\n\n'"Merged since the previous release:"$'\n'"$merged"
             fi
           fi
-          gh release create "$tag" --target "$HEAD_SHA" --title "$tag" --notes "$notes" 2>/dev/null \
-            || gh release view "$tag" >/dev/null
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists, adding assets"
+          else
+            gh release create "$tag" --target "$HEAD_SHA" --title "$tag" --notes "$notes"
+          fi
           gh release upload "$tag" "${assets[@]}" --clobber
           grep . ./*.sha256 || true
