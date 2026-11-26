@@ -1,11 +1,11 @@
 {
   "adapters": {
     "codex": {
-      "version": "2.11.0-jaz.2",
+      "version": "2.12.0-jaz.1",
       "assets": {
         "linux-arm64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.2/codex-acp-app-server-2.11.0-jaz.2-linux-arm64.tar.gz",
-          "sha256": "2949a7414bc86bb6fd3cfbcc683fdf790b7a33ba279a960e9c55ef829ff82a10",
+          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.12.0-jaz.1/codex-acp-app-server-2.12.0-jaz.1-linux-arm64.tar.gz",
+          "sha256": "2017f3ae530de919aa47c5d49f2d1b574e9cd180f6c1b6142694a6de26820c53",
           "binary": "codex-acp",
           "env": {
             "CODEX_PATH": "codex-runtime/aarch64-unknown-linux-musl/bin/codex",
@@ -13,8 +13,8 @@
           }
         },
         "linux-x64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.2/codex-acp-app-server-2.11.0-jaz.2-linux-x64.tar.gz",
-          "sha256": "82027b598cac39a224d3109378fa00f66d1b28208c87eef10efbe29405b84d5c",
+          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.12.0-jaz.1/codex-acp-app-server-2.12.0-jaz.1-linux-x64.tar.gz",
+          "sha256": "678a4ad15e6fe4e00a8f40e6c6860c6e540181b5e30327dc6b29c068b230dce7",
           "binary": "codex-acp",
           "env": {
             "CODEX_PATH": "codex-runtime/x86_64-unknown-linux-musl/bin/codex",
@@ -22,8 +22,8 @@
           }
         },
         "win32-arm64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.2/codex-acp-app-server-2.11.0-jaz.2-win32-arm64.tar.gz",
-          "sha256": "914dc4608d6b304b68fac2c69ed45e582bb4eb27313be0c948b8cd03e9d48907",
+          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.12.0-jaz.1/codex-acp-app-server-2.12.0-jaz.1-win32-arm64.tar.gz",
+          "sha256": "5c26f8f8895af7978bf4ecdf060554101eeb07f948b9a6bae1a97d373165282c",
           "binary": "codex-acp.exe",
           "env": {
             "CODEX_PATH": "codex-runtime/aarch64-pc-windows-msvc/bin/codex.exe",
@@ -31,8 +31,8 @@
           }
         },
         "win32-x64": {
-          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.11.0-jaz.2/codex-acp-app-server-2.11.0-jaz.2-win32-x64.tar.gz",
-          "sha256": "5a4a9f4f02e104959e85ca3d295a25a4a13d4790a295d42701a8ccbbbf0d832e",
+          "url": "https://github.com/v0id3r/codex-acp-app-server/releases/download/v2.12.0-jaz.1/codex-acp-app-server-2.12.0-jaz.1-win32-x64.tar.gz",
+          "sha256": "3110b5446725461f54e4a167f9545e38790e03e7b1531dec74a00beeda96b3e9",
           "binary": "codex-acp.exe",
           "env": {
             "CODEX_PATH": "codex-runtime/x86_64-pc-windows-msvc/bin/codex.exe",
@@ -77,11 +77,11 @@
       }
     },
     "claude": {
-      "version": "0.111.0-jaz.2",
+      "version": "0.112.0-jaz.1",
       "assets": {
         "linux-x64": {
-          "url": "https://github.com/v0id3r/claude-agent-acp/releases/download/v0.111.0-jaz.2/claude-agent-acp-0.111.0-jaz.2-linux-x64.tar.gz",
-          "sha256": "acab6252d24b3b46f82eceae2e6dbcd869c48131d9cf35e005760d2f2957fc10",
+          "url": "https://github.com/v0id3r/claude-agent-acp/releases/download/v0.112.0-jaz.1/claude-agent-acp-0.112.0-jaz.1-linux-x64.tar.gz",
+          "sha256": "9260270e7df1d443343511823b5014ac0adc87cc165dfcad88c87e385bc9290e",
           "binary": "claude-agent-acp",
           "env": {
             "CLAUDE_CODE_EXECUTABLE": "claude"
@@ -90,36 +90,36 @@
       }
     },
     "kimi": {
-      "version": "2.7.2-jaz.3",
+      "version": "2.8.0-jaz.1",
       "assets": {
         "darwin-arm64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-darwin-arm64.zip",
-          "sha256": "3fe45afb4d19d8b30c5352bd9a29d0a4d26be81277db244e14203ef4dcf43da4",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.8.0-jaz.1/kimi-code-darwin-arm64.zip",
+          "sha256": "e6a96187deed294ee75d3a88e8354279047082bbcd8141bfb0616efb0629bc4f",
           "binary": "kimi"
         },
         "darwin-x64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-darwin-x64.zip",
-          "sha256": "b8b75b988c80f0dfb06ec59fa93f7a1cd24ba9f47cef6ee762a55650480fd9f6",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.8.0-jaz.1/kimi-code-darwin-x64.zip",
+          "sha256": "2a79bb6058bb0a6a876d4b65016aac9a19db5bef834ded98e591711c56b8e913",
           "binary": "kimi"
         },
         "linux-arm64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-linux-arm64.zip",
-          "sha256": "8d69319525bd5508a5d86106673e21a18a43c76f83e6d255a6ce536857925516",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.8.0-jaz.1/kimi-code-linux-arm64.zip",
+          "sha256": "b80ff98b51f9ecc04cfa78f954d0cc8e868ea2d5717a915a9241efcfb4f910f6",
           "binary": "kimi"
         },
         "linux-x64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-linux-x64.zip",
-          "sha256": "64b514048e639121405ae8fab50d239ec3e488b28a084afb2c1e4e72ed46a42c",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.8.0-jaz.1/kimi-code-linux-x64.zip",
+          "sha256": "783896945da41f3d7e66d4154cb4985afc5759bf0b816ae6ada91ed91d2a2e83",
           "binary": "kimi"
         },
         "win32-arm64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-win32-arm64.zip",
-          "sha256": "b63329435724aa9874dae75b38bc090517b93f3e18a070d1d483d7b47328f8ee",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.8.0-jaz.1/kimi-code-win32-arm64.zip",
+          "sha256": "3e387b88f021477111fdb6482992da9dee3f10abed66cba5f0036226fcf890e0",
           "binary": "kimi.exe"
         },
         "win32-x64": {
-          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.7.2-jaz.3/kimi-code-win32-x64.zip",
-          "sha256": "320f80ae7a5e832f1bf10686baceb3a007ce43feb9d667ae06ff9e71747bfa64",
+          "url": "https://github.com/v0id3r/kimi-code/releases/download/v2.8.0-jaz.1/kimi-code-win32-x64.zip",
+          "sha256": "9d1315e3e196b9e86a5ccd67dbc4398aab2f914c52465f62a08e7b614c3f4e2e",
           "binary": "kimi.exe"
         }
       }
