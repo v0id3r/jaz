@@ -9,7 +9,39 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            range="origin/${{ github.base_ref }}...HEAD"
+          else
+            range="HEAD~1..HEAD"
+          fi
+          files=$(git diff --name-only "$range")
+          echo "$files"
+          backend=false frontend=false
+          if echo "$files" | grep -q '^\.github/'; then
+            backend=true frontend=true
+          else
+            # Go tests drive the production voice client out of frontend/src, so
+            # they run for renderer/shared changes, not only backend ones.
+            echo "$files" | grep -qE '^(backend/|frontend/src/)' && backend=true
+            echo "$files" | grep -q '^frontend/' && frontend=true
+          fi
+          echo "backend=$backend" | tee -a "$GITHUB_OUTPUT"
+          echo "frontend=$frontend" | tee -a "$GITHUB_OUTPUT"
+
   backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -32,6 +64,8 @@ jobs:
         run: go test ./...
 
   frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -61,3 +95,17 @@ jobs:
       - name: Typecheck
         working-directory: frontend
         run: bun run typecheck
+
+  ci:
+    needs: [backend, frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      BACKEND: ${{ needs.backend.result }}
+      FRONTEND: ${{ needs.frontend.result }}
+    steps:
+      - name: Aggregate test results
+        run: |
+          for result in "$BACKEND" "$FRONTEND"; do
+            [ "$result" = success ] || [ "$result" = skipped ] || exit 1
+          done
