@@ -115,7 +115,7 @@ jobs:
             -ldflags="-X github.com/wins/jaz/backend/internal/buildinfo.version=jaz-${GITHUB_SHA::8}" \
             -o "$out/jaz" ./cmd/jaz
           tar -C "$out" -czf "../dist/backend/$name.tar.gz" jaz
-          sha256sum "../dist/backend/$name.tar.gz" > "../dist/backend/$name.tar.gz.sha256"
+          (cd ../dist/backend && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: jaz-backend-linux-x64-${{ needs.changes.outputs.sha }}
@@ -144,7 +144,7 @@ jobs:
           grep -q "return window.location.origin" dist-web/assets/index-*.js
           mkdir -p ../dist/backend
           tar -C dist-web -czf ../dist/backend/dist-web.tar.gz .
-          sha256sum ../dist/backend/dist-web.tar.gz > ../dist/backend/dist-web.tar.gz.sha256
+          (cd ../dist/backend && sha256sum dist-web.tar.gz > dist-web.tar.gz.sha256)
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist-web-${{ needs.changes.outputs.sha }}
@@ -153,25 +153,9 @@ jobs:
             dist/backend/dist-web.tar.gz.sha256
           retention-days: 14
 
-  ci:
-    needs: [backend-test, frontend-test, build-backend, build-web]
-    if: always()
-    runs-on: ubuntu-latest
-    env:
-      BACKEND_TEST: ${{ needs.backend-test.result }}
-      FRONTEND_TEST: ${{ needs.frontend-test.result }}
-      BACKEND: ${{ needs.build-backend.result }}
-      WEB: ${{ needs.build-web.result }}
-    steps:
-      - name: Aggregate results
-        run: |
-          for result in "$BACKEND_TEST" "$FRONTEND_TEST" "$BACKEND" "$WEB"; do
-            [ "$result" = success ] || [ "$result" = skipped ] || exit 1
-          done
-
   release:
-    needs: [changes, build-backend, build-web, ci]
-    if: github.event_name == 'push' && needs.ci.result == 'success'
+    needs: [changes, backend-test, frontend-test, build-backend, build-web]
+    if: always() && github.event_name == 'push' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4
