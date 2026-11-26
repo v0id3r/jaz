@@ -43,7 +43,9 @@ jobs:
         with:
           filters: .github/filters.yml
       - id: sha
-        run: echo "sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+        run: |
+          sha="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "sha=${sha::8}" >> "$GITHUB_OUTPUT"
 
   backend-test:
     needs: changes
@@ -151,35 +153,25 @@ jobs:
             dist/backend/dist-web.tar.gz.sha256
           retention-days: 14
 
-  tests:
-    needs: [backend-test, frontend-test]
+  ci:
+    needs: [backend-test, frontend-test, build-backend, build-web]
     if: always()
     runs-on: ubuntu-latest
     env:
-      BACKEND: ${{ needs.backend-test.result }}
-      FRONTEND: ${{ needs.frontend-test.result }}
-    steps:
-      - run: |
-          for result in "$BACKEND" "$FRONTEND"; do
-            [ "$result" = success ] || [ "$result" = skipped ] || exit 1
-          done
-
-  artifacts:
-    needs: [build-backend, build-web]
-    if: always()
-    runs-on: ubuntu-latest
-    env:
+      BACKEND_TEST: ${{ needs.backend-test.result }}
+      FRONTEND_TEST: ${{ needs.frontend-test.result }}
       BACKEND: ${{ needs.build-backend.result }}
       WEB: ${{ needs.build-web.result }}
     steps:
-      - run: |
-          for result in "$BACKEND" "$WEB"; do
+      - name: Aggregate results
+        run: |
+          for result in "$BACKEND_TEST" "$FRONTEND_TEST" "$BACKEND" "$WEB"; do
             [ "$result" = success ] || [ "$result" = skipped ] || exit 1
           done
 
   release:
-    needs: [changes, build-backend, build-web]
-    if: github.event_name == 'push' && always()
+    needs: [changes, build-backend, build-web, ci]
+    if: github.event_name == 'push' && needs.ci.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4
