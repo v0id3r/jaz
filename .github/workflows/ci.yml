@@ -1,15 +1,14 @@
-name: Server release
+name: CI
 
-# Builds deployable artifacts of the fork:
-#   - pull_request uploads them as workflow artifacts (jaz-backend-linux-x64
-#     and dist-web, named with the PR head's short sha, sha256 attached,
+# Tests and buildable artifacts of the fork, gated by what changed:
+#   - pull_request runs the affected tests and uploads changed components as
+#     workflow artifacts named with the head's short sha (sha256 attached,
 #     retained for 14 days);
 #   - a push to main releases jaz-<YYYYMMDD>-<shortsha> with only the
 #     components that changed, listed in the notes;
 #   - pushing a tag jaz-* releases that tag with both components.
-# Only components whose sources changed are built: backend is backend/**,
-# web is frontend/** minus the desktop-only parts that never enter the web
-# bundle (src/main, native, electron.vite.config.ts); .github/** builds all.
+# Filters live in .github/filters.yml; web excludes the desktop-only parts
+# that never enter the web bundle (src/main, native, electron.vite.config).
 # Deploys on the host download the tarballs and verify them against the
 # published sha256 files instead of building locally.
 on:
@@ -23,7 +22,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: server-release-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,51 +31,78 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       web: ${{ steps.filter.outputs.web }}
-      sha: ${{ steps.filter.outputs.sha }}
+      backend-tests: ${{ steps.filter.outputs.backend-tests }}
+      web-tests: ${{ steps.filter.outputs.web-tests }}
+      sha: ${{ steps.sha.outputs.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - id: filter
-        run: |
-          sha="${{ github.event.pull_request.head.sha || github.sha }}"
-          echo "sha=${sha::8}" | tee -a "$GITHUB_OUTPUT"
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            echo backend=true | tee -a "$GITHUB_OUTPUT"
-            echo web=true | tee -a "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            range="origin/${{ github.base_ref }}...HEAD"
-          else
-            range="HEAD~1..HEAD"
-          fi
-          files=$(git diff --name-only "$range")
-          echo "$files"
-          backend=false web=false
-          if echo "$files" | grep -q '^\.github/'; then
-            backend=true web=true
-          else
-            echo "$files" | grep -q '^backend/' && backend=true
-            webfiles=$(echo "$files" | grep '^frontend/' \
-              | grep -vE '^frontend/(src/main/|native/|electron\.vite\.config\.ts)' || true)
-            [ -n "$webfiles" ] && web=true
-          fi
-          echo "backend=$backend" | tee -a "$GITHUB_OUTPUT"
-          echo "web=$web" | tee -a "$GITHUB_OUTPUT"
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: .github/filters.yml
+      - id: sha
+        run: echo "sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
 
-  build-backend:
+  backend-test:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.backend-tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.27.4'
           cache-dependency-path: backend/go.sum
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Install voice-client test dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Test backend
+        working-directory: backend
+        run: go test ./...
 
+  frontend-test:
+    needs: changes
+    if: needs.changes.outputs.web-tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+      - name: Test frontend under xvfb
+        working-directory: frontend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+          if ! ELECTRON_DISABLE_SANDBOX=1 xvfb-run -a bun test --isolate 2>&1 | tee /tmp/bun-test.log; then
+            tail -120 /tmp/bun-test.log >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Lint
+        working-directory: frontend
+        run: bun run lint
+      - name: Typecheck
+        working-directory: frontend
+        run: bun run typecheck
+
+  build-backend:
+    needs: changes
+    if: github.ref_type == 'tag' || needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: backend/go.sum
       - name: Build linux-x64 backend
         working-directory: backend
         run: |
@@ -88,8 +114,6 @@ jobs:
             -o "$out/jaz" ./cmd/jaz
           tar -C "$out" -czf "../dist/backend/$name.tar.gz" jaz
           sha256sum "../dist/backend/$name.tar.gz" > "../dist/backend/$name.tar.gz.sha256"
-          sha256sum "$out/jaz"
-
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: jaz-backend-linux-x64-${{ needs.changes.outputs.sha }}
@@ -100,15 +124,13 @@ jobs:
 
   build-web:
     needs: changes
-    if: needs.changes.outputs.web == 'true'
+    if: github.ref_type == 'tag' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
-
       - name: Build web client
         working-directory: frontend
         env:
@@ -121,7 +143,6 @@ jobs:
           mkdir -p ../dist/backend
           tar -C dist-web -czf ../dist/backend/dist-web.tar.gz .
           sha256sum ../dist/backend/dist-web.tar.gz > ../dist/backend/dist-web.tar.gz.sha256
-
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist-web-${{ needs.changes.outputs.sha }}
@@ -129,6 +150,32 @@ jobs:
             dist/backend/dist-web.tar.gz
             dist/backend/dist-web.tar.gz.sha256
           retention-days: 14
+
+  tests:
+    needs: [backend-test, frontend-test]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      BACKEND: ${{ needs.backend-test.result }}
+      FRONTEND: ${{ needs.frontend-test.result }}
+    steps:
+      - run: |
+          for result in "$BACKEND" "$FRONTEND"; do
+            [ "$result" = success ] || [ "$result" = skipped ] || exit 1
+          done
+
+  artifacts:
+    needs: [build-backend, build-web]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      BACKEND: ${{ needs.build-backend.result }}
+      WEB: ${{ needs.build-web.result }}
+    steps:
+      - run: |
+          for result in "$BACKEND" "$WEB"; do
+            [ "$result" = success ] || [ "$result" = skipped ] || exit 1
+          done
 
   release:
     needs: [changes, build-backend, build-web]
@@ -161,34 +208,19 @@ jobs:
             echo "no component changed, no release"
             exit 0
           fi
+          notes="Components: ${components[*]}."
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             tag="$GITHUB_REF_NAME"
-            gh release create "$tag" --verify-tag --title "$tag" \
-              --notes "Components: ${components[*]}."$'\n\n'"Build of commit $GITHUB_SHA." 2>/dev/null || true
           else
             tag="jaz-$(date -u +%Y%m%d)-${GITHUB_SHA::8}"
-            notes="Components: ${components[*]}."$'\n\n'"Build of commit $GITHUB_SHA."
             since=$(gh release list --limit 30 --json tagName,createdAt --jq 'first | .createdAt // empty')
             if [ -n "$since" ]; then
               merged=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=closed&per_page=100" \
                 --jq "[.[] | select(.merged_at != null and .merged_at > \"$since\")] | sort_by(.number) | .[] | \"- #\(.number) \(.title)\"")
               [ -n "$merged" ] && notes="$notes"$'\n\n'"Merged since the previous release:"$'\n'"$merged"
             fi
-            gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes "$notes"
           fi
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes "$notes" 2>/dev/null \
+            || gh release view "$tag" >/dev/null
           gh release upload "$tag" "${assets[@]}" --clobber
           grep . ./*.sha256 || true
-
-  artifacts:
-    needs: [build-backend, build-web]
-    if: always() && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    env:
-      BACKEND: ${{ needs.build-backend.result }}
-      WEB: ${{ needs.build-web.result }}
-    steps:
-      - name: Aggregate build results
-        run: |
-          for result in "$BACKEND" "$WEB"; do
-            [ "$result" = success ] || [ "$result" = skipped ] || exit 1
-          done
