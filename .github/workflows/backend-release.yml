@@ -1,64 +1,63 @@
 name: Server release
 
-# Builds the linux-x64 backend and the web client of the fork and publishes
-# them as one GitHub release. A tag push jaz-* releases as-is; a dispatch on a
-# non-main branch defaults to a prerelease tagged jaz-<shortsha> so feature
-# branches deploy through release-deploy.sh without a real release. Manual
-# deploys download the tarballs and verify them against the published sha256
-# files instead of building locally.
+# Publishes deployable releases of the fork:
+#   - a pull_request from this repository gets a rolling prerelease jaz-pr<N>
+#     (replaced on every push, deleted when the PR closes);
+#   - a push to main releases jaz-<YYYYMMDD>-<shortsha> with the merged PRs in
+#     the notes;
+#   - pushing a tag jaz-* releases that tag as-is.
+# Deploys on the host download the tarballs and verify them against the
+# published sha256 files instead of building locally.
 on:
   push:
+    branches: [main]
     tags:
       - 'jaz-*'
-  workflow_dispatch:
-    inputs:
-      prerelease:
-        description: 'Publish as prerelease (auto: everything but main)'
-        type: choice
-        options: [auto, 'true', 'false']
-        default: auto
-      version:
-        description: Version stamp for jaz --version (defaults to the release tag)
-        required: false
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
 
 permissions:
   contents: write
 
+concurrency:
+  group: server-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      PRERELEASE: ${{ inputs.prerelease == 'true' || (inputs.prerelease == 'auto' && github.ref_name != 'main' && github.ref_type != 'tag') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: github.event.action != 'closed'
         with:
           go-version: '1.27.4'
           cache-dependency-path: backend/go.sum
 
       - name: Build linux-x64 backend
+        if: github.event.action != 'closed'
         working-directory: backend
         run: |
-          tag="$GITHUB_REF_NAME"
-          [ "$GITHUB_REF_TYPE" != "tag" ] && { [ "$PRERELEASE" = true ] && tag="jaz-${GITHUB_SHA::8}" || tag="jaz-dispatch-$GITHUB_RUN_NUMBER"; }
-          version="${{ inputs.version }}"
-          version="${version:-$tag}"
           name="jaz-backend-linux-x64"
           out="../dist/backend/$name"
           mkdir -p "$out"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-            -ldflags="-X github.com/wins/jaz/backend/internal/buildinfo.version=$version" \
+            -ldflags="-X github.com/wins/jaz/backend/internal/buildinfo.version=$VERSION" \
             -o "$out/jaz" ./cmd/jaz
           tar -C "$out" -czf "../dist/backend/$name.tar.gz" jaz
           sha256sum "../dist/backend/$name.tar.gz" > "../dist/backend/$name.tar.gz.sha256"
           sha256sum "$out/jaz"
+        env:
+          VERSION: ${{ format('jaz-pr{0}', github.event.pull_request.number) || github.ref_name }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: github.event.action != 'closed'
         with:
           bun-version: 1.4.4
 
       - name: Build web client
+        if: github.event.action != 'closed'
         working-directory: frontend
         env:
           VITE_JAZ_API_URL: origin
@@ -70,39 +69,41 @@ jobs:
           tar -C dist-web -czf ../dist/backend/dist-web.tar.gz .
           sha256sum ../dist/backend/dist-web.tar.gz > ../dist/backend/dist-web.tar.gz.sha256
 
-      - name: Publish release
+      - name: Publish
         working-directory: dist/backend
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
-            prerelease_flag=
-            if [ "$PRERELEASE" = true ]; then
-              release_tag="jaz-${GITHUB_SHA::8}"
-              prerelease_flag=--prerelease
-            else
-              release_tag="jaz-dispatch-$GITHUB_RUN_NUMBER"
+          set -u
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            if [ "${{ github.event.action }}" = "closed" ]; then
+              gh release delete "jaz-pr${{ github.event.pull_request.number }}" --yes --cleanup-tag 2>/dev/null \
+                && echo "prerelease of PR ${{ github.event.pull_request.number }} removed" || true
+              exit 0
             fi
-            gh release create "$release_tag" --target "$GITHUB_SHA" \
-              ${prerelease_flag:+$prerelease_flag} \
-              --title "$release_tag" --notes "Backend linux-x64 and web client build of commit $GITHUB_SHA."
-          else
-            release_tag="$GITHUB_REF_NAME"
+            tag="jaz-pr${{ github.event.pull_request.number }}"
+            gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+            gh release create "$tag" --target "${{ github.event.pull_request.head.sha }}" --prerelease \
+              --title "$tag" --notes "Preview build for PR #${{ github.event.pull_request.number }} at ${{ github.event.pull_request.head.sha }}."
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
             # No-op when the release already exists (workflow re-run).
-            gh release create "$release_tag" --verify-tag --title "$release_tag" \
+            gh release create "$tag" --verify-tag --title "$tag" \
               --notes "Backend linux-x64 and web client build of commit $GITHUB_SHA." 2>/dev/null || true
+          else
+            tag="jaz-$(date -u +%Y%m%d)-${GITHUB_SHA::8}"
+            since=$(gh release list --limit 30 --json tagName,createdAt \
+              --jq '[.[] | select(.tagName != "'"$tag"'")] | first | .createdAt // empty')
+            notes="Backend linux-x64 and web client build of commit $GITHUB_SHA."
+            if [ -n "$since" ]; then
+              merged=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=closed&per_page=100" \
+                --jq "[.[] | select(.merged_at != null and .merged_at > \"$since\")] | sort_by(.number) | .[] | \"- #\(.number) \(.title)\"")
+              [ -n "$merged" ] && notes="$notes"$'\n\n'"Merged since the previous release:"$'\n'"$merged"
+            fi
+            gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes "$notes"
           fi
-          gh release upload "$release_tag" \
+          gh release upload "$tag" \
             jaz-backend-linux-x64.tar.gz jaz-backend-linux-x64.tar.gz.sha256 \
             dist-web.tar.gz dist-web.tar.gz.sha256 \
             --clobber
           cat jaz-backend-linux-x64.tar.gz.sha256 dist-web.tar.gz.sha256
-
-      - name: Prune old prereleases
-        if: env.PRERELEASE == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release list --json tagName,isPrerelease,createdAt --limit 100 \
-            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("jaz-")))] | sort_by(.createdAt) | reverse | .[10:] | .[].tagName' \
-            | xargs -r -n1 gh release delete --yes --cleanup-tag

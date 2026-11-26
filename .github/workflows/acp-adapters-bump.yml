@@ -37,7 +37,7 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      BASE: jaz/acp-jaz-agnostic
+      BASE: main
       PINS: jaz/adapter-pins
       GH_TOKEN: ${{ github.token }}
     steps:
