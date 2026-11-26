@@ -1,14 +1,22 @@
 name: Server release
 
 # Builds the linux-x64 backend and the web client of the fork and publishes
-# them as one GitHub release. Manual deploys download the tarballs and verify
-# them against the published sha256 files instead of building locally.
+# them as one GitHub release. A tag push jaz-* releases as-is; a dispatch on a
+# non-main branch defaults to a prerelease tagged jaz-<shortsha> so feature
+# branches deploy through release-deploy.sh without a real release. Manual
+# deploys download the tarballs and verify them against the published sha256
+# files instead of building locally.
 on:
   push:
     tags:
       - 'jaz-*'
   workflow_dispatch:
     inputs:
+      prerelease:
+        description: 'Publish as prerelease (auto: everything but main)'
+        type: choice
+        options: [auto, 'true', 'false']
+        default: auto
       version:
         description: Version stamp for jaz --version (defaults to the release tag)
         required: false
@@ -19,6 +27,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      PRERELEASE: ${{ inputs.prerelease == 'true' || (inputs.prerelease == 'auto' && github.ref_name != 'main' && github.ref_type != 'tag') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -29,15 +39,16 @@ jobs:
 
       - name: Build linux-x64 backend
         working-directory: backend
-        env:
-          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('jaz-dispatch-{0}', github.run_number) }}
-          VERSION: ${{ inputs.version || (github.ref_type == 'tag' && github.ref_name) || format('jaz-dispatch-{0}', github.run_number) }}
         run: |
+          tag="$GITHUB_REF_NAME"
+          [ "$GITHUB_REF_TYPE" != "tag" ] && { [ "$PRERELEASE" = true ] && tag="jaz-${GITHUB_SHA::8}" || tag="jaz-dispatch-$GITHUB_RUN_NUMBER"; }
+          version="${{ inputs.version }}"
+          version="${version:-$tag}"
           name="jaz-backend-linux-x64"
           out="../dist/backend/$name"
           mkdir -p "$out"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-            -ldflags="-X github.com/wins/jaz/backend/internal/buildinfo.version=$VERSION" \
+            -ldflags="-X github.com/wins/jaz/backend/internal/buildinfo.version=$version" \
             -o "$out/jaz" ./cmd/jaz
           tar -C "$out" -czf "../dist/backend/$name.tar.gz" jaz
           sha256sum "../dist/backend/$name.tar.gz" > "../dist/backend/$name.tar.gz.sha256"
@@ -63,18 +74,35 @@ jobs:
         working-directory: dist/backend
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('jaz-dispatch-{0}', github.run_number) }}
         run: |
           if [ "$GITHUB_REF_TYPE" != "tag" ]; then
-            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" \
-              --notes "Backend linux-x64 and web client build of commit $GITHUB_SHA."
+            prerelease_flag=
+            if [ "$PRERELEASE" = true ]; then
+              release_tag="jaz-${GITHUB_SHA::8}"
+              prerelease_flag=--prerelease
+            else
+              release_tag="jaz-dispatch-$GITHUB_RUN_NUMBER"
+            fi
+            gh release create "$release_tag" --target "$GITHUB_SHA" \
+              ${prerelease_flag:+$prerelease_flag} \
+              --title "$release_tag" --notes "Backend linux-x64 and web client build of commit $GITHUB_SHA."
           else
+            release_tag="$GITHUB_REF_NAME"
             # No-op when the release already exists (workflow re-run).
-            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" \
+            gh release create "$release_tag" --verify-tag --title "$release_tag" \
               --notes "Backend linux-x64 and web client build of commit $GITHUB_SHA." 2>/dev/null || true
           fi
-          gh release upload "$RELEASE_TAG" \
+          gh release upload "$release_tag" \
             jaz-backend-linux-x64.tar.gz jaz-backend-linux-x64.tar.gz.sha256 \
             dist-web.tar.gz dist-web.tar.gz.sha256 \
             --clobber
           cat jaz-backend-linux-x64.tar.gz.sha256 dist-web.tar.gz.sha256
+
+      - name: Prune old prereleases
+        if: env.PRERELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --json tagName,isPrerelease,createdAt --limit 100 \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("jaz-")))] | sort_by(.createdAt) | reverse | .[10:] | .[].tagName' \
+            | xargs -r -n1 gh release delete --yes --cleanup-tag
