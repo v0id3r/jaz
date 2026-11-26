@@ -118,6 +118,7 @@ jobs:
           bun run build:web
           test -f dist-web/commit.txt
           grep -q "return window.location.origin" dist-web/assets/index-*.js
+          mkdir -p ../dist/backend
           tar -C dist-web -czf ../dist/backend/dist-web.tar.gz .
           sha256sum ../dist/backend/dist-web.tar.gz > ../dist/backend/dist-web.tar.gz.sha256
 
