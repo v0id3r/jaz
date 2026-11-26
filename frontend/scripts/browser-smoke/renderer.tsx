@@ -53,7 +53,7 @@ import { exerciseConnectionSecurity } from './connection-security'
 import { exerciseBrowserVisibility } from './browser-visibility'
 import { exerciseRepoStatus } from './repo-status'
 import { exerciseBrowserStartup } from './browser-startup'
-import { apiBaseUrl, apiWebSocketProtocols, setApiAuthToken } from '@/lib/api/client'
+import { apiWebSocket, setApiAuthToken, setApiBaseUrl } from '@/lib/api/client'
 
 declare global {
   interface Window {
@@ -521,8 +521,9 @@ awaitPromise:true
       }
       const backend = await window.smoke.backend()
       progress('MCP and accessibility')
-      setApiAuthToken(apiBaseUrl(), 'browser-smoke-credential')
-      const socket = new WebSocket(`${backend.replace('http:', 'ws:')}/v1/sessions/browser-fixture/browser`, apiWebSocketProtocols())
+      setApiBaseUrl(backend)
+      setApiAuthToken(backend, 'browser-smoke-credential')
+      const socket = await apiWebSocket('/v1/sessions/browser-fixture/browser')
       serveBrowser(socket)
       await new Promise((resolve, reject) => {
         socket.onopen = resolve
