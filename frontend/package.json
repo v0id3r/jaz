@@ -18,7 +18,7 @@
     "preview": "electron-vite preview",
     "preview:web": "vite preview --config vite.web.config.ts",
     "dev:web": "vite --config vite.web.config.ts",
-    "test": "bun test",
+    "test": "bun test --isolate",
     "test:computer:native": "electron scripts/test-computer-native.mjs",
     "test:onboarding:packaged": "bun run build:bundle && bun scripts/test-onboarding-packaged.ts",
     "test:dictation": "bun scripts/test-dictation.ts",

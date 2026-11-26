@@ -1,0 +1,16 @@
+backend:
+  - '.github/**'
+  - 'backend/**'
+web:
+  - '.github/**'
+  - 'frontend/**'
+  - '!frontend/src/main/**'
+  - '!frontend/native/**'
+  - '!frontend/electron.vite.config.ts'
+backend-tests:
+  - '.github/**'
+  - 'backend/**'
+  - 'frontend/src/**'
+web-tests:
+  - '.github/**'
+  - 'frontend/**'
