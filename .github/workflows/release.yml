@@ -42,6 +42,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Publish release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -58,6 +59,7 @@ jobs:
           fi
           if [ ${#assets[@]} -eq 0 ]; then
             echo "no component was built, no release"
+            echo "released=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           branch="${{ github.event.workflow_run.head_branch }}"
@@ -83,3 +85,21 @@ jobs:
           fi
           gh release upload "$tag" "${assets[@]}" --clobber
           grep . ./*.sha256 || true
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "components=${components[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Signal the ops repo
+        if: steps.publish.outputs.released == 'true' && env.GITOPS_DISPATCH_TOKEN != ''
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          token: ${{ secrets.GITOPS_DISPATCH_TOKEN }}
+          repository: v0id3r/gitops
+          event-type: jaz-release
+          client-payload: '{"tag":"${{ steps.publish.outputs.tag }}","sha":"${{ github.event.workflow_run.head_sha }}","run_id":${{ github.event.workflow_run.id }},"components":"${{ steps.publish.outputs.components }}"}'
+
+      - name: Ops repo signal skipped
+        if: steps.publish.outputs.released == 'true' && env.GITOPS_DISPATCH_TOKEN == ''
+        run: echo "::notice::GITOPS_DISPATCH_TOKEN is not set, ops repo not signalled"
+    env:
+      GITOPS_DISPATCH_TOKEN: ${{ secrets.GITOPS_DISPATCH_TOKEN }}

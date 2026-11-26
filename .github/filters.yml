@@ -7,10 +7,17 @@ web:
   - '!frontend/src/main/**'
   - '!frontend/native/**'
   - '!frontend/electron.vite.config.ts'
+# The Go voice tests bundle the production voice client out of the renderer
+# lib (session.ts/desktop.ts and everything they import), so backend tests
+# track lib and shared — not the UI parts (components, routes) that a voice
+# bundle never pulls in.
 backend-tests:
   - '.github/**'
   - 'backend/**'
-  - 'frontend/src/**'
+  - 'frontend/src/renderer/src/lib/**'
+  - 'frontend/src/shared/**'
+  - 'frontend/package.json'
+  - 'frontend/bun.lock'
 web-tests:
   - '.github/**'
   - 'frontend/**'
