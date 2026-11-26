@@ -94,8 +94,8 @@ jobs:
         with:
           name: jaz-backend-linux-x64-${{ needs.changes.outputs.sha }}
           path: |
-            backend/dist/backend/jaz-backend-linux-x64.tar.gz
-            backend/dist/backend/jaz-backend-linux-x64.tar.gz.sha256
+            dist/backend/jaz-backend-linux-x64.tar.gz
+            dist/backend/jaz-backend-linux-x64.tar.gz.sha256
           retention-days: 14
 
   build-web:
@@ -126,8 +126,8 @@ jobs:
         with:
           name: dist-web-${{ needs.changes.outputs.sha }}
           path: |
-            frontend/dist/backend/dist-web.tar.gz
-            frontend/dist/backend/dist-web.tar.gz.sha256
+            dist/backend/dist-web.tar.gz
+            dist/backend/dist-web.tar.gz.sha256
           retention-days: 14
 
   release:
