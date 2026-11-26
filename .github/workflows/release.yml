@@ -1,0 +1,82 @@
+name: Release
+
+# Publishes a GitHub release from the artifacts of a completed CI run:
+#   - a CI run on a main push releases jaz-<YYYYMMDD>-<shortsha> with the
+#     components that were built, listed in the notes;
+#   - a CI run on a jaz-* tag push releases that tag (both components, since
+#     CI builds everything for tags).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        run: |
+          sha="${{ github.event.workflow_run.head_sha }}"
+          echo "sha8=${sha::8}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4
+        id: backend-artifact
+        continue-on-error: true
+        with:
+          name: jaz-backend-linux-x64-${{ steps.meta.outputs.sha8 }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4
+        id: web-artifact
+        continue-on-error: true
+        with:
+          name: dist-web-${{ steps.meta.outputs.sha8 }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -u
+          assets=() components=()
+          if [ -f jaz-backend-linux-x64.tar.gz ]; then
+            assets+=(jaz-backend-linux-x64.tar.gz jaz-backend-linux-x64.tar.gz.sha256)
+            components+=("backend linux-x64")
+          fi
+          if [ -f dist-web.tar.gz ]; then
+            assets+=(dist-web.tar.gz dist-web.tar.gz.sha256)
+            components+=("web client")
+          fi
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "no component was built, no release"
+            exit 0
+          fi
+          branch="${{ github.event.workflow_run.head_branch }}"
+          if [ "$branch" = main ]; then
+            tag="jaz-${{ steps.meta.outputs.date }}-${{ steps.meta.outputs.sha8 }}"
+          else
+            tag="$branch"
+            [[ "$tag" =~ ^jaz- ]] || { echo "not a jaz-* ref, nothing to release"; exit 0; }
+          fi
+          notes="Components: ${components[*]}."
+          if [ "$branch" = main ]; then
+            since=$(gh release list --limit 30 --json tagName,createdAt --jq 'first | .createdAt // empty')
+            if [ -n "$since" ]; then
+              merged=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=closed&per_page=100" \
+                --jq "[.[] | select(.merged_at != null and .merged_at > \"$since\")] | sort_by(.number) | .[] | \"- #\(.number) \(.title)\"")
+              [ -n "$merged" ] && notes="$notes"$'\n\n'"Merged since the previous release:"$'\n'"$merged"
+            fi
+          fi
+          gh release create "$tag" --target "$HEAD_SHA" --title "$tag" --notes "$notes" 2>/dev/null \
+            || gh release view "$tag" >/dev/null
+          gh release upload "$tag" "${assets[@]}" --clobber
+          grep . ./*.sha256 || true

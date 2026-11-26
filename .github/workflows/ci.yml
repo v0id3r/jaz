@@ -1,14 +1,13 @@
 name: CI
 
-# Tests and buildable artifacts of the fork, gated by what changed:
+# Tests and buildable artifacts of the fork, gated by what changed (filters
+# in .github/filters.yml; web excludes the desktop-only parts that never
+# enter the web bundle: src/main, native, electron.vite.config).
 #   - pull_request runs the affected tests and uploads changed components as
 #     workflow artifacts named with the head's short sha (sha256 attached,
 #     retained for 14 days);
-#   - a push to main releases jaz-<YYYYMMDD>-<shortsha> with only the
-#     components that changed, listed in the notes;
-#   - pushing a tag jaz-* releases that tag with both components.
-# Filters live in .github/filters.yml; web excludes the desktop-only parts
-# that never enter the web bundle (src/main, native, electron.vite.config).
+#   - a push to main or a jaz-* tag runs the same and release.yml publishes
+#     a GitHub release from the artifacts of the completed run.
 # Deploys on the host download the tarballs and verify them against the
 # published sha256 files instead of building locally.
 on:
@@ -153,50 +152,3 @@ jobs:
             dist/backend/dist-web.tar.gz.sha256
           retention-days: 14
 
-  release:
-    needs: [changes, backend-test, frontend-test, build-backend, build-web]
-    if: always() && github.event_name == 'push' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4
-        if: needs.build-backend.result == 'success'
-        with:
-          name: jaz-backend-linux-x64-${{ needs.changes.outputs.sha }}
-      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4
-        if: needs.build-web.result == 'success'
-        with:
-          name: dist-web-${{ needs.changes.outputs.sha }}
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -u
-          assets=() components=()
-          if [ -f jaz-backend-linux-x64.tar.gz ]; then
-            assets+=(jaz-backend-linux-x64.tar.gz jaz-backend-linux-x64.tar.gz.sha256)
-            components+=("backend linux-x64")
-          fi
-          if [ -f dist-web.tar.gz ]; then
-            assets+=(dist-web.tar.gz dist-web.tar.gz.sha256)
-            components+=("web client")
-          fi
-          if [ ${#assets[@]} -eq 0 ]; then
-            echo "no component changed, no release"
-            exit 0
-          fi
-          notes="Components: ${components[*]}."
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            tag="$GITHUB_REF_NAME"
-          else
-            tag="jaz-$(date -u +%Y%m%d)-${GITHUB_SHA::8}"
-            since=$(gh release list --limit 30 --json tagName,createdAt --jq 'first | .createdAt // empty')
-            if [ -n "$since" ]; then
-              merged=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=closed&per_page=100" \
-                --jq "[.[] | select(.merged_at != null and .merged_at > \"$since\")] | sort_by(.number) | .[] | \"- #\(.number) \(.title)\"")
-              [ -n "$merged" ] && notes="$notes"$'\n\n'"Merged since the previous release:"$'\n'"$merged"
-            fi
-          fi
-          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes "$notes" 2>/dev/null \
-            || gh release view "$tag" >/dev/null
-          gh release upload "$tag" "${assets[@]}" --clobber
-          grep . ./*.sha256 || true
