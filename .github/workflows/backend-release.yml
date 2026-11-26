@@ -1,0 +1,63 @@
+name: Backend release
+
+# Builds the linux-x64 backend of the fork and publishes it as a GitHub
+# release. Manual deploys download the tarball and verify it against the
+# published sha256 instead of building locally.
+on:
+  push:
+    tags:
+      - 'jaz-*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version stamp for jaz --version (defaults to the release tag)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: backend/go.sum
+
+      - name: Build linux-x64 backend
+        working-directory: backend
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('jaz-dispatch-{0}', github.run_number) }}
+          VERSION: ${{ inputs.version || (github.ref_type == 'tag' && github.ref_name) || format('jaz-dispatch-{0}', github.run_number) }}
+        run: |
+          name="jaz-backend-linux-x64"
+          out="../dist/backend/$name"
+          mkdir -p "$out"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags="-X github.com/wins/jaz/backend/internal/buildinfo.version=$VERSION" \
+            -o "$out/jaz" ./cmd/jaz
+          tar -C "$out" -czf "../dist/backend/$name.tar.gz" jaz
+          sha256sum "../dist/backend/$name.tar.gz" > "../dist/backend/$name.tar.gz.sha256"
+          sha256sum "$out/jaz"
+
+      - name: Publish release
+        working-directory: dist/backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('jaz-dispatch-{0}', github.run_number) }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" \
+              --notes "Backend linux-x64 build of commit $GITHUB_SHA."
+          else
+            # No-op when the release already exists (workflow re-run).
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" \
+              --notes "Backend linux-x64 build of commit $GITHUB_SHA." 2>/dev/null || true
+          fi
+          gh release upload "$RELEASE_TAG" \
+            jaz-backend-linux-x64.tar.gz jaz-backend-linux-x64.tar.gz.sha256 \
+            --clobber
+          cat jaz-backend-linux-x64.tar.gz.sha256

@@ -2,7 +2,7 @@ name: Validate ACP adapters
 
 on:
   push:
-    branches: [main]
+    branches: [jaz/acp-jaz-agnostic]
     paths:
       - .github/acp-adapter-assets.json
       - .github/scripts/create-acp-adapters-manifest.mjs

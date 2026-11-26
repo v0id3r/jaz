@@ -4,19 +4,88 @@ on:
   schedule:
     - cron: "23 6 * * 1"
   workflow_dispatch:
-
-permissions:
-  contents: read
+    inputs:
+      adapter:
+        description: Fork adapter to bump (codex, claude, kimi or all)
+        default: all
+        required: false
+      tag:
+        description: Release tag to pin (defaults to the adapter's latest release)
+        required: false
 
 jobs:
   upstream:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - name: Check native runtimes and upstream adapters
         env:
           GH_TOKEN: ${{ github.token }}
         run: node .github/scripts/check-acp-upstream.mjs
+
+  # Accumulates every pending fork-adapter pin on the single jaz/adapter-pins
+  # branch and keeps one open PR against the base branch. New releases of any
+  # of the three fork adapters join that PR instead of opening their own.
+  pins:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      BASE: jaz/acp-jaz-agnostic
+      PINS: jaz/adapter-pins
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Resolve the pins branch
+        run: |
+          git fetch origin "$BASE"
+          if git fetch origin "$PINS" 2>/dev/null; then
+            git checkout -B "$PINS" "origin/$PINS"
+            git merge --no-edit "origin/$BASE"
+          else
+            git checkout -b "$PINS" "origin/$BASE"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump fork adapter pins
+        run: |
+          args=()
+          [ "${{ inputs.adapter || 'all' }}" != "all" ] && args+=(--adapter "${{ inputs.adapter }}")
+          [ -n "${{ inputs.tag }}" ] && args+=(--tag "${{ inputs.tag }}")
+          node .github/scripts/bump-acp-adapters.mjs "${args[@]}"
+
+      - name: Commit accumulated pins
+        run: |
+          if git diff --quiet -- .github/acp-adapter-assets.json backend/internal/acpadapter/acp-adapters.json; then
+            echo "Pins already up to date on $PINS."
+            exit 0
+          fi
+          git commit -am "Bump ACP adapter pins"
+
+      - name: Push the pins branch and keep one PR open
+        run: |
+          if git diff --quiet "origin/$BASE"; then
+            echo "Pins match $BASE; dropping the empty pins branch."
+            gh pr close "$PINS" --delete-branch 2>/dev/null || git push origin --delete "$PINS" || true
+            exit 0
+          fi
+          git push -u origin "$PINS"
+          if ! gh pr view "$PINS" --json number >/dev/null 2>&1; then
+            gh pr create --base "$BASE" --head "$PINS" \
+              --title "Bump ACP adapter pins" \
+              --body "Accumulated fork adapter pins. Merged pins match $BASE; the branch is recreated on the next bump."
+          fi
