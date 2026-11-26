@@ -53,6 +53,7 @@ app.commandLine.appendSwitch('host-resolver-rules', 'MAP linkedin.com 127.0.0.1,
 const timeout = Number(process.env.JAZ_BROWSER_SMOKE_TIMEOUT_MS || 30000)
 const googlePasskeys = process.env.JAZ_BROWSER_SMOKE_SUITE === 'google-passkeys'
 const wordDocuments = process.env.JAZ_BROWSER_SMOKE_SUITE === 'word-documents'
+const images = process.env.JAZ_BROWSER_SMOKE_SUITE === 'images'
 const openedURLs: string[] = []
 const popupURLs: string[] = []
 const tabURLs: string[] = []
@@ -315,7 +316,7 @@ body{font:16px system-ui;padding:60px;background:#faf9f6;color:#242424}form{disp
     throw new Error('Missing HTTPS fixture address')
   }
   passwordOrigin = `https://localhost:${secureAddress.port}`
-  await prepareProfileFixture(app.getPath('userData'), passwordOrigin)
+  if (!images) await prepareProfileFixture(app.getPath('userData'), passwordOrigin)
   const claudeOrigin = process.env.JAZ_BROWSER_SMOKE_BACKEND!
   installClaudeVoice({ origin: claudeOrigin, preload: join(process.env.JAZ_BROWSER_SMOKE_DIR!, 'index.js') })
   await session.fromPartition(PREVIEW_PARTITION).cookies.set({ url: claudeOrigin, name: 'voice-fixture-session', value: 'signed-in', httpOnly: true })
@@ -400,7 +401,7 @@ body{font:16px system-ui;padding:60px;background:#faf9f6;color:#242424}form{disp
     }
     return { contrast: max - min, inkPixels: Math.min(high, pixels.length / 4 - high), frames, paintedAt: at }
   })
-  if (!googlePasskeys && !wordDocuments) await exerciseClipboard(process.env.ELECTRON_RENDERER_URL)
+  if (!googlePasskeys && !wordDocuments && !images) await exerciseClipboard(process.env.ELECTRON_RENDERER_URL)
   attachPreviewWebviews(window.webContents, join(process.env.JAZ_BROWSER_SMOKE_DIR!, 'index.js'))
   ipcMain.handle('smoke:password-store', async () => {
     const file = join(app.getPath('userData'), 'browser-passwords.enc')
@@ -446,7 +447,7 @@ body{font:16px system-ui;padding:60px;background:#faf9f6;color:#242424}form{disp
     await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY, modifiers: control ? 2 : 0 })
     await new Promise((resolve) => setTimeout(resolve, 20))
   })
-  if (!googlePasskeys) {
+  if (!googlePasskeys && !images) {
     await assertUntrustedProfileCaller(process.env.JAZ_BROWSER_SMOKE_DIR!)
     await exerciseBrowserPopups(join(process.env.JAZ_BROWSER_SMOKE_DIR!, 'index.js'), openedURLs)
   }

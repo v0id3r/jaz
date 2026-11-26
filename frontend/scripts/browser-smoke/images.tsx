@@ -95,6 +95,7 @@ export async function exerciseImages() {
       }
       await until(() => !document.querySelector('[role="menu"][aria-label="File actions"]'))
     }
+    await exerciseInstalledIOSSharing(host, until)
     const generated = [...host.querySelectorAll<HTMLElement>('[role="link"]')].find((node) => node.textContent === 'Generated image')!
     generated.click()
     await until(() => Boolean(host.querySelector('[data-image-reader]')?.textContent?.includes('Couldn’t open this image')))
@@ -111,5 +112,81 @@ export async function exerciseImages() {
     client.clear()
     host.remove()
     setApiBaseUrl(previousBackend)
+  }
+}
+
+async function exerciseInstalledIOSSharing(host: HTMLElement, until: (check: () => boolean) => Promise<void>) {
+  const matchMedia = window.matchMedia
+  const shared: File[] = []
+  const properties = {
+    platform: 'iPhone',
+    canShare: ({ files }: ShareData) => files?.length === 1,
+    share: async ({ files }: ShareData) => {
+      shared.push(...files!)
+      throw new DOMException('Share sheet dismissed', 'AbortError')
+    },
+  }
+  for (const [key, value] of Object.entries(properties)) {
+    Object.defineProperty(navigator, key, { configurable: true, value })
+  }
+  window.matchMedia = (query) => matchMedia.call(window, query === '(display-mode: standalone)' ? 'all' : query)
+  const reader = () => host.querySelector<HTMLElement>('[data-image-reader]')!
+  const dialog = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Share file"]')
+  const button = (root: ParentNode | null, label: string) => [...(root?.querySelectorAll('button') ?? [])].find(node => node.textContent === label)
+  const openShare = async () => {
+    reader().querySelector<HTMLButtonElement>('[aria-label="File actions"]')!.click()
+    const action = () => button(document.querySelector('[role="menu"][aria-label="File actions"]'), 'Share file…')
+    await until(() => Boolean(action()))
+    action()!.click()
+    await until(() => Boolean(dialog()))
+  }
+  const share = async (label: string) => {
+    const preview = reader().querySelector('img')
+    const url = location.href
+    await openShare()
+    await until(() => Boolean(button(dialog(), label)))
+    button(dialog(), label)!.click()
+    await until(() => !dialog())
+    if (reader().querySelector('img') !== preview || location.href !== url) {
+      throw new Error('Dismissing the system share sheet left the file preview')
+    }
+  }
+
+  try {
+    await openShare()
+    dialog()!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click()
+    await until(() => !dialog())
+    if (shared.length) throw new Error('Closing the export dialog shared a file')
+
+    await share('Share original SVG')
+    await share('Share as PNG')
+    const [svg, png] = shared
+    if (svg?.name !== 'cache-chart.svg' || svg.type !== 'image/svg+xml' || !(await svg.text()).includes('fill="blue"')) {
+      throw new Error('The share sheet did not receive the current original SVG')
+    }
+    if (png?.name !== 'cache-chart.png' || png.type !== 'image/png') throw new Error('The SVG export did not produce a named PNG')
+    const decoded = await createImageBitmap(png)
+    const canvas = new OffscreenCanvas(decoded.width, decoded.height)
+    const context = canvas.getContext('2d')!
+    context.drawImage(decoded, 0, 0)
+    decoded.close()
+    if (canvas.width !== canvas.height * 2 || context.getImageData(1, 1, 1, 1).data.join(',') !== '0,0,255,255') {
+      throw new Error('PNG export lost the SVG aspect ratio or contents')
+    }
+
+    const link = [...host.querySelectorAll<HTMLElement>('[role="link"]')].find(node => node.textContent === 'PNG file')!
+    link.click()
+    await until(() => reader().querySelector('img')?.naturalWidth === 1024)
+    await share('Share file')
+    const nativePNG = shared[2]
+    if (nativePNG?.name !== 'icon-1024.png' || nativePNG.type !== 'image/png') throw new Error('The share sheet did not receive a PNG')
+    const expected = new Uint8Array(await fetch('/icon-1024.png').then(response => response.arrayBuffer()))
+    const actual = new Uint8Array(await nativePNG.arrayBuffer())
+    if (actual.length !== expected.length || actual.some((byte, index) => byte !== expected[index])) {
+      throw new Error('The share sheet did not receive the original PNG bytes')
+    }
+  } finally {
+    window.matchMedia = matchMedia
+    for (const key of Object.keys(properties)) Reflect.deleteProperty(navigator, key)
   }
 }
