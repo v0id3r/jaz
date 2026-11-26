@@ -126,7 +126,12 @@ jobs:
     if: github.ref_type == 'tag' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
+      # Build the PR head, not the synthetic merge commit: the vcs stamp,
+      # commit.txt and the artifact name must all name a commit that can
+      # reach main. Tests below keep running against the merge ref.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.27.4'
@@ -156,6 +161,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
